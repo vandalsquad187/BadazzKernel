@@ -1231,7 +1231,7 @@ static int pl_fv_vote_callback(struct votable *votable, void *data,
 	if (!chip->main_psy)
 		return 0;
 
-	cp_psy = power_supply_get_by_name("bq2597x-standalone");
+	cp_psy = power_supply_get_by_name("bq2597x-master");
 	if (cp_psy) {
 		rc = power_supply_get_property(cp_psy,
 				POWER_SUPPLY_PROP_CHARGING_ENABLED, &pval);
@@ -1250,6 +1250,14 @@ static int pl_fv_vote_callback(struct votable *votable, void *data,
 			POWER_SUPPLY_PROP_VOLTAGE_MAX, &pval);
 	if (rc < 0) {
 		pr_err("Couldn't set main fv, rc=%d\n", rc);
+		return rc;
+	}
+
+	pval.intval -= 150000;
+	rc = power_supply_set_property(chip->main_psy,
+			POWER_SUPPLY_PROP_RECHARGE_VBAT, &pval);
+	if (rc < 0) {
+		pr_err("Couldn't set recharge fv, rc=%d\n", rc);
 		return rc;
 	}
 
@@ -1290,7 +1298,6 @@ static int pl_fv_vote_callback(struct votable *votable, void *data,
 
 	chip->float_voltage_uv = fv_uv;
 */
-
 	return 0;
 }
 
