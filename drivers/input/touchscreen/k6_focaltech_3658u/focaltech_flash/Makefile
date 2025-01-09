@@ -1,1 +1,0 @@
-obj-$(CONFIG_TOUCHSCREEN_FTS_K6) += focaltech_upgrade_ft3658u.o
