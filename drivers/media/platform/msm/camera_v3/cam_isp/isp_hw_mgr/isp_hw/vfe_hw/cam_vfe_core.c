@@ -453,7 +453,7 @@ static int cam_vfe_irq_top_half(uint32_t    evt_id,
 	struct cam_isp_timestamp            timestamp_before_spinlok;
 	struct timespec ts;
 
-	get_monotonic_boottime64(&ts);
+	get_monotonic_boottime(&ts);
 	cam_isp_hw_get_timestamp(&timestamp_before_spinlok);
 	handler_priv = th_payload->handler_priv;
 
