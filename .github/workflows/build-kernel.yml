@@ -42,7 +42,9 @@ jobs:
       - name: Install toolchain
         run: |
           sudo apt-get update
-          sudo apt-get install -y gcc-aarch64-linux-gnu
+          sudo apt-get install -y \
+            gcc-aarch64-linux-gnu \
+            gcc-arm-linux-gnueabihf
 
       # -------------------------------------------------------
       # Schritt 3: Kernel + Device Trees bauen
@@ -51,6 +53,7 @@ jobs:
         run: |
           export ARCH=arm64
           export CROSS_COMPILE=aarch64-linux-gnu-
+          export CROSS_COMPILE_COMPAT=arm-linux-gnueabihf-
           make sweet_defconfig
           make -j$(nproc) Image.gz dtb.img dtbo.img
 
