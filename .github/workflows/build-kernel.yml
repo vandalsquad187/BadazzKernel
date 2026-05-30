@@ -1,0 +1,107 @@
+# Build Kernel — K6A Custom Kernel for sweet
+# -----------------------------------------------------------
+# Läuft bei jedem Push auf Branch 23.2
+# Baut den Kernel + DTBs, packt ein flashbares AnyKernel3-ZIP
+# und veröffentlicht es als GitHub Release.
+#
+# Ablauf:
+#   1. Repo clonen
+#   2. AArch64 Cross-Compiler installieren
+#   3. Kernel + DTBs bauen (sweet_defconfig)
+#   4. Artefakte in anykernel/ kopieren
+#   5. Flashbares ZIP erstellen
+#   6. Release erstellen mit ZIP als Artefakt
+# -----------------------------------------------------------
+
+name: Build Kernel
+
+on:
+  push:
+    branches: [23.2]
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: Build sweet kernel
+    runs-on: ubuntu-latest
+
+    steps:
+      # -------------------------------------------------------
+      # Schritt 1: Repo auschecken
+      # -------------------------------------------------------
+      - name: Checkout source
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      # -------------------------------------------------------
+      # Schritt 2: Cross-Compiler installieren
+      # Der Kernel 4.14 baut sauber mit dem distro-eigenen
+      # aarch64-linux-gnu-gcc (GCC 13/14).
+      # -------------------------------------------------------
+      - name: Install toolchain
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-aarch64-linux-gnu
+
+      # -------------------------------------------------------
+      # Schritt 3: Kernel + Device Trees bauen
+      # -------------------------------------------------------
+      - name: Build kernel
+        run: |
+          export ARCH=arm64
+          export CROSS_COMPILE=aarch64-linux-gnu-
+          make sweet_defconfig
+          make -j$(nproc) Image.gz dtb.img dtbo.img
+
+      # -------------------------------------------------------
+      # Schritt 4: AnyKernel3-flashbares ZIP erstellen
+      # anykernel/ liegt im Repo und wird nur mit den neuen
+      # Artefakten befüllt.
+      # -------------------------------------------------------
+      - name: Build flashable ZIP
+        run: |
+          # Kernel + DTBs in den AnyKernel3-Ordner kopieren
+          cp arch/arm64/boot/Image.gz anykernel/
+          cp arch/arm64/boot/dtb.img anykernel/
+          cp arch/arm64/boot/dtbo.img anykernel/
+          # ZIP erstellen (ohne .git und README — die sind nur im Repo)
+          cd anykernel
+          zip -r9 ../K6A-Kernel-sweet-${{ github.run_number }}.zip * \
+            -x ".git/*" "README.md"
+
+      # -------------------------------------------------------
+      # Schritt 5: Release erstellen
+      # Das Release bekommt einen Tag build-<Run-Nummer>
+      # und enthält das flashbare ZIP.
+      # -------------------------------------------------------
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: build-${{ github.run_number }}
+          name: "K6A Kernel Build #${{ github.run_number }}"
+          body: |
+            **K6A Custom Kernel** für sweet (sweetin / sweet_k6a)
+
+            - **Basis:** 4.14.356-openela-rc1 (Branch 23.2)
+            - **LMH DCVS:** deaktiviert (kein Frequenz-Cap mehr durch thermische Limits)
+            - **scaling_max_freq:** Userspace-Writes werden respektiert
+
+            **Flashbar via OrangeFox / TWRP** — einfach das ZIP flashen.
+
+            **Changelog:**
+            - `drivers/thermal/qcom/msm_lmh_dcvs.c`: LMH-Mitigation deaktiviert
+            - `anykernel/`: AnyKernel3-Template für sweet
+            - CI: Automatischer Build bei jedem Push
+          files: K6A-Kernel-sweet-*.zip
+
+      # -------------------------------------------------------
+      # Schritt 6: Zusammenfassung der Änderungen ausgeben
+      # -------------------------------------------------------
+      - name: Show summary
+        run: |
+          echo "=== Build abgeschlossen ==="
+          echo "ZIP: K6A-Kernel-sweet-${{ github.run_number }}.zip"
+          echo ""
+          echo "Enthaltene Änderungen:"
+          echo "  - LMH DCVS deaktiviert (drivers/thermal/qcom/msm_lmh_dcvs.c)"
