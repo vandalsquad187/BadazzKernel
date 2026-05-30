@@ -55,10 +55,13 @@ jobs:
           export CROSS_COMPILE=aarch64-linux-gnu-
           export CROSS_COMPILE_COMPAT=arm-linux-gnueabihf-
           make sweet_defconfig
-          # GCC 13 aus Ubuntu 24.04 unterstützt -fstack-protector-strong
-          # nicht für Cross-Compile — downgrade auf REGULAR
-          scripts/config --disable CC_STACKPROTECTOR_STRONG \
-                         --enable CC_STACKPROTECTOR_REGULAR
+          # GCC 13 (Ubuntu 24.04) erkennt -fstack-protector nicht
+          # im Cross-Compile auf aarch64 — komplett deaktivieren
+          sed -i 's/CONFIG_CC_STACKPROTECTOR_STRONG=y/# CONFIG_CC_STACKPROTECTOR_STRONG is not set/' .config
+          sed -i 's/.*CONFIG_CC_STACKPROTECTOR_NONE.*/CONFIG_CC_STACKPROTECTOR_NONE=y/' .config
+          grep -q 'CONFIG_CC_STACKPROTECTOR_NONE=y' .config || \
+            echo 'CONFIG_CC_STACKPROTECTOR_NONE=y' >> .config
+          sed -i '/CONFIG_CC_STACKPROTECTOR_REGULAR/d' .config
           make olddefconfig
 
       - name: Build kernel
