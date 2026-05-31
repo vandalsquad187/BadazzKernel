@@ -1,5 +1,6 @@
 #include <errno.h>
 #include <fcntl.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -7,13 +8,13 @@
 #include <sys/types.h>
 #include <unistd.h>
 
-#define KSU_IOCTL_GET_INFO _IOR('k', 2, __u32)
-#define KSU_IOCTL_BECOME_MANAGER _IOW('k', 23, __u32)
+#define KSU_IOCTL_GET_INFO _IOR('k', 2, unsigned int)
+#define KSU_IOCTL_BECOME_MANAGER _IOW('k', 23, unsigned int)
 
 struct ksu_get_info_cmd {
-	__u32 version;
-	__u32 flags;
-	__u32 features;
+	uint32_t version;
+	uint32_t flags;
+	uint32_t features;
 };
 
 int main(int argc, char *argv[], char *envp[])
