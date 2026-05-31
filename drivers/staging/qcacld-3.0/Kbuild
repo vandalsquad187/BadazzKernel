@@ -2308,6 +2308,8 @@ cppflags-y +=	-DANI_OS_TYPE_ANDROID=6 \
 		-Wno-error=stringop-truncation\
 		-Wno-error=restrict\
 		-Wno-error=address\
+		-Wno-error=maybe-uninitialized\
+		-Wno-error=uninitialized\
 		-D__linux__
 
 cppflags-$(CONFIG_PTT_SOCK_SVC_ENABLE) += -DPTT_SOCK_SVC_ENABLE
