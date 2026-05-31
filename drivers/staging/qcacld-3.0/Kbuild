@@ -2304,6 +2304,9 @@ cppflags-y +=	-DANI_OS_TYPE_ANDROID=6 \
 		-Wno-error=enum-int-mismatch\
 		-Wno-error=misleading-indentation\
 		-Wno-error=array-parameter\
+		-Wno-error=stringop-overflow\
+		-Wno-error=stringop-truncation\
+		-Wno-error=restrict\
 		-D__linux__
 
 cppflags-$(CONFIG_PTT_SOCK_SVC_ENABLE) += -DPTT_SOCK_SVC_ENABLE
