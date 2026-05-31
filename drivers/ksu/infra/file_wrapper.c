@@ -448,65 +448,20 @@ static const struct dentry_operations ksu_file_wrapper_d_ops = { .d_dname = ksu_
 // Borrow kernel's anon_inode_mnt, so that we don't need to mount one by ourselves.
 static struct vfsmount *anon_inode_mnt __read_mostly;
 
-static struct inode *ksu_anon_inode_make_secure_inode(const char *name, const struct inode *context_inode)
-{
-    struct inode *inode;
-    const struct qstr qname = QSTR_INIT(name, strlen(name));
-    int error;
-
-    if (unlikely(!anon_inode_mnt)) {
-        return ERR_PTR(-ENODEV);
-    }
-
-    inode = alloc_anon_inode(anon_inode_mnt->mnt_sb);
-    if (IS_ERR(inode))
-        return inode;
-    inode->i_flags &= ~S_PRIVATE;
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 0, 0)
-    error = security_inode_init_security_anon(inode, &qname, context_inode);
-#else
-    error = 0;
-#endif
-    if (error) {
-        iput(inode);
-        return ERR_PTR(error);
-    }
-    return inode;
-}
-
 static struct file *ksu_anon_inode_create_getfile_compat(const char *name, const struct file_operations *fops,
                                                          void *priv, int flags, const struct inode *context_inode)
 {
-    struct inode *inode;
     struct file *file;
 
     if (fops->owner && !try_module_get(fops->owner))
         return ERR_PTR(-ENOENT);
 
-    inode = ksu_anon_inode_make_secure_inode(name, context_inode);
-    if (IS_ERR(inode)) {
-        file = ERR_CAST(inode);
-        goto err;
+    file = anon_inode_getfile(name, fops, priv, flags);
+    if (IS_ERR(file)) {
+        module_put(fops->owner);
+        return file;
     }
 
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 1, 0)
-    file = alloc_file_pseudo(inode, anon_inode_mnt, name, flags & (O_ACCMODE | O_NONBLOCK), fops);
-#else
-    file = alloc_file(inode, anon_inode_mnt, flags & (O_ACCMODE | O_NONBLOCK), fops);
-#endif
-    if (IS_ERR(file))
-        goto err_iput;
-
-    file->f_mapping = inode->i_mapping;
-
-    file->private_data = priv;
-
-    return file;
-
-err_iput:
-    iput(inode);
-err:
-    module_put(fops->owner);
     return file;
 }
 #endif
