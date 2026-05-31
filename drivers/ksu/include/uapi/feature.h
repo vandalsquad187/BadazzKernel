@@ -2,5 +2,6 @@
 #define _UAPI_LINUX_KSU_FEATURE_H
 
 #define KSU_FEATURE_VERSION 1
+#define KSU_FEATURE_KERNEL_UMOUNT 1
 
 #endif
