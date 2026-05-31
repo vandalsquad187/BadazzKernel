@@ -41,6 +41,7 @@ extern long __x64_sys_setns(const struct pt_regs *regs);
 
 static long ksu_sys_setns(int fd, int flags)
 {
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 0, 0)
     struct pt_regs regs;
     memset(&regs, 0, sizeof(regs));
 
@@ -53,6 +54,15 @@ static long ksu_sys_setns(int fd, int flags)
     return __x64_sys_setns(&regs);
 #else
 #error "Unsupported arch"
+#endif
+#else
+#if defined(__aarch64__)
+    return sys_setns(fd, flags);
+#elif defined(__x86_64__)
+    return sys_setns(fd, flags);
+#else
+#error "Unsupported arch"
+#endif
 #endif
 }
 
@@ -125,7 +135,11 @@ try_setns:
     ret = ksu_sys_setns(fd, CLONE_NEWNS);
 
 #if LINUX_VERSION_CODE < KERNEL_VERSION(5, 11, 0)
-    ksys_close(fd);
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(4, 17, 0)
+    __close_fd(current->files, fd);
+#else
+    sys_close(fd);
+#endif
 #else
     close_fd(fd);
 #endif
@@ -152,7 +166,11 @@ out:
 // individual mode , need CAP_SYS_ADMIN to perform unshare and remount
 static void ksu_mnt_ns_individual(void)
 {
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(4, 17, 0)
     long ret = ksys_unshare(CLONE_NEWNS);
+#else
+    long ret = sys_unshare(CLONE_NEWNS);
+#endif
     if (ret) {
         pr_warn("call ksys_unshare failed: %ld\n", ret);
         return;
@@ -161,7 +179,20 @@ static void ksu_mnt_ns_individual(void)
     // make root mount private
     struct path root_path;
     get_fs_root(current->fs, &root_path);
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 1, 0)
     int pm_ret = path_mount(NULL, &root_path, NULL, MS_PRIVATE | MS_REC, NULL);
+#else
+    char *root_path_str = kmalloc(PATH_MAX, GFP_KERNEL);
+    char *root_path_buf = root_path_str ? d_path(&root_path, root_path_str, PATH_MAX) : NULL;
+    int pm_ret = -ENOMEM;
+    if (root_path_buf && !IS_ERR(root_path_buf)) {
+        mm_segment_t old_fs = get_fs();
+        set_fs(KERNEL_DS);
+        pm_ret = do_mount(NULL, root_path_buf, NULL, MS_PRIVATE | MS_REC, NULL);
+        set_fs(old_fs);
+    }
+    kfree(root_path_str);
+#endif
     path_put(&root_path);
 
     if (pm_ret < 0) {
