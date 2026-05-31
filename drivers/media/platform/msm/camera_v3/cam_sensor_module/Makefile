@@ -1,15 +1,14 @@
-# Alle Submodul-Verzeichnisse in den Include-Pfad (GCC 13 sucht
-# bei #include \"...\" zuerst das Header-, nicht das .c-Verzeichnis)
-ccflags-y += -Idrivers/media/platform/msm/camera_v3/cam_sensor_module/cam_res_mgr
-ccflags-y += -Idrivers/media/platform/msm/camera_v3/cam_sensor_module/cam_sensor_utils
-ccflags-y += -Idrivers/media/platform/msm/camera_v3/cam_sensor_module/cam_cci
-ccflags-y += -Idrivers/media/platform/msm/camera_v3/cam_sensor_module/cam_sensor_io
-ccflags-y += -Idrivers/media/platform/msm/camera_v3/cam_sensor_module/cam_csiphy
-ccflags-y += -Idrivers/media/platform/msm/camera_v3/cam_sensor_module/cam_actuator
-ccflags-y += -Idrivers/media/platform/msm/camera_v3/cam_sensor_module/cam_sensor
-ccflags-y += -Idrivers/media/platform/msm/camera_v3/cam_sensor_module/cam_flash
-ccflags-y += -Idrivers/media/platform/msm/camera_v3/cam_sensor_module/cam_eeprom
-ccflags-y += -Idrivers/media/platform/msm/camera_v3/cam_sensor_module/cam_ois
+# subdir-ccflags-y wird an alle Sub-Submodule vererbt.
+subdir-ccflags-y += -Idrivers/media/platform/msm/camera_v3/cam_sensor_module/cam_res_mgr
+subdir-ccflags-y += -Idrivers/media/platform/msm/camera_v3/cam_sensor_module/cam_sensor_utils
+subdir-ccflags-y += -Idrivers/media/platform/msm/camera_v3/cam_sensor_module/cam_cci
+subdir-ccflags-y += -Idrivers/media/platform/msm/camera_v3/cam_sensor_module/cam_sensor_io
+subdir-ccflags-y += -Idrivers/media/platform/msm/camera_v3/cam_sensor_module/cam_csiphy
+subdir-ccflags-y += -Idrivers/media/platform/msm/camera_v3/cam_sensor_module/cam_actuator
+subdir-ccflags-y += -Idrivers/media/platform/msm/camera_v3/cam_sensor_module/cam_sensor
+subdir-ccflags-y += -Idrivers/media/platform/msm/camera_v3/cam_sensor_module/cam_flash
+subdir-ccflags-y += -Idrivers/media/platform/msm/camera_v3/cam_sensor_module/cam_eeprom
+subdir-ccflags-y += -Idrivers/media/platform/msm/camera_v3/cam_sensor_module/cam_ois
 
 obj-$(CONFIG_SPECTRA_CAMERA) += cam_res_mgr/
 obj-$(CONFIG_SPECTRA_CAMERA) += cam_sensor_utils/

@@ -1,3 +1,4 @@
+ccflags-y += -Idrivers/media/platform/msm/camera_v3/cam_sensor_module/cam_sensor_utils
 ccflags-y += -Idrivers/media/platform/msm/camera_v3/cam_req_mgr
 ccflags-y += -Idrivers/media/platform/msm/camera_v3/cam_utils
 ccflags-y += -Idrivers/media/platform/msm/camera_v3/cam_sensor_module/cam_sensor_io

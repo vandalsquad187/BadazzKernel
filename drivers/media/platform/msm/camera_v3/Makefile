@@ -1,21 +1,20 @@
-# Alle Submodul-Verzeichnisse in den Include-Pfad, damit
-# GCC 13 bei #include \"...\" aus Submodul-Headern die eigenen
-# und benachbarten Submodul-Header findet (Clang sucht zuerst
-# das .c-Verzeichnis, GCC das Header-Verzeichnis).
-ccflags-y += -Idrivers/media/platform/msm/camera_v3/cam_req_mgr
-ccflags-y += -Idrivers/media/platform/msm/camera_v3/cam_hyp_intf
-ccflags-y += -Idrivers/media/platform/msm/camera_v3/cam_utils
-ccflags-y += -Idrivers/media/platform/msm/camera_v3/cam_core
-ccflags-y += -Idrivers/media/platform/msm/camera_v3/cam_sync
-ccflags-y += -Idrivers/media/platform/msm/camera_v3/cam_smmu
-ccflags-y += -Idrivers/media/platform/msm/camera_v3/cam_cpas
-ccflags-y += -Idrivers/media/platform/msm/camera_v3/cam_cdm
-ccflags-y += -Idrivers/media/platform/msm/camera_v3/cam_isp
-ccflags-y += -Idrivers/media/platform/msm/camera_v3/cam_sensor_module
-ccflags-y += -Idrivers/media/platform/msm/camera_v3/cam_icp
-ccflags-y += -Idrivers/media/platform/msm/camera_v3/cam_jpeg
-ccflags-y += -Idrivers/media/platform/msm/camera_v3/cam_fd
-ccflags-y += -Idrivers/media/platform/msm/camera_v3/cam_lrme
+# subdir-ccflags-y wird an alle Submodule vererbt (im Gegensatz
+# zu ccflags-y). GCC 13 sucht bei #include \"...\" zuerst das
+# Header-Verzeichnis, nicht das .c-Verzeichnis (anders als Clang).
+subdir-ccflags-y += -Idrivers/media/platform/msm/camera_v3/cam_req_mgr
+subdir-ccflags-y += -Idrivers/media/platform/msm/camera_v3/cam_hyp_intf
+subdir-ccflags-y += -Idrivers/media/platform/msm/camera_v3/cam_utils
+subdir-ccflags-y += -Idrivers/media/platform/msm/camera_v3/cam_core
+subdir-ccflags-y += -Idrivers/media/platform/msm/camera_v3/cam_sync
+subdir-ccflags-y += -Idrivers/media/platform/msm/camera_v3/cam_smmu
+subdir-ccflags-y += -Idrivers/media/platform/msm/camera_v3/cam_cpas
+subdir-ccflags-y += -Idrivers/media/platform/msm/camera_v3/cam_cdm
+subdir-ccflags-y += -Idrivers/media/platform/msm/camera_v3/cam_isp
+subdir-ccflags-y += -Idrivers/media/platform/msm/camera_v3/cam_sensor_module
+subdir-ccflags-y += -Idrivers/media/platform/msm/camera_v3/cam_icp
+subdir-ccflags-y += -Idrivers/media/platform/msm/camera_v3/cam_jpeg
+subdir-ccflags-y += -Idrivers/media/platform/msm/camera_v3/cam_fd
+subdir-ccflags-y += -Idrivers/media/platform/msm/camera_v3/cam_lrme
 
 obj-$(CONFIG_SPECTRA_CAMERA) += cam_req_mgr/
 obj-$(CONFIG_SPECTRA_CAMERA) += cam_hyp_intf/

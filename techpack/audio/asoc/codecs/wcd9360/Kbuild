@@ -77,6 +77,8 @@ CDEFINES +=	-DANI_LITTLE_BYTE_ENDIAN \
 		-DPTT_SOCK_SVC_ENABLE \
 		-Wall\
 		-Werror\
+		-Wno-error=maybe-uninitialized\
+		-Wno-error=uninitialized\
 		-Wno-error=misleading-indentation\
 		-Wno-error=address\
 		-Wno-error=format\
