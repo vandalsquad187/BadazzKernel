@@ -739,10 +739,18 @@ static struct freq_attr *osm_cpufreq_attr[] = {
 	NULL
 };
 
+static int osm_cpufreq_verify(struct cpufreq_policy *policy)
+{
+	cpufreq_verify_within_cpu_limits(policy);
+	if (!policy->freq_table)
+		return -ENODEV;
+	return cpufreq_frequency_table_verify(policy, policy->freq_table);
+}
+
 static struct cpufreq_driver qcom_osm_cpufreq_driver = {
 	.flags		= CPUFREQ_STICKY | CPUFREQ_NEED_INITIAL_FREQ_CHECK |
 			  CPUFREQ_HAVE_GOVERNOR_PER_POLICY,
-	.verify		= cpufreq_generic_frequency_table_verify,
+	.verify		= osm_cpufreq_verify,
 	.target_index	= osm_cpufreq_target_index,
 	.get		= osm_cpufreq_get,
 	.init		= osm_cpufreq_cpu_init,

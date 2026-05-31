@@ -516,6 +516,25 @@ lmh_freq_limit_show(struct device *dev, struct device_attribute *devattr,
 	return snprintf(buf, PAGE_SIZE, "%lu\n", hw->hw_freq_limit);
 }
 
+static ssize_t
+lmh_freq_limit_store(struct device *dev, struct device_attribute *devattr,
+			const char *buf, size_t count)
+{
+	struct limits_dcvs_hw *hw = container_of(devattr,
+						struct limits_dcvs_hw,
+						lmh_freq_attr);
+	unsigned long val;
+	int ret;
+
+	ret = kstrtoul(buf, 0, &val);
+	if (ret)
+		return ret;
+
+	hw->hw_freq_limit = val;
+
+	return count;
+}
+
 static int limits_dcvs_probe(struct platform_device *pdev)
 {
 	int ret;
@@ -710,7 +729,8 @@ static int limits_dcvs_probe(struct platform_device *pdev)
 	limits_isens_vref_ldo_init(pdev, hw);
 	hw->lmh_freq_attr.attr.name = "lmh_freq_limit";
 	hw->lmh_freq_attr.show = lmh_freq_limit_show;
-	hw->lmh_freq_attr.attr.mode = 0444;
+	hw->lmh_freq_attr.store = lmh_freq_limit_store;
+	hw->lmh_freq_attr.attr.mode = 0644;
 	device_create_file(&pdev->dev, &hw->lmh_freq_attr);
 
 probe_exit:
