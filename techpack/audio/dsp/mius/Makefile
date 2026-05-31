@@ -1,4 +1,4 @@
-ccflags-y := -I$(src) -Wall -Werror
+ccflags-y := -I$(src) -Wall -Werror -Wno-error=misleading-indentation -Wno-error=address -Wno-error=format
 IO_MODULE := msm
 
 # EXTRA_CFLAGS += -DDEBUG
