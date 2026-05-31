@@ -33,7 +33,7 @@ extern long do_mount(const char *dev_name, const char __user *dir_name, const ch
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 0, 0)
 extern long __arm64_sys_setns(const struct pt_regs *regs);
 #else
-extern asmlinkage long sys_setns(const struct pt_regs *regs);
+extern asmlinkage long sys_setns(int fd, int nstype);
 #endif
 #elif defined(__x86_64__)
 extern long __x64_sys_setns(const struct pt_regs *regs);
