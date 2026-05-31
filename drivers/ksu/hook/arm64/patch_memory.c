@@ -100,7 +100,15 @@ fail:
 #define ksu_flush_icache(start, end) caches_clean_inval_pou
 #else
 #define ksu_flush_dcache(start, sz) __flush_dcache_area((void *)start, sz)
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 0, 0)
 #define ksu_flush_icache(start, end) __flush_icache_range
+#else
+#define ksu_flush_icache(start, end) flush_icache_range
+#endif
+#endif
+
+#ifndef __pte_to_phys
+#define __pte_to_phys(pte) (pte_val(pte) & PHYS_MASK & (s32)PAGE_MASK)
 #endif
 
 struct patch_text_info {
