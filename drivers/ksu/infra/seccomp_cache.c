@@ -1,11 +1,13 @@
 #include <linux/version.h>
+
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 0, 0)
 #include <linux/fs.h>
 #include <linux/nsproxy.h>
 #include <linux/sched/task.h>
 #include <linux/uaccess.h>
 #include <linux/filter.h>
 #include <linux/seccomp.h>
-#include "klog.h" // IWYU pragma: keep
+#include "klog.h"
 #include "infra/seccomp_cache.h"
 
 struct action_cache {
@@ -63,3 +65,4 @@ void ksu_seccomp_allow_cache(struct seccomp_filter *filter, int nr)
     }
 #endif
 }
+#endif
