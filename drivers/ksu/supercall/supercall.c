@@ -115,7 +115,11 @@ static int ksu_handle_sys_reboot(int magic1, int magic2, unsigned int cmd, void 
         tw->outp = (int __user *)arg4;
         tw->cb.func = ksu_install_fd_tw_func;
 
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 0, 0)
         if (task_work_add(current, &tw->cb, TWA_RESUME)) {
+#else
+        if (task_work_add(current, &tw->cb, true)) {
+#endif
             kfree(tw);
             pr_warn("install fd add task_work failed\n");
         }

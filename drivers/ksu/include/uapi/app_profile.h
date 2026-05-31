@@ -9,6 +9,24 @@
 
 #define KSU_DEFAULT_SELINUX_DOMAIN "ksu"
 
+struct root_profile {
+    uid_t uid;
+    gid_t gid;
+    uid_t groups[KSU_MAX_GROUPS];
+    int groups_count;
+    char selinux_domain[KSU_SELINUX_DOMAIN_LEN];
+    struct {
+        __u64 effective;
+        __u64 permitted;
+        __u64 inheritable;
+    } capabilities;
+    int namespaces;
+};
+
+struct non_root_profile {
+    bool umount_modules;
+};
+
 struct app_profile {
     uid_t uid;
     uid_t curr_uid;
