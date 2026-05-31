@@ -418,6 +418,9 @@ static bool add_type_rule(struct policydb *db, const char *s, const char *t, con
 // 5.9.0 : static inline int hashtab_insert(struct hashtab *h, void *key, void
 // *datum, struct hashtab_key_params key_params) 5.8.0: int
 // hashtab_insert(struct hashtab *h, void *k, void *d);
+// In 4.14, hashtab_insert takes (struct hashtab *h, void *k, void *d)
+// and the filename_trans table uses struct filename_trans (with stype) as key
+// and struct filename_trans_datum (with otype only) as datum
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 9, 0)
 static u32 filenametr_hash(const void *k)
 {
@@ -484,6 +487,7 @@ static bool add_filename_trans(struct policydb *db, const char *s, const char *t
         return false;
     }
 
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 9, 0)
     struct filename_trans_key key;
     key.ttype = tgt->value;
     key.tclass = cls->value;
@@ -516,6 +520,51 @@ static bool add_filename_trans(struct policydb *db, const char *s, const char *t
 
     db->compat_filename_trans_count++;
     return ebitmap_set_bit(&trans->stypes, src->value - 1, 1) == 0;
+#else
+    // 4.14 filename_trans uses struct filename_trans as key (includes stype)
+    struct filename_trans *ft = kzalloc(sizeof(*ft), GFP_KERNEL);
+    if (!ft) {
+        pr_err("add_filename_trans: alloc key failed\n");
+        return false;
+    }
+    ft->stype = src->value;
+    ft->ttype = tgt->value;
+    ft->tclass = cls->value;
+    ft->name = kstrdup(o, GFP_KERNEL);
+    if (!ft->name) {
+        pr_err("add_filename_trans: alloc name failed\n");
+        kfree(ft);
+        return false;
+    }
+
+    struct filename_trans_datum *existing = hashtab_search(db->filename_trans, ft);
+    if (existing) {
+        // Entry already exists, update otype if needed
+        existing->otype = def->value;
+        kfree(ft->name);
+        kfree(ft);
+        return true;
+    }
+
+    struct filename_trans_datum *otype = kzalloc(sizeof(*otype), GFP_KERNEL);
+    if (!otype) {
+        pr_err("add_filename_trans: alloc datum failed\n");
+        kfree(ft->name);
+        kfree(ft);
+        return false;
+    }
+    otype->otype = def->value;
+
+    if (hashtab_insert(db->filename_trans, ft, otype)) {
+        pr_err("add_filename_trans: insert failed\n");
+        kfree(otype);
+        kfree(ft->name);
+        kfree(ft);
+        return false;
+    }
+
+    return true;
+#endif
 }
 
 static bool add_genfscon(struct policydb *db, const char *fs_name, const char *path, const char *context)
@@ -578,6 +627,14 @@ static bool add_type(struct policydb *db, const char *type_name, bool attr)
         return false;
     }
 
+    char **new_val_to_name_types =
+        ksu_kvrealloc(db->sym_val_to_name[SYM_TYPES], sizeof(char *) * value, sizeof(char *) * (value - 1));
+    if (!new_val_to_name_types) {
+        pr_err("add_type: alloc val_to_name failed\n");
+        return false;
+    }
+
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 9, 0)
     struct ebitmap *new_type_attr_map_array =
         ksu_kvrealloc(db->type_attr_map_array, value * sizeof(struct ebitmap), (value - 1) * sizeof(struct ebitmap));
 
@@ -594,19 +651,17 @@ static bool add_type(struct policydb *db, const char *type_name, bool attr)
         return false;
     }
 
-    char **new_val_to_name_types =
-        ksu_kvrealloc(db->sym_val_to_name[SYM_TYPES], sizeof(char *) * value, sizeof(char *) * (value - 1));
-    if (!new_val_to_name_types) {
-        pr_err("add_type: alloc val_to_name failed\n");
-        return false;
-    }
-
     db->type_attr_map_array = new_type_attr_map_array;
     ebitmap_init(&db->type_attr_map_array[value - 1]);
     ebitmap_set_bit(&db->type_attr_map_array[value - 1], value - 1, 1);
 
     db->type_val_to_struct = new_type_val_to_struct;
     db->type_val_to_struct[value - 1] = type;
+#else
+    // 4.14 uses flex_array which is not designed for dynamic growth
+    // skip flex_array updates - type exists in p_types hashtab
+    pr_debug("add_type: skipping flex_array updates on 4.14\n");
+#endif
 
     db->sym_val_to_name[SYM_TYPES] = new_val_to_name_types;
     db->sym_val_to_name[SYM_TYPES][value - 1] = key;
@@ -646,8 +701,10 @@ static bool set_type_state(struct policydb *db, const char *type_name, bool perm
 
 static void add_typeattribute_raw(struct policydb *db, struct type_datum *type, struct type_datum *attr)
 {
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 9, 0)
     struct ebitmap *sattr = &db->type_attr_map_array[type->value - 1];
     ebitmap_set_bit(sattr, attr->value - 1, 1);
+#endif
 
     struct hashtab_node *node;
     struct constraint_node *n;
