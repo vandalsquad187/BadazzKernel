@@ -369,9 +369,18 @@ out_unlock:
     return copied;
 }
 
-__poll_t ksu_event_queue_poll(struct ksu_event_queue *queue, struct file *file, poll_table *wait)
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 0, 0)
+__poll_t
+#else
+unsigned int
+#endif
+ksu_event_queue_poll(struct ksu_event_queue *queue, struct file *file, poll_table *wait)
 {
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 0, 0)
     __poll_t mask = 0;
+#else
+    unsigned int mask = 0;
+#endif
     unsigned long irq_flags;
 
     poll_wait(file, &queue->read_wait, wait);
