@@ -4,6 +4,7 @@
 #include <linux/file.h>
 #include <linux/fs.h>
 #include <linux/kprobes.h>
+#include <linux/miscdevice.h>
 #include <linux/pid.h>
 #include <linux/slab.h>
 #include <linux/syscalls.h>
@@ -45,6 +46,26 @@ static const struct file_operations anon_ksu_fops = {
     .unlocked_ioctl = anon_ksu_ioctl,
     .compat_ioctl = anon_ksu_ioctl,
     .release = anon_ksu_release,
+};
+
+static int ksu_misc_open(struct inode *inode, struct file *file)
+{
+    return 0;
+}
+
+static const struct file_operations ksu_misc_fops = {
+    .owner = THIS_MODULE,
+    .open = ksu_misc_open,
+    .unlocked_ioctl = anon_ksu_ioctl,
+    .compat_ioctl = anon_ksu_ioctl,
+    .release = anon_ksu_release,
+};
+
+static struct miscdevice ksu_misc_device = {
+    .minor = MISC_DYNAMIC_MINOR,
+    .name = "ksu",
+    .mode = 0666,
+    .fops = &ksu_misc_fops,
 };
 
 int ksu_install_fd(void)
@@ -321,6 +342,13 @@ void __init ksu_supercalls_init(void)
     }
 
     ksu_syscall_table_hook(__NR_reboot, ksu_reboot_hook, &orig_reboot_syscall);
+
+    rc = misc_register(&ksu_misc_device);
+    if (rc) {
+        pr_err("misc_register(/dev/ksu) failed: %d\n", rc);
+    } else {
+        pr_info("misc_register(/dev/ksu) success\n");
+    }
 }
 
 void __exit ksu_supercalls_exit(void)
@@ -330,6 +358,7 @@ void __exit ksu_supercalls_exit(void)
         kfree(sulog_buf_ptr);
     }
 
+    misc_deregister(&ksu_misc_device);
     ksu_syscall_table_unhook(__NR_reboot);
     unregister_kprobe(&reboot_kp);
     ksu_supercall_cleanup_state();

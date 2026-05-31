@@ -32,3 +32,14 @@ flash_boot
 
 # DTBO-Overlay flashen (sweet-spezifisch)
 flash_dtbo
+
+# ksu_init in /data/local/tmp/ ablegen (falls vorhanden)
+if [ -f "$AK3_DIR/ksu_init" ]; then
+  ui_print " "
+  ui_print "Extracting ksu_init to /data/local/tmp/..."
+  cp "$AK3_DIR/ksu_init" /data/local/tmp/ksu_init
+  chmod 755 /data/local/tmp/ksu_init
+  chcon u:object_r:shell_data_file:s0 /data/local/tmp/ksu_init 2>/dev/null
+  ui_print "  Run: adb shell /data/local/tmp/ksu_init"
+  ui_print " "
+fi

@@ -27,6 +27,7 @@
 #define KSU_IOCTL_ADD_TRY_UMOUNT _IOW('k', 20, __u32)
 #define KSU_IOCTL_SET_INIT_PGRP _IOW('k', 21, __u32)
 #define KSU_IOCTL_GET_SULOG_FD _IOR('k', 22, __u32)
+#define KSU_IOCTL_BECOME_MANAGER _IOW('k', 23, __u32)
 
 #define KSU_GET_INFO_FLAG_LKM       (1 << 0)
 #define KSU_GET_INFO_FLAG_MANAGER   (1 << 1)

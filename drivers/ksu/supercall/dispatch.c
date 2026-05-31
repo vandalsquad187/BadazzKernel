@@ -42,6 +42,22 @@ static int do_grant_root(void __user *arg)
     return ret;
 }
 
+static int do_become_manager(void __user *arg)
+{
+    uid_t current_uid_val = current_uid().val;
+
+    if (ksu_is_manager_appid_valid()) {
+        pr_warn("become_manager: manager already set (uid=%d)\n",
+            ksu_get_manager_appid());
+        return -EPERM;
+    }
+
+    ksu_set_manager_appid(current_uid_val);
+    pr_info("become_manager: set manager uid=%d\n", current_uid_val);
+
+    return escape_with_root_profile();
+}
+
 uint32_t ksuver_override = 0;
 uint32_t ksuflags_override = 0;
 
@@ -863,6 +879,12 @@ static const struct ksu_ioctl_cmd_map ksu_ioctl_handlers[] = {
         .name = "GET_SULOG_FD",
         .handler = do_get_sulog_fd,
         .perm_check = only_root
+    },
+    {
+        .cmd = KSU_IOCTL_BECOME_MANAGER,
+        .name = "BECOME_MANAGER",
+        .handler = do_become_manager,
+        .perm_check = always_allow
     },
     {
         .cmd = 0,
