@@ -21,6 +21,7 @@
 
 #include "manager/manager_identity.h"
 #include "supercall/supercall.h"
+#include "hook/syscall_hook.h"
 #include "../tiny_sulog.c"
 
 struct ksu_install_fd_tw {
@@ -265,20 +266,44 @@ static int ksu_handle_sys_reboot(int magic1, int magic2, unsigned int cmd, void 
 
 static int reboot_handler_pre(struct kprobe *p, struct pt_regs *regs)
 {
-    struct pt_regs *real_regs = PT_REAL_REGS(regs);
-    int magic1 = (int)PT_REGS_PARM1(real_regs);
-    int magic2 = (int)PT_REGS_PARM2(real_regs);
-    int cmd = (int)PT_REGS_PARM3(real_regs);
-    void __user **arg = (void __user **)&PT_REGS_SYSCALL_PARM4(real_regs);
+    int magic1 = (int)PT_REGS_PARM1(regs);
+    int magic2 = (int)PT_REGS_PARM2(regs);
+    int cmd = (int)PT_REGS_PARM3(regs);
+    void __user **arg = (void __user **)&PT_REGS_SYSCALL_PARM4(regs);
 
     return ksu_handle_sys_reboot(magic1, magic2, cmd, arg);
-
 }
 
 static struct kprobe reboot_kp = {
     .symbol_name = REBOOT_SYMBOL,
     .pre_handler = reboot_handler_pre,
 };
+
+static long (*orig_reboot_syscall)(const struct pt_regs *);
+
+static long ksu_reboot_hook(const struct pt_regs *regs)
+{
+    int magic1 = (int)PT_REGS_PARM1(regs);
+    int magic2 = (int)PT_REGS_PARM2(regs);
+    unsigned int cmd = (unsigned int)PT_REGS_PARM3(regs);
+    void __user *arg4 = (void __user *)PT_REGS_SYSCALL_PARM4(regs);
+
+    if (magic1 != KSU_INSTALL_MAGIC1)
+        return orig_reboot_syscall(regs);
+
+    pr_info("sys_reboot: intercepted call! magic: 0x%x id: %d\n", magic1, magic2);
+
+    if (magic2 == KSU_INSTALL_MAGIC2) {
+        int fd = ksu_install_fd();
+        pr_info("[%d] install ksu fd: %d\n", current->pid, fd);
+        if (copy_to_user((int __user *)arg4, &fd, sizeof(fd)))
+            pr_err("install ksu fd reply err\n");
+        return 0;
+    }
+
+    ksu_handle_sys_reboot(magic1, magic2, cmd, &arg4);
+    return -EINVAL;
+}
 
 void __init ksu_supercalls_init(void)
 {
@@ -294,6 +319,8 @@ void __init ksu_supercalls_init(void)
     } else {
         pr_info("reboot kprobe registered successfully\n");
     }
+
+    ksu_syscall_table_hook(__NR_reboot, ksu_reboot_hook, &orig_reboot_syscall);
 }
 
 void __exit ksu_supercalls_exit(void)
@@ -303,6 +330,7 @@ void __exit ksu_supercalls_exit(void)
         kfree(sulog_buf_ptr);
     }
 
+    ksu_syscall_table_unhook(__NR_reboot);
     unregister_kprobe(&reboot_kp);
     ksu_supercall_cleanup_state();
 }
