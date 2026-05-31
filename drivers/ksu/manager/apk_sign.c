@@ -18,25 +18,6 @@
 #include "uapi/app_profile.h"
 #include "klog.h" // IWYU pragma: keep
 
-#ifndef KSU_MAX_PACKAGE_NAME
-#define KSU_MAX_PACKAGE_NAME 256
-#endif
-#ifndef KSU_MANAGER_PACKAGE
-#define KSU_MANAGER_PACKAGE ""
-#endif
-#ifndef EXPECTED_SIZE
-#define EXPECTED_SIZE 0
-#endif
-#ifndef EXPECTED_HASH
-#define EXPECTED_HASH NULL
-#endif
-#ifndef EXPECTED_SIZE2
-#define EXPECTED_SIZE2 0
-#endif
-#ifndef EXPECTED_HASH2
-#define EXPECTED_HASH2 NULL
-#endif
-
 struct sdesc {
     struct shash_desc shash;
     char ctx[];

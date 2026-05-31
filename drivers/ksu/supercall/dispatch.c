@@ -18,6 +18,7 @@
 #include "infra/file_wrapper.h"
 #include "hook/tp_marker.h"
 #include "policy/app_profile.h"
+#include "manager/apk_sign.h"
 #include "sulog/event.h"
 #include "sulog/fd.h"
 #include "supercall/supercall.h"
