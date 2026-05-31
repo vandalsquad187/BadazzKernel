@@ -185,6 +185,7 @@ CDEFINES +=	-DANI_LITTLE_BYTE_ENDIAN \
 		-Wall\
 		-Werror\
 		-Wno-error=misleading-indentation\
+		-Wno-error=address\
 		-D__linux__
 
 KBUILD_CPPFLAGS += $(CDEFINES)
