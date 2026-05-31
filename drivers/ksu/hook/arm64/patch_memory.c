@@ -17,6 +17,10 @@
 
 // https://github.com/fuqiuluo/ovo/blob/f7da411458e87d32438dc14fce5a3313ed0c967e/ovo/mmuhack.c#L21
 
+#ifndef __pte_to_phys
+#define __pte_to_phys(pte) (pte_val(pte) & PHYS_MASK & (s32)PAGE_MASK)
+#endif
+
 // Translate a kernel virtual address to a physical address by walking the
 // init_mm page tables. Returns the physical address on success, or writes
 // a non-zero error to *err. Callers must check *err before using the result,
@@ -105,10 +109,6 @@ fail:
 #else
 #define ksu_flush_icache(start, end) flush_icache_range
 #endif
-#endif
-
-#ifndef __pte_to_phys
-#define __pte_to_phys(pte) (pte_val(pte) & PHYS_MASK & (s32)PAGE_MASK)
 #endif
 
 struct patch_text_info {
