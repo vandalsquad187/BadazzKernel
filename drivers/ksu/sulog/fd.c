@@ -19,7 +19,12 @@ static ssize_t ksu_sulog_read(struct file *file, char __user *buf, size_t count,
     return ksu_event_queue_read(ksu_sulog_get_queue(), buf, count, file->f_flags);
 }
 
-static __poll_t ksu_sulog_poll(struct file *file, poll_table *wait)
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 0, 0)
+static __poll_t
+#else
+static unsigned int
+#endif
+ksu_sulog_poll(struct file *file, poll_table *wait)
 {
     return ksu_event_queue_poll(ksu_sulog_get_queue(), file, wait);
 }
