@@ -184,6 +184,7 @@ CDEFINES +=	-DANI_LITTLE_BYTE_ENDIAN \
 		-DPTT_SOCK_SVC_ENABLE \
 		-Wall\
 		-Werror\
+		-Wno-error=misleading-indentation\
 		-D__linux__
 
 KBUILD_CPPFLAGS += $(CDEFINES)
