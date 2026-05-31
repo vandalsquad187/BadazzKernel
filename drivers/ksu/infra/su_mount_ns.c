@@ -20,11 +20,21 @@
 #include "ksu.h"
 #include "infra/su_mount_ns.h"
 
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 1, 0)
 extern int path_mount(const char *dev_name, struct path *path, const char *type_page, unsigned long flags,
                       void *data_page);
+#else
+#include <linux/mount.h>
+extern long do_mount(const char *dev_name, const char __user *dir_name, const char *type_page, unsigned long flags,
+                     void *data_page);
+#endif
 
 #if defined(__aarch64__)
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 0, 0)
 extern long __arm64_sys_setns(const struct pt_regs *regs);
+#else
+extern asmlinkage long sys_setns(const struct pt_regs *regs);
+#endif
 #elif defined(__x86_64__)
 extern long __x64_sys_setns(const struct pt_regs *regs);
 #endif
