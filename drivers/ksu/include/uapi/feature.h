@@ -1,0 +1,6 @@
+#ifndef _UAPI_LINUX_KSU_FEATURE_H
+#define _UAPI_LINUX_KSU_FEATURE_H
+
+#define KSU_FEATURE_VERSION 1
+
+#endif
