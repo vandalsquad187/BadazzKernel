@@ -24,6 +24,8 @@ jobs:
   build:
     name: Build sweet kernel
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
 
     steps:
       # -------------------------------------------------------
