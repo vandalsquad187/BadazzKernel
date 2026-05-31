@@ -16,6 +16,7 @@
 #include <linux/compiler_types.h>
 #include <linux/hashtable.h>
 #include <linux/kref.h>
+#include <linux/sched/task.h>
 
 #include "klog.h" // IWYU pragma: keep
 #include "ksu.h"
