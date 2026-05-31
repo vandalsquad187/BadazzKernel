@@ -51,6 +51,7 @@
 struct ksu_get_info_cmd {
     __u32 version;
     __u32 flags;
+    __u32 features;
 };
 
 struct ksu_report_event_cmd {

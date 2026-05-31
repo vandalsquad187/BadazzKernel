@@ -1,5 +1,6 @@
 #include <linux/capability.h>
 #include <linux/cred.h>
+#include <linux/sched/task.h>
 #include <linux/slab.h>
 #include <linux/uaccess.h>
 #include <linux/version.h>
@@ -158,6 +159,8 @@ static int do_new_get_allow_list_common(void __user *arg, bool allow)
     struct ksu_new_get_allow_list_cmd cmd;
     int *arr = NULL;
     int err = 0;
+    u16 out_count = 0;
+    u16 out_total = 0;
 
     if (copy_from_user(&cmd, arg, sizeof(cmd))) {
         return -EFAULT;
@@ -170,7 +173,10 @@ static int do_new_get_allow_list_common(void __user *arg, bool allow)
         }
     }
 
-    bool success = ksu_get_allow_list(arr, cmd.count, &cmd.count, &cmd.total_count, allow);
+    bool success = ksu_get_allow_list(arr, cmd.count, &out_count, &out_total, allow);
+
+    cmd.count = out_count;
+    cmd.total_count = out_total;
 
     if (!success) {
         err = -EFAULT;
@@ -363,13 +369,16 @@ static int do_get_feature(void __user *arg)
     struct ksu_get_feature_cmd cmd;
     bool supported;
     int ret;
+    u64 value;
 
     if (copy_from_user(&cmd, arg, sizeof(cmd))) {
         pr_err("get_feature: copy_from_user failed\n");
         return -EFAULT;
     }
 
-    ret = ksu_get_feature(cmd.feature_id, &cmd.value, &supported);
+    value = cmd.value;
+    ret = ksu_get_feature(cmd.feature_id, &value, &supported);
+    cmd.value = (__u32)value;
     cmd.supported = supported ? 1 : 0;
 
     if (ret && supported) {
