@@ -2684,10 +2684,10 @@ static inline bool uclamp_is_ignore_uclamp_max(struct task_struct *p)
 {
 	return p->uclamp_req[UCLAMP_MAX].ignore_uclamp_max;
 }
-inline void uclamp_rq_inc_id(struct rq *rq, struct task_struct *p,
-			     enum uclamp_id clamp_id);
-inline void uclamp_rq_dec_id(struct rq *rq, struct task_struct *p,
-			     enum uclamp_id clamp_id);
+void uclamp_rq_inc_id(struct rq *rq, struct task_struct *p,
+		      enum uclamp_id clamp_id);
+void uclamp_rq_dec_id(struct rq *rq, struct task_struct *p,
+		      enum uclamp_id clamp_id);
 #else /* CONFIG_UCLAMP_TASK */
 static inline unsigned long uclamp_util_with(struct rq *rq, unsigned long util,
 					     struct task_struct *p)
