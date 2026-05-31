@@ -4,6 +4,8 @@
 
 #if defined(__x86_64__)
 typedef sys_call_ptr_t syscall_fn_t;
+#elif defined(__aarch64__)
+typedef void *syscall_fn_t;
 #endif
 
 extern syscall_fn_t *ksu_syscall_table;
