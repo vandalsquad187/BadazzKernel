@@ -41,15 +41,23 @@ static const struct ksu_feature_handler kernel_umount_handler = {
     .set_handler = kernel_umount_feature_set,
 };
 
-extern int path_umount(struct path *path, int flags);
-
+/* path_umount was added in kernel 5.2 */
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 2, 0)
 static void ksu_umount_mnt(const char *mnt, struct path *path, int flags)
 {
+    extern int path_umount(struct path *path, int flags);
     int err = path_umount(path, flags);
     if (err) {
         pr_info("umount %s failed: %d\n", mnt, err);
     }
 }
+#else
+/* 4.14 has no path_umount; stub out umount functionality */
+static void ksu_umount_mnt(const char *mnt, struct path *path, int flags)
+{
+    pr_debug("umount %s not supported on this kernel version\n", mnt);
+}
+#endif
 
 static void try_umount(const char *mnt, int flags)
 {
