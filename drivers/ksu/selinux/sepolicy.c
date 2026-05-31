@@ -627,6 +627,7 @@ static bool add_type(struct policydb *db, const char *type_name, bool attr)
         return false;
     }
 
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 9, 0)
     char **new_val_to_name_types =
         ksu_kvrealloc(db->sym_val_to_name[SYM_TYPES], sizeof(char *) * value, sizeof(char *) * (value - 1));
     if (!new_val_to_name_types) {
@@ -634,7 +635,6 @@ static bool add_type(struct policydb *db, const char *type_name, bool attr)
         return false;
     }
 
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 9, 0)
     struct ebitmap *new_type_attr_map_array =
         ksu_kvrealloc(db->type_attr_map_array, value * sizeof(struct ebitmap), (value - 1) * sizeof(struct ebitmap));
 
@@ -657,14 +657,14 @@ static bool add_type(struct policydb *db, const char *type_name, bool attr)
 
     db->type_val_to_struct = new_type_val_to_struct;
     db->type_val_to_struct[value - 1] = type;
+
+    db->sym_val_to_name[SYM_TYPES] = new_val_to_name_types;
+    db->sym_val_to_name[SYM_TYPES][value - 1] = key;
 #else
     // 4.14 uses flex_array which is not designed for dynamic growth
     // skip flex_array updates - type exists in p_types hashtab
     pr_debug("add_type: skipping flex_array updates on 4.14\n");
 #endif
-
-    db->sym_val_to_name[SYM_TYPES] = new_val_to_name_types;
-    db->sym_val_to_name[SYM_TYPES][value - 1] = key;
 
     int i;
     for (i = 0; i < db->p_roles.nprim; ++i) {
