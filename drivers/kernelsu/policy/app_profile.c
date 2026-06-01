@@ -61,7 +61,16 @@ void setup_groups(struct root_profile *profile, struct cred *cred)
     put_group_info(group_info);
 }
 
-void seccomp_filter_release(struct task_struct *tsk);
+void seccomp_filter_release(struct task_struct *tsk)
+{
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 11, 0)
+    // On >= 5.11, the kernel provides seccomp_filter_release.
+    // This stub is only reached when it doesn't.
+#else
+    put_seccomp_filter(tsk);
+    tsk->seccomp.filter = NULL;
+#endif
+}
 
 static void disable_seccomp(void)
 {
@@ -88,7 +97,9 @@ static void disable_seccomp(void)
 
     current->seccomp.mode = 0;
     current->seccomp.filter = NULL;
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 11, 0)
     atomic_set(&current->seccomp.filter_count, 0);
+#endif
     spin_unlock_irq(&current->sighand->siglock);
 
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 11, 0)
