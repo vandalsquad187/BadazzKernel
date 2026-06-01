@@ -118,7 +118,7 @@ try_setns:
     ret = ksu_sys_setns(fd, CLONE_NEWNS);
 
 #if LINUX_VERSION_CODE < KERNEL_VERSION(5, 11, 0)
-    ksys_close(fd);
+    sys_close(fd);
 #else
     close_fd(fd);
 #endif
@@ -145,9 +145,9 @@ out:
 // individual mode , need CAP_SYS_ADMIN to perform unshare and remount
 static void ksu_mnt_ns_individual(void)
 {
-    long ret = ksys_unshare(CLONE_NEWNS);
+    long ret = sys_unshare(CLONE_NEWNS);
     if (ret) {
-        pr_warn("call ksys_unshare failed: %ld\n", ret);
+        pr_warn("call sys_unshare failed: %ld\n", ret);
         return;
     }
 
