@@ -12,6 +12,10 @@
 #include <linux/version.h>
 #include <linux/utsname.h> // utsname() and uts_sem
 
+#ifndef TWA_RESUME
+#define TWA_RESUME true
+#endif
+
 #include "uapi/supercall.h"
 #include "supercall/internal.h"
 #include "arch.h"
