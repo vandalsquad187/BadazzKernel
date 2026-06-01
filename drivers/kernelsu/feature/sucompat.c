@@ -10,6 +10,15 @@
 #include <linux/fs.h>
 #include <linux/types.h>
 #include <linux/version.h>
+
+/*
+ * Kernel 4.14 compatibility: strncpy_from_user_nofault was added in 5.3.
+ * On 4.14, strncpy_from_user() returns -EFAULT on bad address (same semantics).
+ */
+#if LINUX_VERSION_CODE < KERNEL_VERSION(5, 3, 0)
+#define strncpy_from_user_nofault(to, from, n) strncpy_from_user(to, from, n)
+#endif
+
 #include <linux/sched/task_stack.h>
 #include <linux/ptrace.h>
 

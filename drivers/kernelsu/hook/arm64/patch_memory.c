@@ -10,7 +10,15 @@
 #include "linux/gfp.h" // IWYU pragma: keep
 #include "linux/uaccess.h"
 #include "linux/stop_machine.h"
+#include "linux/version.h"
 #include "asm/cacheflush.h"
+
+/*
+ * Kernel 4.14 compatibility: copy_to_kernel_nofault was added in 5.4.
+ */
+#if LINUX_VERSION_CODE < KERNEL_VERSION(5, 4, 0)
+#define copy_to_kernel_nofault(dst, src, len) probe_kernel_write(dst, src, len)
+#endif
 #include "asm-generic/fixmap.h"
 
 // https://github.com/fuqiuluo/ovo/blob/f7da411458e87d32438dc14fce5a3313ed0c967e/ovo/mmuhack.c#L21

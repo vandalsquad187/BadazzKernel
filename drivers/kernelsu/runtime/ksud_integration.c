@@ -9,6 +9,19 @@
 #include <linux/file.h>
 #include <linux/fs.h>
 #include <linux/version.h>
+
+/*
+ * Kernel 4.14 compatibility: *_nofault variants were added in 5.x.
+ * On 4.14, the regular functions suffice (they return -EFAULT on bad addr).
+ */
+#if LINUX_VERSION_CODE < KERNEL_VERSION(5, 3, 0)
+#define strncpy_from_user_nofault(to, from, n) strncpy_from_user(to, from, n)
+#endif
+#if LINUX_VERSION_CODE < KERNEL_VERSION(5, 5, 0)
+#define copy_from_user_nofault(to, from, n) copy_from_user(to, from, n)
+#define copy_to_user_nofault(to, from, n)   copy_to_user(to, from, n)
+#endif
+
 #include <linux/input-event-codes.h>
 #include <linux/kprobes.h>
 #include <linux/printk.h>
