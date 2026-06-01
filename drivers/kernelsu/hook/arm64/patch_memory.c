@@ -14,10 +14,20 @@
 #include "asm/cacheflush.h"
 
 /*
- * Kernel 4.14 compatibility: copy_to_kernel_nofault was added in 5.4.
+ * Kernel 4.14 compatibility: nofault variants, page-table helpers, and
+ * cache-flush helpers were added in later kernels.
  */
 #if LINUX_VERSION_CODE < KERNEL_VERSION(5, 4, 0)
 #define copy_to_kernel_nofault(dst, src, len) probe_kernel_write(dst, src, len)
+#endif
+#if LINUX_VERSION_CODE < KERNEL_VERSION(5, 0, 0)
+#define __pte_to_phys(pte)  ((phys_addr_t)(pte_val(pte) & PHYS_MASK))
+#define __pmd_to_phys(pmd)  ((phys_addr_t)(pmd_val(pmd) & PHYS_MASK))
+#define __pud_to_phys(pud)  ((phys_addr_t)(pud_val(pud) & PHYS_MASK))
+#define __p4d_to_phys(p4d)  ((phys_addr_t)(p4d_val(p4d) & PHYS_MASK))
+#endif
+#if LINUX_VERSION_CODE < KERNEL_VERSION(5, 5, 0)
+#define __flush_icache_range(start, end) flush_icache_range(start, end)
 #endif
 #include "asm-generic/fixmap.h"
 
