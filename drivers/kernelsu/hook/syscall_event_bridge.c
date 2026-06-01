@@ -5,6 +5,7 @@
 #include "selinux/selinux.h"
 #include <asm/syscall.h>
 #include <linux/ptrace.h>
+#include <linux/uaccess.h>
 #include <linux/static_key.h>
 
 #include "arch.h"
