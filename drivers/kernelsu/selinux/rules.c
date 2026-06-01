@@ -15,6 +15,8 @@
 #include "linux/lsm_audit.h" // IWYU pragma: keep
 #include "xfrm.h"
 
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 4, 0)
+
 struct selinux_policy *backup_sepolicy;
 
 #define SELINUX_POLICY_INSTEAD_SELINUX_SS
@@ -535,3 +537,18 @@ out_free:
 
     return ret;
 }
+
+#else /* < 5.4 */
+
+struct selinux_policy *backup_sepolicy;
+
+void apply_kernelsu_rules(void)
+{
+}
+
+int handle_sepolicy(void __user *user_data, u64 data_len)
+{
+    return -EOPNOTSUPP;
+}
+
+#endif

@@ -29,6 +29,8 @@
 #include "policy/feature.h"
 #include "hook/lsm_hook.h"
 
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 4, 0)
+
 static DEFINE_MUTEX(selinux_hide_mutex);
 static bool ksu_selinux_hide_enabled __read_mostly = false;
 static bool ksu_selinux_hide_running __read_mostly = false;
@@ -1132,4 +1134,14 @@ allow:
     avd->allowed = 0xffffffff;
     goto out;
 }
-#endif
+#endif /* LINUX_VERSION_CODE >= KERNEL_VERSION(6, 6, 0) */
+
+#else /* LINUX_VERSION_CODE < KERNEL_VERSION(5, 4, 0) */
+
+void __init ksu_selinux_hide_init(void) { }
+void __exit ksu_selinux_hide_exit(void) { }
+void ksu_selinux_hide_drop_backup_if_unused(void) { }
+void ksu_selinux_hide_handle_second_stage(void) { }
+void ksu_selinux_hide_handle_post_fs_data(void) { }
+
+#endif /* LINUX_VERSION_CODE >= KERNEL_VERSION(5, 4, 0) */

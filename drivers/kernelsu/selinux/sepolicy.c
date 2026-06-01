@@ -14,6 +14,21 @@
 #include "klog.h" // IWYU pragma: keep
 #include "ss/symtab.h"
 
+#if LINUX_VERSION_CODE < KERNEL_VERSION(5, 4, 0)
+
+#include "sepolicy.h"
+
+void ksu_destroy_sepolicy(struct selinux_policy *pol)
+{
+}
+
+struct selinux_policy *ksu_dup_sepolicy(struct selinux_policy *old_pol)
+{
+    return NULL;
+}
+
+#else
+
 #define KSU_SUPPORT_ADD_TYPE
 
 //////////////////////////////////////////////////////
@@ -998,3 +1013,5 @@ out_free_data:
 
     return ERR_PTR(ret);
 }
+
+#endif

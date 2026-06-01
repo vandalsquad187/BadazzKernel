@@ -2,8 +2,20 @@
 #define __KSU_H_SEPOLICY
 
 #include <linux/types.h>
+#include <linux/version.h>
 
 #include "ss/policydb.h"
+
+#if LINUX_VERSION_CODE < KERNEL_VERSION(5, 4, 0)
+/* Kernel < 5.4 does not define struct selinux_policy. Provide a minimal
+ * forward declaration so that pointer types compile.
+ */
+struct selinux_policy {
+    struct policydb policydb;
+    struct sidtab *sidtab;
+    u32 latest_granting;
+};
+#endif
 
 struct selinux_policy *ksu_dup_sepolicy(struct selinux_policy *old_pol);
 
