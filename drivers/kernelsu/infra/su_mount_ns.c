@@ -20,18 +20,36 @@
 #include "ksu.h"
 #include "infra/su_mount_ns.h"
 
-extern int path_mount(const char *dev_name, struct path *path,
-                      const char *type_page, unsigned long flags,
-                      void *data_page);
-
-#if defined(__aarch64__)
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 11, 0)
 extern long __arm64_sys_setns(const struct pt_regs *regs);
 #elif defined(__x86_64__)
 extern long __x64_sys_setns(const struct pt_regs *regs);
 #endif
 
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 1, 0)
+extern int path_mount(const char *dev_name, struct path *path,
+                      const char *type_page, unsigned long flags,
+                      void *data_page);
+#else
+#include <linux/uaccess.h>
+static inline int ksu_path_mount(const char *dev_name, struct path *path,
+                                 const char *type_page, unsigned long flags,
+                                 void *data_page)
+{
+    char buf[PATH_MAX];
+    char *pathname = dentry_path_raw(path->dentry, buf, sizeof(buf));
+    mm_segment_t old_fs = get_fs();
+    set_fs(KERNEL_DS);
+    int ret = do_mount(dev_name, pathname, type_page, flags, data_page);
+    set_fs(old_fs);
+    return ret;
+}
+#define path_mount ksu_path_mount
+#endif
+
 static long ksu_sys_setns(int fd, int flags)
 {
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 11, 0)
     struct pt_regs regs;
     memset(&regs, 0, sizeof(regs));
 
@@ -44,6 +62,9 @@ static long ksu_sys_setns(int fd, int flags)
     return __x64_sys_setns(&regs);
 #else
 #error "Unsupported arch"
+#endif
+#else
+    return sys_setns(fd, flags);
 #endif
 }
 

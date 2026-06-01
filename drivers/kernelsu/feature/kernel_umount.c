@@ -18,6 +18,11 @@
 #include "runtime/ksud_boot.h"
 #include "ksu.h"
 
+#if LINUX_VERSION_CODE < KERNEL_VERSION(5, 11, 0)
+#include <linux/syscalls.h>
+#include <linux/uaccess.h>
+#endif
+
 static bool ksu_kernel_umount_enabled = true;
 
 static int kernel_umount_feature_get(u64 *value)
@@ -41,6 +46,7 @@ static const struct ksu_feature_handler kernel_umount_handler = {
 	.set_handler = kernel_umount_feature_set,
 };
 
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 11, 0)
 extern int path_umount(struct path *path, int flags);
 
 static void ksu_umount_mnt(const char *mnt, struct path *path, int flags)
@@ -50,6 +56,18 @@ static void ksu_umount_mnt(const char *mnt, struct path *path, int flags)
 		pr_info("umount %s failed: %d\n", mnt, err);
 	}
 }
+#else
+static void ksu_umount_mnt(const char *mnt, struct path *path, int flags)
+{
+	mm_segment_t old_fs = get_fs();
+	set_fs(KERNEL_DS);
+	int err = sys_umount((char __user *)mnt, flags);
+	set_fs(old_fs);
+	if (err) {
+		pr_info("umount %s failed: %d\n", mnt, err);
+	}
+}
+#endif
 
 static void try_umount(const char *mnt, int flags)
 {
