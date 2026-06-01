@@ -36,8 +36,33 @@ static int ksu_handle_inode_event(struct fsnotify_mark *mark, u32 mask,
     return 0;
 }
 
+#if LINUX_VERSION_CODE < KERNEL_VERSION(5, 2, 0)
+static int ksu_handle_inode_event_compat(struct fsnotify_group *group,
+                                    struct inode *inode,
+                                    struct fsnotify_mark *inode_mark,
+                                    struct fsnotify_mark *vfsmount_mark,
+                                    u32 mask, const void *data, int data_type,
+                                    const unsigned char *file_name, u32 cookie,
+                                    struct fsnotify_iter_info *iter_info)
+{
+    if (!file_name)
+        return 0;
+    if (mask & FS_ISDIR)
+        return 0;
+    if (strlen(file_name) == 13 && !memcmp(file_name, "packages.list", 13)) {
+        pr_info("packages.list detected: %d\n", mask);
+        track_throne(false);
+    }
+    return 0;
+}
+#endif
+
 static const struct fsnotify_ops ksu_ops = {
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 2, 0)
 	.handle_inode_event = ksu_handle_inode_event,
+#else
+	.handle_event = ksu_handle_inode_event_compat,
+#endif
 };
 
 static int add_mark_on_inode(struct inode *inode, u32 mask,
@@ -52,7 +77,7 @@ static int add_mark_on_inode(struct inode *inode, u32 mask,
 	fsnotify_init_mark(m, g);
 	m->mask = mask;
 
-	if (fsnotify_add_inode_mark(m, inode, 0)) {
+	if (fsnotify_add_mark(m, inode, NULL, 0)) {
 		fsnotify_put_mark(m);
 		return -EINVAL;
 	}
