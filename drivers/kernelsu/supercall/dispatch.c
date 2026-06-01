@@ -4,6 +4,8 @@
 #include <linux/string.h>
 #include <linux/uaccess.h>
 #include <linux/version.h>
+#include <linux/sched/signal.h>
+#include <linux/sched/task.h>
 
 #include "uapi/supercall.h"
 #include "supercall/internal.h"
