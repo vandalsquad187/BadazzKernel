@@ -26,9 +26,6 @@
 #define __pud_to_phys(pud)  ((phys_addr_t)(pud_val(pud) & PHYS_MASK))
 #define __p4d_to_phys(p4d)  ((phys_addr_t)(p4d_val(p4d) & PHYS_MASK))
 #endif
-#if LINUX_VERSION_CODE < KERNEL_VERSION(5, 5, 0)
-#define __flush_icache_range(start, end) flush_icache_range(start, end)
-#endif
 #include "asm-generic/fixmap.h"
 
 // https://github.com/fuqiuluo/ovo/blob/f7da411458e87d32438dc14fce5a3313ed0c967e/ovo/mmuhack.c#L21
@@ -120,7 +117,11 @@ fail:
 #define ksu_flush_icache(start, end) caches_clean_inval_pou
 #else
 #define ksu_flush_dcache(start, sz) __flush_dcache_area((void *)start, sz)
+#if LINUX_VERSION_CODE < KERNEL_VERSION(5, 5, 0)
+#define ksu_flush_icache(start, end) flush_icache_range(start, end)
+#else
 #define ksu_flush_icache(start, end) __flush_icache_range
+#endif
 #endif
 
 struct patch_text_info {
