@@ -76,18 +76,7 @@ jobs:
           make -j$(nproc) Image.gz dtb.img dtbo.img
 
       # -------------------------------------------------------
-      # Schritt 4a: ksu_init — statisch gelinkter Init-Helfer
-      # Wird nach dem Kernel-Build kompiliert und später mit
-      # in das AnyKernel3-ZIP verpackt.
-      # -------------------------------------------------------
-      - name: Build ksu_init tool
-        run: |
-          aarch64-linux-gnu-gcc -static -O2 -s \
-            -o ksu_init \
-            drivers/ksu/tools/ksu_init.c
-
-      # -------------------------------------------------------
-      # Schritt 4b: AnyKernel3-flashbares ZIP erstellen
+      # Schritt 4: AnyKernel3-flashbares ZIP erstellen
       # anykernel/ liegt im Repo und wird nur mit den neuen
       # Artefakten befüllt.
       # -------------------------------------------------------
@@ -97,8 +86,6 @@ jobs:
           cp arch/arm64/boot/Image.gz anykernel/
           cp arch/arm64/boot/dtb.img anykernel/
           cp arch/arm64/boot/dtbo.img anykernel/
-          # ksu_init ins ZIP aufnehmen
-          cp ksu_init anykernel/
           # ZIP erstellen (ohne .git und README — die sind nur im Repo)
           cd anykernel
           zip -r9 ../K6A-Kernel-sweet-${{ github.run_number }}.zip * \
@@ -117,39 +104,19 @@ jobs:
           body: |
             **K6A Custom Kernel** für sweet (sweetin / sweet_k6a)
 
-            - **Basis:** 4.14.356-openela-rc1 (Branch 23.2)
-            - **LMH DCVS:** deaktiviert (kein Frequenz-Cap mehr durch thermische Limits)
-            - **scaling_max_freq:** Userspace-Writes werden respektiert
-            - **KoWSU:** Phase 2 — `/dev/ksu` + `KSU_IOCTL_BECOME_MANAGER` + `ksu_init`-Tool
+            - **Basis:** 4.14.356-openela-rc1-perf
+            - **Root:** KernelSU-Next (built-in, non-GKI)
+            - **Manager:** KernelSU-Next Manager APK installieren
 
             **Flashbar via OrangeFox / TWRP** — einfach das ZIP flashen.
 
-            **ksu_init** (im ZIP enthalten):
-            Nach dem Flash per ADB extrahieren und auf dem Gerät ausführen:
+            Nach dem Flash die **KernelSU-Next Manager App** installieren
+            (APK von GitHub Releases: https://github.com/rifsxd/KernelSU-Next/releases)
+            und öffnen — Root sollte sofort verfügbar sein.
 
-            ```
-            adb push ksu_init /data/local/tmp/
-            adb shell chmod 755 /data/local/tmp/ksu_init
-            adb shell /data/local/tmp/ksu_init
-            ```
-
-            Der Befehl öffnet `/dev/ksu`, setzt den aufrufenden Prozess
-            als KernelSU-Manager und gibt eine Root-Shell zurück.
-            Von dort aus:
-
-            ```
-            dmesg | grep ksu     # Kernel-Logs prüfen
-            id                     # uid=0(root)
-            ```
-
-            **Hinweis:** Die Manager-App zeigt weiter "Unsupported" bis
-            ein fix kompiliert wird, der den GKI-Check umgeht.
-            ksu_init gibt erst einmal Root ohne die App.
-
-            **Changelog:**
-            - `drivers/thermal/qcom/msm_lmh_dcvs.c`: LMH-Mitigation deaktiviert
-            - `anykernel/`: AnyKernel3-Template für sweet
-            - CI: Automatischer Build bei jedem Push
+            **Changelog gegenüber Build #58:**
+            - KoWSU entfernt, KSU Next integriert
+            - Kernel heißt jetzt `4.14.356-openela-rc1-perf` (unscheinbar)
           files: K6A-Kernel-sweet-*.zip
 
       # -------------------------------------------------------
@@ -161,4 +128,5 @@ jobs:
           echo "ZIP: K6A-Kernel-sweet-${{ github.run_number }}.zip"
           echo ""
           echo "Enthaltene Änderungen:"
-          echo "  - LMH DCVS deaktiviert (drivers/thermal/qcom/msm_lmh_dcvs.c)"
+          echo "  - KernelSU-Next built-in"
+          echo "  - Kernel name: 4.14.356-openela-rc1-perf"
