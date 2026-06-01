@@ -83,7 +83,7 @@ static void ksu_install_fd_tw_func(struct callback_head *cb)
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 11, 0)
         close_fd(fd);
 #else
-        ksys_close(fd);
+        sys_close(fd);
 #endif
     }
 
