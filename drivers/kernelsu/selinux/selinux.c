@@ -28,11 +28,10 @@ static int transive_to_domain(const char *domain, struct cred *cred, bool clear_
     u32 sid;
     int error;
 #if LINUX_VERSION_CODE < KERNEL_VERSION(6, 18, 0)
-    struct task_security_struct *tsec;
+    struct task_security_struct *tsec = cred->security;
 #else
-    struct cred_security_struct *tsec;
+    struct cred_security_struct *tsec = selinux_cred(cred);
 #endif
-    tsec = selinux_cred(cred);
     if (!tsec) {
         pr_err("tsec == NULL!\n");
         return -1;
