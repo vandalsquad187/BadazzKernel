@@ -23,6 +23,12 @@
 #include "feature/kernel_umount.h"
 #include "arch.h"
 
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 9, 0)
+#define KSU_TWA_FLAG TWA_RESUME
+#else
+#define KSU_TWA_FLAG TWA_SIGNAL
+#endif
+
 static void ksu_kretprobe_install_fd_work(struct callback_head *cb)
 {
     kfree(cb);
@@ -44,7 +50,7 @@ static int setresuid_ret_handler(struct kretprobe_instance *ri, struct pt_regs *
         struct callback_head *cb = kzalloc(sizeof(*cb), GFP_ATOMIC);
         if (cb) {
             cb->func = ksu_kretprobe_install_fd_work;
-            task_work_add(current, cb, TWA_RESUME);
+            task_work_add(current, cb, KSU_TWA_FLAG);
             pr_info("kretprobe: install fd for manager uid=%d\n", current_uid().val);
         }
     }
