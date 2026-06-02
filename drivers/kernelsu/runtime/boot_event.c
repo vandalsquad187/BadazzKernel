@@ -29,6 +29,13 @@ void on_post_fs_data(void)
     pr_info("on_post_fs_data!\n");
 
     ksu_load_allow_list();
+
+    // Search for the Manager APK now so that ksu_manager_appid is set
+    // before any app starts. If we don't search here, the throne tracker
+    // only watches for future changes to packages.list and never detects
+    // the Manager if packages.list already exists.
+    track_throne(false);
+
     ksu_observer_init();
     // Sanity check for safe mode only needs early-boot input samples.
     ksu_stop_input_hook_runtime();
