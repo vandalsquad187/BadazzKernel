@@ -2,7 +2,6 @@
 #include <linux/spinlock.h>
 #include <linux/kprobes.h>
 #include <linux/tracepoint.h>
-#include <linux/workqueue.h>
 #include <asm/syscall.h>
 #include <linux/ptrace.h>
 #include <linux/slab.h>
@@ -22,14 +21,6 @@
 #include "hook/setuid_hook.h"
 #include "hook/syscall_hook.h"
 #include "hook/syscall_event_bridge.h"
-
-static struct delayed_work ksu_mark_work;
-
-static void ksu_delayed_mark_work(struct work_struct *work)
-{
-    pr_info("hook_manager: delayed mark running processes\n");
-    ksu_mark_running_process();
-}
 
 #ifdef CONFIG_KRETPROBES
 
@@ -162,18 +153,10 @@ void __init ksu_syscall_hook_manager_init(void)
     ksu_setuid_hook_init();
     ksu_sucompat_init();
     ksu_avc_spoof_init();
-
-    // Schedule delayed marking so init and zygote are caught after boot.
-    // The kretprobe on syscall_regfunc only fires during tracepoint
-    // registration (too early, before userspace exists), so we need
-    // this second pass once userspace is up.
-    INIT_DELAYED_WORK(&ksu_mark_work, ksu_delayed_mark_work);
-    schedule_delayed_work(&ksu_mark_work, msecs_to_jiffies(10000));
 }
 
 void __exit ksu_syscall_hook_manager_exit(void)
 {
-    cancel_delayed_work_sync(&ksu_mark_work);
     pr_info("hook_manager: ksu_hook_manager_exit called\n");
 #ifdef CONFIG_HAVE_SYSCALL_TRACEPOINTS
     unregister_trace_sys_enter(ksu_sys_enter_handler, NULL);

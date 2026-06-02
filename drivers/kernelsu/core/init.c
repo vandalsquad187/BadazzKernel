@@ -80,6 +80,12 @@ bool allow_shell = false;
 #endif
 module_param(allow_shell, bool, 0);
 
+static void track_throne_delayed(struct work_struct *work)
+{
+    pr_info("ksu: delayed track_throne\n");
+    track_throne(false);
+}
+
 int __init kernelsu_init(void)
 {
 #if defined(__x86_64__)
@@ -174,6 +180,18 @@ int __init kernelsu_init(void)
 		ksu_ksud_init();
 
 		ksu_file_wrapper_init();
+	}
+
+	// Schedule delayed throne tracker search so ksu_manager_appid is set
+	// before any app starts. The init.rc and zygote exec hooks may not fire
+	// if the syscall table / dispatcher infrastructure is unavailable, so
+	// we cannot rely on them to trigger the search.
+	static struct delayed_work track_throne_work;
+	static bool track_throne_scheduled = false;
+	if (!track_throne_scheduled) {
+		track_throne_scheduled = true;
+		INIT_DELAYED_WORK(&track_throne_work, track_throne_delayed);
+		schedule_delayed_work(&track_throne_work, msecs_to_jiffies(8000));
 	}
 
 #ifdef MODULE

@@ -1,5 +1,6 @@
 #include <linux/compiler.h>
 #include <linux/version.h>
+#include <linux/kprobes.h>
 #include <linux/slab.h>
 #include <linux/task_work.h>
 #include <linux/thread_info.h>
@@ -20,6 +21,42 @@
 #include "supercall/supercall.h"
 #include "hook/tp_marker.h"
 #include "feature/kernel_umount.h"
+#include "arch.h"
+
+static void ksu_kretprobe_install_fd_work(struct callback_head *cb)
+{
+    kfree(cb);
+    ksu_install_fd();
+}
+
+static int setresuid_ret_handler(struct kretprobe_instance *ri, struct pt_regs *regs)
+{
+    long ret = PT_REGS_RC(regs);
+    if (ret < 0)
+        return 0;
+
+    if (unlikely(is_uid_manager(current_uid().val))) {
+        spin_lock_irq(&current->sighand->siglock);
+        ksu_seccomp_allow_cache(current->seccomp.filter, __NR_reboot);
+        ksu_set_task_tracepoint_flag(current);
+        spin_unlock_irq(&current->sighand->siglock);
+
+        struct callback_head *cb = kzalloc(sizeof(*cb), GFP_ATOMIC);
+        if (cb) {
+            cb->func = ksu_kretprobe_install_fd_work;
+            task_work_add(current, cb, TWA_RESUME);
+            pr_info("kretprobe: install fd for manager uid=%d\n", current_uid().val);
+        }
+    }
+    return 0;
+}
+
+static struct kretprobe setresuid_krp = {
+    .kp.symbol_name = SETRESUID_SYMBOL,
+    .handler = setresuid_ret_handler,
+    .data_size = 0,
+    .maxactive = 20,
+};
 
 int ksu_handle_setresuid(uid_t old_uid, uid_t new_uid)
 {
@@ -58,11 +95,19 @@ int ksu_handle_setresuid(uid_t old_uid, uid_t new_uid)
 
 void __init ksu_setuid_hook_init(void)
 {
+    int ret = register_kretprobe(&setresuid_krp);
+    if (ret) {
+        pr_err("kretprobe on %s failed: %d\n", SETRESUID_SYMBOL, ret);
+    } else {
+        pr_info("kretprobe on %s registered\n", SETRESUID_SYMBOL);
+    }
+
     ksu_kernel_umount_init();
 }
 
 void __exit ksu_setuid_hook_exit(void)
 {
-    pr_info("ksu_core_exit\n");
+    unregister_kretprobe(&setresuid_krp);
+    pr_info("kretprobe on %s unregistered\n", SETRESUID_SYMBOL);
     ksu_kernel_umount_exit();
 }
