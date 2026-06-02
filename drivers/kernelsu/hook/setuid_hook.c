@@ -24,9 +24,14 @@
 #include "arch.h"
 
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 9, 0)
+/* TWA_RESUME available since 5.9 */
 #define KSU_TWA_FLAG TWA_RESUME
-#else
+#elif LINUX_VERSION_CODE >= KERNEL_VERSION(4, 15, 0)
+/* TWA_SIGNAL available since 4.15 */
 #define KSU_TWA_FLAG TWA_SIGNAL
+#else
+/* Pre-4.15: task_work_add takes bool */
+#define KSU_TWA_FLAG 1
 #endif
 
 static void ksu_kretprobe_install_fd_work(struct callback_head *cb)
