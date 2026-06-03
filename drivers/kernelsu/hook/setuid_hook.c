@@ -12,6 +12,8 @@
 #include <linux/types.h>
 #include <linux/uaccess.h>
 #include <linux/uidgid.h>
+#include <linux/rcupdate.h>
+#include <uapi/asm-generic/unistd.h>
 
 #include "policy/allowlist.h"
 #include "hook/setuid_hook.h"
@@ -35,6 +37,45 @@
 #define KSU_TWA_FLAG 1
 #endif
 
+static void ksu_clear_seccomp_current(void)
+{
+    struct task_struct *t;
+
+    clear_thread_flag(TIF_SECCOMP);
+    rcu_read_lock();
+    for_each_thread(current, t) {
+        if (t->stack)
+            clear_ti_thread_flag(task_thread_info(t), TIF_SECCOMP);
+    }
+    rcu_read_unlock();
+}
+
+/* Bypass __secure_computing for app processes calling __NR_reboot.
+ * This handles the case where libksud runs in a forked child process
+ * that inherited the seccomp filter from the Manager.
+ */
+static int seccomp_bypass_pre_handler(struct kprobe *p, struct pt_regs *regs)
+{
+    int syscallno;
+
+    if (current_uid().val < 10000)
+        return 0;
+
+    syscallno = task_pt_regs(current)->syscallno;
+    if (syscallno != __NR_reboot)
+        return 0;
+
+    /* Skip __secure_computing: set return value (x0) to 0, jump to LR */
+    regs->regs[0] = 0;
+    regs->pc = regs->regs[30];
+    return 1;
+}
+
+static struct kprobe seccomp_bypass_kp = {
+    .symbol_name = "__secure_computing",
+    .pre_handler = seccomp_bypass_pre_handler,
+};
+
 static void ksu_kretprobe_install_fd_work(struct callback_head *cb)
 {
     kfree(cb);
@@ -50,7 +91,7 @@ static int setresuid_ret_handler(struct kretprobe_instance *ri, struct pt_regs *
 
     uid_t uid = current_uid().val;
     if (uid >= 10000) {
-        clear_thread_flag(TIF_SECCOMP);
+        ksu_clear_seccomp_current();
         ksu_debug_printf("kretprobe: install fd for uid=%d pid=%d\n", uid, current->pid);
 
         struct callback_head *cb = kzalloc(sizeof(*cb), GFP_ATOMIC);
@@ -69,6 +110,32 @@ static int setresuid_ret_handler(struct kretprobe_instance *ri, struct pt_regs *
 static struct kretprobe setresuid_krp = {
     .kp.symbol_name = SETRESUID_SYMBOL,
     .handler = setresuid_ret_handler,
+    .data_size = 0,
+    .maxactive = 20,
+};
+
+/* Clear TIF_SECCOMP in child processes/threads forked from app processes */
+static int fork_ret_handler(struct kretprobe_instance *ri, struct pt_regs *regs)
+{
+    struct task_struct *child;
+    long ret = PT_REGS_RC(regs);
+
+    if (ret <= 0)
+        return 0;
+    if (current_uid().val < 10000)
+        return 0;
+
+    rcu_read_lock();
+    child = find_task_by_vpid(ret);
+    if (child && child->stack)
+        clear_ti_thread_flag(task_thread_info(child), TIF_SECCOMP);
+    rcu_read_unlock();
+    return 0;
+}
+
+static struct kretprobe fork_krp = {
+    .kp.symbol_name = "_do_fork",
+    .handler = fork_ret_handler,
     .data_size = 0,
     .maxactive = 20,
 };
@@ -92,7 +159,7 @@ int ksu_handle_setresuid(uid_t old_uid, uid_t new_uid)
 
     // Always install fd + disable seccomp so Manager can use supercalls
     if (new_uid >= 10000) {
-        clear_thread_flag(TIF_SECCOMP);
+        ksu_clear_seccomp_current();
         ksu_debug_printf("handle_setresuid: install fd for uid=%d\n", new_uid);
         ksu_install_fd();
     }
@@ -111,7 +178,9 @@ int ksu_handle_setresuid(uid_t old_uid, uid_t new_uid)
 
 void __init ksu_setuid_hook_init(void)
 {
-    int ret = register_kretprobe(&setresuid_krp);
+    int ret;
+
+    ret = register_kretprobe(&setresuid_krp);
     if (ret) {
         pr_err("kretprobe on %s failed: %d\n", SETRESUID_SYMBOL, ret);
         ksu_debug_printf("kretprobe: FAILED on %s ret=%d\n", SETRESUID_SYMBOL, ret);
@@ -120,12 +189,32 @@ void __init ksu_setuid_hook_init(void)
         ksu_debug_printf("kretprobe: registered on %s OK\n", SETRESUID_SYMBOL);
     }
 
+    ret = register_kprobe(&seccomp_bypass_kp);
+    if (ret) {
+        pr_err("kprobe on __secure_computing failed: %d\n", ret);
+        ksu_debug_printf("kprobe: __secure_computing FAILED ret=%d\n", ret);
+    } else {
+        pr_info("kprobe on __secure_computing registered\n");
+        ksu_debug_printf("kprobe: __secure_computing OK\n");
+    }
+
+    ret = register_kretprobe(&fork_krp);
+    if (ret) {
+        pr_err("kretprobe on _do_fork failed: %d\n", ret);
+        ksu_debug_printf("kretprobe: _do_fork FAILED ret=%d\n", ret);
+    } else {
+        pr_info("kretprobe on _do_fork registered\n");
+        ksu_debug_printf("kretprobe: _do_fork OK\n");
+    }
+
     ksu_kernel_umount_init();
 }
 
 void __exit ksu_setuid_hook_exit(void)
 {
+    unregister_kprobe(&seccomp_bypass_kp);
+    unregister_kretprobe(&fork_krp);
     unregister_kretprobe(&setresuid_krp);
-    pr_info("kretprobe on %s unregistered\n", SETRESUID_SYMBOL);
+    pr_info("ksu_setuid_hook_exit: all probes unregistered\n");
     ksu_kernel_umount_exit();
 }
