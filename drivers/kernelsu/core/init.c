@@ -10,6 +10,7 @@
 #include "policy/app_profile.h"
 #include "policy/feature.h"
 #include "klog.h" // IWYU pragma: keep
+#include "manager/manager_identity.h"
 #include "manager/manager_observer.h"
 #include "manager/throne_tracker.h"
 #include "hook/syscall_hook_manager.h"
