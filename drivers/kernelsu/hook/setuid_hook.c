@@ -13,7 +13,6 @@
 #include <linux/uaccess.h>
 #include <linux/uidgid.h>
 #include <linux/rcupdate.h>
-#include <uapi/asm-generic/unistd.h>
 
 #include "policy/allowlist.h"
 #include "hook/setuid_hook.h"
@@ -49,32 +48,6 @@ static void ksu_clear_seccomp_current(void)
     }
     rcu_read_unlock();
 }
-
-/* Bypass __secure_computing for app processes calling __NR_reboot.
- * This handles the case where libksud runs in a forked child process
- * that inherited the seccomp filter from the Manager.
- */
-static int seccomp_bypass_pre_handler(struct kprobe *p, struct pt_regs *regs)
-{
-    int syscallno;
-
-    if (current_uid().val < 10000)
-        return 0;
-
-    syscallno = task_pt_regs(current)->syscallno;
-    if (syscallno != __NR_reboot)
-        return 0;
-
-    /* Skip __secure_computing: set return value (x0) to 0, jump to LR */
-    regs->regs[0] = 0;
-    regs->pc = regs->regs[30];
-    return 1;
-}
-
-static struct kprobe seccomp_bypass_kp = {
-    .symbol_name = "__secure_computing",
-    .pre_handler = seccomp_bypass_pre_handler,
-};
 
 static void ksu_kretprobe_install_fd_work(struct callback_head *cb)
 {
@@ -189,15 +162,6 @@ void __init ksu_setuid_hook_init(void)
         ksu_debug_printf("kretprobe: registered on %s OK\n", SETRESUID_SYMBOL);
     }
 
-    ret = register_kprobe(&seccomp_bypass_kp);
-    if (ret) {
-        pr_err("kprobe on __secure_computing failed: %d\n", ret);
-        ksu_debug_printf("kprobe: __secure_computing FAILED ret=%d\n", ret);
-    } else {
-        pr_info("kprobe on __secure_computing registered\n");
-        ksu_debug_printf("kprobe: __secure_computing OK\n");
-    }
-
     ret = register_kretprobe(&fork_krp);
     if (ret) {
         pr_err("kretprobe on _do_fork failed: %d\n", ret);
@@ -212,7 +176,6 @@ void __init ksu_setuid_hook_init(void)
 
 void __exit ksu_setuid_hook_exit(void)
 {
-    unregister_kprobe(&seccomp_bypass_kp);
     unregister_kretprobe(&fork_krp);
     unregister_kretprobe(&setresuid_krp);
     pr_info("ksu_setuid_hook_exit: all probes unregistered\n");
