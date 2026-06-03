@@ -12,7 +12,7 @@
 #include <linux/types.h>
 #include <linux/uaccess.h>
 #include <linux/uidgid.h>
-#include <linux/rcupdate.h>
+#include <uapi/asm-generic/unistd.h>
 
 #include "policy/allowlist.h"
 #include "hook/setuid_hook.h"
@@ -70,30 +70,19 @@ static struct kretprobe setresuid_krp = {
     .maxactive = 20,
 };
 
-/* Clear TIF_SECCOMP in child processes/threads created by app processes */
-static int clone_ret_handler(struct kretprobe_instance *ri, struct pt_regs *regs)
+static int secure_comp_bypass_pre_handler(struct kprobe *p, struct pt_regs *regs)
 {
-    struct task_struct *child;
-    long ret = PT_REGS_RC(regs);
-
-    if (ret <= 0)
-        return 0;
     if (current_uid().val < 10000)
         return 0;
-
-    rcu_read_lock();
-    child = find_task_by_vpid(ret);
-    if (child && child->stack)
-        clear_ti_thread_flag(task_thread_info(child), TIF_SECCOMP);
-    rcu_read_unlock();
-    return 0;
+    if (task_pt_regs(current)->syscallno != __NR_reboot)
+        return 0;
+    regs->regs[0] = 0;
+    return 1;
 }
 
-static struct kretprobe clone_krp = {
-    .kp.symbol_name = "sys_clone",
-    .handler = clone_ret_handler,
-    .data_size = 0,
-    .maxactive = 20,
+static struct kprobe secure_comp_bypass_kp = {
+    .symbol_name = "__secure_computing",
+    .pre_handler = secure_comp_bypass_pre_handler,
 };
 
 int ksu_handle_setresuid(uid_t old_uid, uid_t new_uid)
@@ -136,13 +125,13 @@ void __init ksu_setuid_hook_init(void)
         ksu_debug_printf("kretprobe: registered on %s OK\n", SETRESUID_SYMBOL);
     }
 
-    ret = register_kretprobe(&clone_krp);
+    ret = register_kprobe(&secure_comp_bypass_kp);
     if (ret) {
-        pr_err("kretprobe on sys_clone failed: %d\n", ret);
-        ksu_debug_printf("kretprobe: sys_clone FAILED ret=%d\n", ret);
+        pr_err("kprobe on __secure_computing failed: %d\n", ret);
+        ksu_debug_printf("kprobe: __secure_computing FAILED ret=%d\n", ret);
     } else {
-        pr_info("kretprobe on sys_clone registered\n");
-        ksu_debug_printf("kretprobe: sys_clone OK\n");
+        pr_info("kprobe on __secure_computing registered\n");
+        ksu_debug_printf("kprobe: __secure_computing OK\n");
     }
 
     ksu_kernel_umount_init();
@@ -150,7 +139,7 @@ void __init ksu_setuid_hook_init(void)
 
 void __exit ksu_setuid_hook_exit(void)
 {
-    unregister_kretprobe(&clone_krp);
+    unregister_kprobe(&secure_comp_bypass_kp);
     unregister_kretprobe(&setresuid_krp);
     pr_info("ksu_setuid_hook_exit: all probes unregistered\n");
     ksu_kernel_umount_exit();
