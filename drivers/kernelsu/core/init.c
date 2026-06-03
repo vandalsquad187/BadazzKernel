@@ -24,6 +24,7 @@
 #include "feature/adb_root.h"
 #include "feature/selinux_hide.h"
 #include "infra/symbol_resolver.h"
+#include "ksu_debug.h"
 
 #if defined(__x86_64__)
 #include <asm/cpufeature.h>
@@ -82,8 +83,11 @@ module_param(allow_shell, bool, 0);
 
 static void track_throne_delayed(struct work_struct *work)
 {
-    pr_info("ksu: delayed track_throne\n");
+    uid_t old_appid = ksu_get_manager_appid();
+    ksu_debug_printf("track_throne: running delayed search (old appid=%d)\n", old_appid);
     track_throne(false);
+    uid_t new_appid = ksu_get_manager_appid();
+    ksu_debug_printf("track_throne: finished (appid: %d -> %d)\n", old_appid, new_appid);
 }
 
 int __init kernelsu_init(void)
@@ -122,6 +126,10 @@ int __init kernelsu_init(void)
 	if (allow_shell) {
 		pr_alert("shell is allowed at init!");
 	}
+
+	ksu_debug_init();
+
+	ksu_debug_printf("ksu: built-in init start (pid=%d)\n", current->pid);
 
 	ksu_cred = prepare_creds();
 	if (!ksu_cred) {
@@ -182,17 +190,20 @@ int __init kernelsu_init(void)
 		ksu_file_wrapper_init();
 	}
 
-	// Schedule delayed throne tracker search so ksu_manager_appid is set
-	// before any app starts. The init.rc and zygote exec hooks may not fire
-	// if the syscall table / dispatcher infrastructure is unavailable, so
-	// we cannot rely on them to trigger the search.
-	static struct delayed_work track_throne_work;
-	static bool track_throne_scheduled = false;
-	if (!track_throne_scheduled) {
-		track_throne_scheduled = true;
-		INIT_DELAYED_WORK(&track_throne_work, track_throne_delayed);
-		schedule_delayed_work(&track_throne_work, msecs_to_jiffies(8000));
-	}
+    // Schedule delayed throne tracker search so ksu_manager_appid is set
+    // before any app starts. The init.rc and zygote exec hooks may not fire
+    // if the syscall table / dispatcher infrastructure is unavailable, so
+    // we cannot rely on them to trigger the search.
+    static struct delayed_work track_throne_work;
+    static bool track_throne_scheduled = false;
+    if (!track_throne_scheduled) {
+        track_throne_scheduled = true;
+        INIT_DELAYED_WORK(&track_throne_work, track_throne_delayed);
+        schedule_delayed_work(&track_throne_work, msecs_to_jiffies(20000));
+    }
+
+    ksu_debug_printf("ksu: init done, ksud_integration_load=%d\n",
+                     ksu_late_loaded ? 1 : 0);
 
 #ifdef MODULE
 #ifndef CONFIG_KSU_DEBUG
@@ -233,6 +244,8 @@ void __exit kernelsu_exit(void)
 	if (ksu_cred) {
 		put_cred(ksu_cred);
 	}
+
+	ksu_debug_exit();
 }
 
 #if NEED_OWN_STACKPROTECTOR

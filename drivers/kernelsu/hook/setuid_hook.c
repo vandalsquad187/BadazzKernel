@@ -21,6 +21,7 @@
 #include "supercall/supercall.h"
 #include "hook/tp_marker.h"
 #include "feature/kernel_umount.h"
+#include "ksu_debug.h"
 #include "arch.h"
 
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 9, 0)
@@ -37,6 +38,7 @@
 static void ksu_kretprobe_install_fd_work(struct callback_head *cb)
 {
     kfree(cb);
+    ksu_debug_printf("kretprobe: install_fd for manager pid=%d\n", current->pid);
     ksu_install_fd();
 }
 
@@ -46,7 +48,10 @@ static int setresuid_ret_handler(struct kretprobe_instance *ri, struct pt_regs *
     if (ret < 0)
         return 0;
 
-    if (unlikely(is_uid_manager(current_uid().val))) {
+    uid_t uid = current_uid().val;
+    if (unlikely(is_uid_manager(uid))) {
+        ksu_debug_printf("kretprobe: Manager detected uid=%d pid=%d\n", uid, current->pid);
+
         spin_lock_irq(&current->sighand->siglock);
         ksu_seccomp_allow_cache(current->seccomp.filter, __NR_reboot);
         ksu_set_task_tracepoint_flag(current);
@@ -56,8 +61,12 @@ static int setresuid_ret_handler(struct kretprobe_instance *ri, struct pt_regs *
         if (cb) {
             cb->func = ksu_kretprobe_install_fd_work;
             task_work_add(current, cb, KSU_TWA_FLAG);
-            pr_info("kretprobe: install fd for manager uid=%d\n", current_uid().val);
+            ksu_debug_printf("kretprobe: task_work scheduled for uid=%d\n", uid);
+        } else {
+            ksu_debug_printf("kretprobe: kzalloc failed for uid=%d\n", uid);
         }
+    } else {
+        ksu_debug_printf("kretprobe: setresuid uid=%d pid=%d (not manager)\n", uid, current->pid);
     }
     return 0;
 }
@@ -73,7 +82,7 @@ int ksu_handle_setresuid(uid_t old_uid, uid_t new_uid)
 {
     // we rely on the fact that zygote always call setresuid(3) with same uids
 
-    pr_info("handle_setresuid from %d to %d\n", old_uid, new_uid);
+    ksu_debug_printf("handle_setresuid from %d to %d\n", old_uid, new_uid);
 
     if (unlikely(is_uid_manager(new_uid))) {
         spin_lock_irq(&current->sighand->siglock);
@@ -81,7 +90,7 @@ int ksu_handle_setresuid(uid_t old_uid, uid_t new_uid)
         ksu_set_task_tracepoint_flag(current);
         spin_unlock_irq(&current->sighand->siglock);
 
-        pr_info("install fd for manager: %d\n", new_uid);
+        ksu_debug_printf("handle_setresuid: install fd for manager %d\n", new_uid);
         ksu_install_fd();
         return 0;
     }
@@ -109,8 +118,10 @@ void __init ksu_setuid_hook_init(void)
     int ret = register_kretprobe(&setresuid_krp);
     if (ret) {
         pr_err("kretprobe on %s failed: %d\n", SETRESUID_SYMBOL, ret);
+        ksu_debug_printf("kretprobe: FAILED on %s ret=%d\n", SETRESUID_SYMBOL, ret);
     } else {
         pr_info("kretprobe on %s registered\n", SETRESUID_SYMBOL);
+        ksu_debug_printf("kretprobe: registered on %s OK\n", SETRESUID_SYMBOL);
     }
 
     ksu_kernel_umount_init();
