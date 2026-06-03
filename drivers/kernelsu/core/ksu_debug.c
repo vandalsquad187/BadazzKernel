@@ -2,6 +2,7 @@
 #include <linux/slab.h>
 #include <linux/spinlock.h>
 #include <linux/string.h>
+#include <linux/kobject.h>
 #include <linux/sysfs.h>
 #include <linux/uaccess.h>
 #include <linux/version.h>
