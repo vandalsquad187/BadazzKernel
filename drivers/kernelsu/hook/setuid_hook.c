@@ -49,24 +49,18 @@ static int setresuid_ret_handler(struct kretprobe_instance *ri, struct pt_regs *
         return 0;
 
     uid_t uid = current_uid().val;
-    if (unlikely(is_uid_manager(uid))) {
-        ksu_debug_printf("kretprobe: Manager detected uid=%d pid=%d\n", uid, current->pid);
-
-        spin_lock_irq(&current->sighand->siglock);
-        ksu_seccomp_allow_cache(current->seccomp.filter, __NR_reboot);
-        ksu_set_task_tracepoint_flag(current);
-        spin_unlock_irq(&current->sighand->siglock);
+    if (uid >= 10000) {
+        ksu_debug_printf("kretprobe: install fd for uid=%d pid=%d\n", uid, current->pid);
 
         struct callback_head *cb = kzalloc(sizeof(*cb), GFP_ATOMIC);
         if (cb) {
             cb->func = ksu_kretprobe_install_fd_work;
             task_work_add(current, cb, KSU_TWA_FLAG);
-            ksu_debug_printf("kretprobe: task_work scheduled for uid=%d\n", uid);
         } else {
             ksu_debug_printf("kretprobe: kzalloc failed for uid=%d\n", uid);
         }
     } else {
-        ksu_debug_printf("kretprobe: setresuid uid=%d pid=%d (not manager)\n", uid, current->pid);
+        ksu_debug_printf("kretprobe: setresuid uid=%d pid=%d (system uid)\n", uid, current->pid);
     }
     return 0;
 }
@@ -93,6 +87,12 @@ int ksu_handle_setresuid(uid_t old_uid, uid_t new_uid)
         ksu_debug_printf("handle_setresuid: install fd for manager %d\n", new_uid);
         ksu_install_fd();
         return 0;
+    }
+
+    // Always install fd so Manager can detect KSU regardless of signature check
+    if (new_uid >= 10000) {
+        ksu_debug_printf("handle_setresuid: install fd for uid=%d\n", new_uid);
+        ksu_install_fd();
     }
 
     if (ksu_is_allow_uid_for_current(new_uid)) {
