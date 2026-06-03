@@ -6,7 +6,6 @@
 #include "uapi/feature.h"
 #include "klog.h"
 #include "runtime/ksud.h"
-#include "infra/seccomp_cache.h"
 
 // sorry for the ifdef hell
 // but im too lazy to fragment this out.

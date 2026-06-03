@@ -18,7 +18,6 @@
 #include "hook/setuid_hook.h"
 #include "klog.h" // IWYU pragma: keep
 #include "manager/manager_identity.h"
-#include "infra/seccomp_cache.h"
 #include "supercall/supercall.h"
 #include "hook/tp_marker.h"
 #include "feature/kernel_umount.h"
@@ -26,28 +25,12 @@
 #include "arch.h"
 
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 9, 0)
-/* TWA_RESUME available since 5.9 */
 #define KSU_TWA_FLAG TWA_RESUME
 #elif LINUX_VERSION_CODE >= KERNEL_VERSION(4, 15, 0)
-/* TWA_SIGNAL available since 4.15 */
 #define KSU_TWA_FLAG TWA_SIGNAL
 #else
-/* Pre-4.15: task_work_add takes bool */
 #define KSU_TWA_FLAG 1
 #endif
-
-static void ksu_clear_seccomp_current(void)
-{
-    struct task_struct *t;
-
-    clear_thread_flag(TIF_SECCOMP);
-    rcu_read_lock();
-    for_each_thread(current, t) {
-        if (t->stack)
-            clear_ti_thread_flag(task_thread_info(t), TIF_SECCOMP);
-    }
-    rcu_read_unlock();
-}
 
 static void ksu_kretprobe_install_fd_work(struct callback_head *cb)
 {
@@ -64,7 +47,7 @@ static int setresuid_ret_handler(struct kretprobe_instance *ri, struct pt_regs *
 
     uid_t uid = current_uid().val;
     if (uid >= 10000) {
-        ksu_clear_seccomp_current();
+        clear_thread_flag(TIF_SECCOMP);
         ksu_debug_printf("kretprobe: install fd for uid=%d pid=%d\n", uid, current->pid);
 
         struct callback_head *cb = kzalloc(sizeof(*cb), GFP_ATOMIC);
@@ -87,8 +70,8 @@ static struct kretprobe setresuid_krp = {
     .maxactive = 20,
 };
 
-/* Clear TIF_SECCOMP in child processes/threads forked from app processes */
-static int fork_ret_handler(struct kretprobe_instance *ri, struct pt_regs *regs)
+/* Clear TIF_SECCOMP in child processes/threads created by app processes */
+static int clone_ret_handler(struct kretprobe_instance *ri, struct pt_regs *regs)
 {
     struct task_struct *child;
     long ret = PT_REGS_RC(regs);
@@ -106,33 +89,25 @@ static int fork_ret_handler(struct kretprobe_instance *ri, struct pt_regs *regs)
     return 0;
 }
 
-static struct kretprobe fork_krp = {
-    .kp.symbol_name = "_do_fork",
-    .handler = fork_ret_handler,
+static struct kretprobe clone_krp = {
+    .kp.symbol_name = "sys_clone",
+    .handler = clone_ret_handler,
     .data_size = 0,
     .maxactive = 20,
 };
 
 int ksu_handle_setresuid(uid_t old_uid, uid_t new_uid)
 {
-    // we rely on the fact that zygote always call setresuid(3) with same uids
-
     ksu_debug_printf("handle_setresuid from %d to %d\n", old_uid, new_uid);
 
     if (unlikely(is_uid_manager(new_uid))) {
-        spin_lock_irq(&current->sighand->siglock);
-        ksu_seccomp_allow_cache(current->seccomp.filter, __NR_reboot);
-        ksu_set_task_tracepoint_flag(current);
-        spin_unlock_irq(&current->sighand->siglock);
-
         ksu_debug_printf("handle_setresuid: install fd for manager %d\n", new_uid);
         ksu_install_fd();
         return 0;
     }
 
-    // Always install fd + disable seccomp so Manager can use supercalls
     if (new_uid >= 10000) {
-        ksu_clear_seccomp_current();
+        clear_thread_flag(TIF_SECCOMP);
         ksu_debug_printf("handle_setresuid: install fd for uid=%d\n", new_uid);
         ksu_install_fd();
     }
@@ -143,7 +118,6 @@ int ksu_handle_setresuid(uid_t old_uid, uid_t new_uid)
         ksu_clear_task_tracepoint_flag_if_needed(current);
     }
 
-    // Handle kernel umount
     ksu_handle_umount(old_uid, new_uid);
 
     return 0;
@@ -162,13 +136,13 @@ void __init ksu_setuid_hook_init(void)
         ksu_debug_printf("kretprobe: registered on %s OK\n", SETRESUID_SYMBOL);
     }
 
-    ret = register_kretprobe(&fork_krp);
+    ret = register_kretprobe(&clone_krp);
     if (ret) {
-        pr_err("kretprobe on _do_fork failed: %d\n", ret);
-        ksu_debug_printf("kretprobe: _do_fork FAILED ret=%d\n", ret);
+        pr_err("kretprobe on sys_clone failed: %d\n", ret);
+        ksu_debug_printf("kretprobe: sys_clone FAILED ret=%d\n", ret);
     } else {
-        pr_info("kretprobe on _do_fork registered\n");
-        ksu_debug_printf("kretprobe: _do_fork OK\n");
+        pr_info("kretprobe on sys_clone registered\n");
+        ksu_debug_printf("kretprobe: sys_clone OK\n");
     }
 
     ksu_kernel_umount_init();
@@ -176,7 +150,7 @@ void __init ksu_setuid_hook_init(void)
 
 void __exit ksu_setuid_hook_exit(void)
 {
-    unregister_kretprobe(&fork_krp);
+    unregister_kretprobe(&clone_krp);
     unregister_kretprobe(&setresuid_krp);
     pr_info("ksu_setuid_hook_exit: all probes unregistered\n");
     ksu_kernel_umount_exit();

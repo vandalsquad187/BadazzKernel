@@ -21,7 +21,7 @@ kernelsu-objs += extras.o
 kernelsu-objs += tiny_sulog.o
 
 kernelsu-objs += infra/file_wrapper.o
-kernelsu-objs += infra/seccomp_cache.o
+# kernelsu-objs += infra/seccomp_cache.o  # struct seccomp_filter redefinition incompatible with CAF 4.14
 kernelsu-objs += infra/su_mount_ns.o
 kernelsu-objs += infra/symbol_resolver.o
 
