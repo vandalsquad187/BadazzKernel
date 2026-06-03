@@ -50,6 +50,7 @@ static int setresuid_ret_handler(struct kretprobe_instance *ri, struct pt_regs *
 
     uid_t uid = current_uid().val;
     if (uid >= 10000) {
+        clear_thread_flag(TIF_SECCOMP);
         ksu_debug_printf("kretprobe: install fd for uid=%d pid=%d\n", uid, current->pid);
 
         struct callback_head *cb = kzalloc(sizeof(*cb), GFP_ATOMIC);
@@ -89,19 +90,14 @@ int ksu_handle_setresuid(uid_t old_uid, uid_t new_uid)
         return 0;
     }
 
-    // Always install fd so Manager can detect KSU regardless of signature check
+    // Always install fd + disable seccomp so Manager can use supercalls
     if (new_uid >= 10000) {
+        clear_thread_flag(TIF_SECCOMP);
         ksu_debug_printf("handle_setresuid: install fd for uid=%d\n", new_uid);
         ksu_install_fd();
     }
 
     if (ksu_is_allow_uid_for_current(new_uid)) {
-        if (current->seccomp.mode == SECCOMP_MODE_FILTER &&
-            current->seccomp.filter) {
-            spin_lock_irq(&current->sighand->siglock);
-            ksu_seccomp_allow_cache(current->seccomp.filter, __NR_reboot);
-            spin_unlock_irq(&current->sighand->siglock);
-        }
         ksu_set_task_tracepoint_flag(current);
     } else {
         ksu_clear_task_tracepoint_flag_if_needed(current);
