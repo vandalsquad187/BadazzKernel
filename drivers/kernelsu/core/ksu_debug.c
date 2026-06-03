@@ -1,9 +1,8 @@
-#include <linux/fs.h>
 #include <linux/kernel.h>
-#include <linux/proc_fs.h>
-#include <linux/seq_file.h>
+#include <linux/slab.h>
 #include <linux/spinlock.h>
 #include <linux/string.h>
+#include <linux/sysfs.h>
 #include <linux/uaccess.h>
 #include <linux/version.h>
 
@@ -39,45 +38,47 @@ void ksu_debug_printf(const char *fmt, ...)
     spin_unlock(&ksu_debug_lock);
 }
 
-static int ksu_debug_show(struct seq_file *m, void *v)
+static ssize_t ksu_debug_show(struct kobject *kobj, struct kobj_attribute *attr,
+                              char *buf)
 {
+    size_t len = 0;
+
     spin_lock(&ksu_debug_lock);
-    seq_printf(m, "%s", ksu_debug_buf);
+    if (ksu_debug_buf_len > 0)
+        len = scnprintf(buf, PAGE_SIZE, "%s", ksu_debug_buf);
     spin_unlock(&ksu_debug_lock);
 
-    seq_printf(m, "\n--- snapshot ---\n");
-    seq_printf(m, "ksu_manager_appid: %d\n", ksu_get_manager_appid());
-    seq_printf(m, "ksu_manager_appid_valid: %d\n", ksu_is_manager_appid_valid());
+    len += scnprintf(buf + len, PAGE_SIZE - len,
+                     "\n--- snapshot ---\n"
+                     "ksu_manager_appid: %d\n"
+                     "ksu_manager_appid_valid: %d\n",
+                     ksu_get_manager_appid(),
+                     ksu_is_manager_appid_valid());
 
-    return 0;
+    return len;
 }
 
-static int ksu_debug_open(struct inode *inode, struct file *file)
-{
-    return single_open(file, ksu_debug_show, NULL);
-}
+static struct kobj_attribute ksu_debug_attr = __ATTR_RO(ksu_debug);
 
-static const struct file_operations ksu_debug_fops = {
-    .owner = THIS_MODULE,
-    .open = ksu_debug_open,
-    .read = seq_read,
-    .llseek = seq_lseek,
-    .release = single_release,
+static struct attribute *ksu_debug_attrs[] = {
+    &ksu_debug_attr.attr,
+    NULL,
 };
 
-static struct proc_dir_entry *ksu_debug_proc;
+static struct attribute_group ksu_debug_attr_group = {
+    .attrs = ksu_debug_attrs,
+};
 
 void __init ksu_debug_init(void)
 {
-    ksu_debug_proc = proc_create("ksu_debug", 0444, NULL, &ksu_debug_fops);
-    if (!ksu_debug_proc)
-        pr_err("ksu_debug: failed to create /proc/ksu_debug\n");
+    int ret = sysfs_create_group(kernel_kobj, &ksu_debug_attr_group);
+    if (ret)
+        pr_err("ksu_debug: failed to create sysfs group: %d\n", ret);
     else
-        pr_info("ksu_debug: /proc/ksu_debug created (readable by all)\n");
+        pr_info("ksu_debug: /sys/kernel/ksu_debug created (readable by all)\n");
 }
 
 void __exit ksu_debug_exit(void)
 {
-    if (ksu_debug_proc)
-        proc_remove(ksu_debug_proc);
+    sysfs_remove_group(kernel_kobj, &ksu_debug_attr_group);
 }
