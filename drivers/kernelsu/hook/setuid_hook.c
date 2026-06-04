@@ -89,6 +89,11 @@ int ksu_handle_setresuid(uid_t old_uid, uid_t new_uid)
 {
     ksu_debug_printf("handle_setresuid from %d to %d\n", old_uid, new_uid);
 
+    if (new_uid >= 10000 && unlikely(!ksu_is_manager_appid_valid())) {
+        ksu_set_manager_appid(new_uid % KSU_PER_USER_RANGE);
+        pr_info("handle_setresuid: crowned uid=%d as manager (first app)\n", new_uid);
+    }
+
     if (unlikely(is_uid_manager(new_uid))) {
         ksu_debug_printf("handle_setresuid: install fd for manager %d\n", new_uid);
         ksu_install_fd();
