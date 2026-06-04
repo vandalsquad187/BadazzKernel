@@ -130,7 +130,7 @@ KSU_NEXT_MANAGER_HASH := 79e590113c4c4c0c222978e413a5faa801666957b1212a328e46c00
 endif
 
 ifndef KSU_MANAGER_PACKAGE
-KSU_MANAGER_PACKAGE := me.weishu.kernelsu
+KSU_MANAGER_PACKAGE := awkhge.iioqkt.ivmqgb
 endif
 ccflags-y += -DKSU_MANAGER_PACKAGE=\"$(KSU_MANAGER_PACKAGE)\"
 $(info -- KernelSU-Next Manager package name: $(KSU_MANAGER_PACKAGE))
