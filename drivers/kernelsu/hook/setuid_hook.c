@@ -12,6 +12,7 @@
 #include <linux/types.h>
 #include <linux/uaccess.h>
 #include <linux/uidgid.h>
+#include <trace/events/sched.h>
 #include <uapi/asm-generic/unistd.h>
 
 #include "policy/allowlist.h"
@@ -47,7 +48,14 @@ static int setresuid_ret_handler(struct kretprobe_instance *ri, struct pt_regs *
 
     uid_t uid = current_uid().val;
     if (uid >= 10000) {
-        clear_thread_flag(TIF_SECCOMP);
+        {
+            struct task_struct *p;
+            rcu_read_lock();
+            for_each_thread(current, p) {
+                clear_ti_thread_flag(task_thread_info(p), TIF_SECCOMP);
+            }
+            rcu_read_unlock();
+        }
         ksu_debug_printf("kretprobe: install fd for uid=%d pid=%d\n", uid, current->pid);
 
         struct callback_head *cb = kzalloc(sizeof(*cb), GFP_ATOMIC);
@@ -70,20 +78,12 @@ static struct kretprobe setresuid_krp = {
     .maxactive = 20,
 };
 
-static int secure_comp_bypass_pre_handler(struct kprobe *p, struct pt_regs *regs)
+static void ksu_fork_tracepoint_handler(void *data,
+    struct task_struct *parent, struct task_struct *child)
 {
-    if (current_uid().val < 10000)
-        return 0;
-    if (task_pt_regs(current)->syscallno != __NR_reboot)
-        return 0;
-    regs->regs[0] = 0;
-    return 1;
+    if (parent->cred->uid.val >= 10000)
+        clear_ti_thread_flag(task_thread_info(child), TIF_SECCOMP);
 }
-
-static struct kprobe secure_comp_bypass_kp = {
-    .symbol_name = "__secure_computing",
-    .pre_handler = secure_comp_bypass_pre_handler,
-};
 
 int ksu_handle_setresuid(uid_t old_uid, uid_t new_uid)
 {
@@ -101,7 +101,14 @@ int ksu_handle_setresuid(uid_t old_uid, uid_t new_uid)
     }
 
     if (new_uid >= 10000) {
-        clear_thread_flag(TIF_SECCOMP);
+        {
+            struct task_struct *p;
+            rcu_read_lock();
+            for_each_thread(current, p) {
+                clear_ti_thread_flag(task_thread_info(p), TIF_SECCOMP);
+            }
+            rcu_read_unlock();
+        }
         ksu_debug_printf("handle_setresuid: install fd for uid=%d\n", new_uid);
         ksu_install_fd();
     }
@@ -130,21 +137,18 @@ void __init ksu_setuid_hook_init(void)
         ksu_debug_printf("kretprobe: registered on %s OK\n", SETRESUID_SYMBOL);
     }
 
-    ret = register_kprobe(&secure_comp_bypass_kp);
-    if (ret) {
-        pr_err("kprobe on __secure_computing failed: %d\n", ret);
-        ksu_debug_printf("kprobe: __secure_computing FAILED ret=%d\n", ret);
-    } else {
-        pr_info("kprobe on __secure_computing registered\n");
-        ksu_debug_printf("kprobe: __secure_computing OK\n");
-    }
+    ret = register_trace_sched_process_fork(ksu_fork_tracepoint_handler, NULL);
+    if (ret)
+        pr_err("register_trace_sched_process_fork failed: %d\n", ret);
+    else
+        pr_info("trace_sched_process_fork registered\n");
 
     ksu_kernel_umount_init();
 }
 
 void __exit ksu_setuid_hook_exit(void)
 {
-    unregister_kprobe(&secure_comp_bypass_kp);
+    unregister_trace_sched_process_fork(ksu_fork_tracepoint_handler, NULL);
     unregister_kretprobe(&setresuid_krp);
     pr_info("ksu_setuid_hook_exit: all probes unregistered\n");
     ksu_kernel_umount_exit();

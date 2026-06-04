@@ -17,7 +17,7 @@ name: Build Kernel
 
 on:
   push:
-    branches: [23.2]
+    branches: [23.2, ksu-next-fix-100]
   workflow_dispatch:
 
 jobs:
