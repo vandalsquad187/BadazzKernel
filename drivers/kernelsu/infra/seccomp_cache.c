@@ -1,13 +1,24 @@
 #include <linux/version.h>
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 10, 0)
 #include <linux/fs.h>
 #include <linux/nsproxy.h>
 #include <linux/sched/task.h>
 #include <linux/uaccess.h>
 #include <linux/filter.h>
 #include <linux/seccomp.h>
+#include <asm/unistd.h>
 #include "klog.h" // IWYU pragma: keep
-#include "seccomp_cache.h"
+#include "infra/seccomp_cache.h"
+
+/*
+ * Kernel 4.14 compat: SECCOMP_ARCH_NATIVE_NR was not defined on arm64 yet.
+ * Use __NR_syscalls as a safe replacement.
+ */
+#ifndef SECCOMP_ARCH_NATIVE_NR
+#define SECCOMP_ARCH_NATIVE_NR __NR_syscalls
+#endif
+#ifndef SECCOMP_ARCH_COMPAT_NR
+#define SECCOMP_ARCH_COMPAT_NR __NR_syscalls
+#endif
 
 struct action_cache {
 	DECLARE_BITMAP(allow_native, SECCOMP_ARCH_NATIVE_NR);
@@ -64,4 +75,3 @@ void ksu_seccomp_allow_cache(struct seccomp_filter *filter, int nr)
     }
 #endif
 }
-#endif // #if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 10, 0)

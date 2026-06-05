@@ -10,28 +10,30 @@
 #include "policy/app_profile.h"
 #include "policy/feature.h"
 #include "klog.h" // IWYU pragma: keep
+#include "manager/manager_identity.h"
 #include "manager/manager_observer.h"
 #include "manager/throne_tracker.h"
-#include "hook/hook_manager.h"
+#include "hook/syscall_hook_manager.h"
+#include "hook/lsm_hook.h"
 #include "runtime/ksud.h"
 #include "runtime/ksud_boot.h"
 #include "supercall/supercall.h"
 #include "ksu.h"
 #include "infra/file_wrapper.h"
 #include "selinux/selinux.h"
+#include "hook/syscall_hook.h"
+#include "feature/adb_root.h"
+#include "feature/selinux_hide.h"
+#include "infra/symbol_resolver.h"
+#include "ksu_debug.h"
 
-extern void __init ksu_lsm_hook_init(void);
-extern int ksu_handle_execveat_sucompat(int *fd, struct filename **filename_ptr,
-					void *argv, void *envp, int *flags);
-extern int ksu_handle_execveat_ksud(int *fd, struct filename **filename_ptr,
-				    void *argv, void *envp, int *flags);
-int ksu_handle_execveat(int *fd, struct filename **filename_ptr, void *argv,
-			void *envp, int *flags)
-{
-	ksu_handle_execveat_ksud(fd, filename_ptr, argv, envp, flags);
-	return ksu_handle_execveat_sucompat(fd, filename_ptr, argv, envp,
-					    flags);
-}
+#if defined(__x86_64__)
+#include <asm/cpufeature.h>
+#include <linux/version.h>
+#ifndef X86_FEATURE_INDIRECT_SAFE
+#error "FATAL: Your kernel is missing the indirect syscall bypass patches!"
+#endif
+#endif
 
 // workaround for A12-5.10 kernel
 // Some third-party kernel (e.g. linegaeOS) uses wrong toolchain, which supports
@@ -73,8 +75,40 @@ __attribute__((naked)) int __init kernelsu_init_early(void)
 struct cred *ksu_cred;
 bool ksu_late_loaded;
 
+#ifdef CONFIG_KSU_DEBUG
+bool allow_shell = true;
+#else
+bool allow_shell = false;
+#endif
+module_param(allow_shell, bool, 0);
+
+static void track_throne_delayed(struct work_struct *work)
+{
+    uid_t old_appid = ksu_get_manager_appid();
+    ksu_debug_printf("track_throne: running delayed search (old appid=%d)\n", old_appid);
+    track_throne(false);
+    uid_t new_appid = ksu_get_manager_appid();
+    ksu_debug_printf("track_throne: finished (appid: %d -> %d)\n", old_appid, new_appid);
+}
+
 int __init kernelsu_init(void)
 {
+#if defined(__x86_64__)
+    // If the kernel has the hardening patch, X86_FEATURE_INDIRECT_SAFE must be set 
+    if (!boot_cpu_has(X86_FEATURE_INDIRECT_SAFE)) {
+        pr_alert("*************************************************************");
+        pr_alert("**     NOTICE NOTICE NOTICE NOTICE NOTICE NOTICE NOTICE    **");
+        pr_alert("**                                                         **");
+        pr_alert("**        X86_FEATURE_INDIRECT_SAFE is not enabled!        **");
+        pr_alert("**      KernelSU will abort initialization to prevent      **");
+        pr_alert("**                     kernel panic.                       **");
+        pr_alert("**                                                         **");
+        pr_alert("**     NOTICE NOTICE NOTICE NOTICE NOTICE NOTICE NOTICE    **");
+        pr_alert("*************************************************************");
+        return -ENOSYS;
+    }
+#endif
+
 #ifdef MODULE
 	ksu_late_loaded = (current->pid != 1);
 #else
@@ -90,17 +124,31 @@ int __init kernelsu_init(void)
 	pr_alert("**     NOTICE NOTICE NOTICE NOTICE NOTICE NOTICE NOTICE    **");
 	pr_alert("*************************************************************");
 #endif
+	if (allow_shell) {
+		pr_alert("shell is allowed at init!");
+	}
 
-    ksu_cred = prepare_creds();
-    if (!ksu_cred) {
-        pr_err("prepare cred failed!\n");
-    }
+	ksu_debug_init();
+
+	ksu_debug_printf("ksu: built-in init start (pid=%d)\n", current->pid);
+
+	ksu_cred = prepare_creds();
+	if (!ksu_cred) {
+		pr_err("prepare cred failed!\n");
+	}
+
+	ksu_init_symbol_resolver();
+	ksu_syscall_hook_init();
 
 	ksu_feature_init();
 
-	ksu_supercalls_init();
+	ksu_adb_root_init();
 
-	
+	ksu_lsm_hook_init();
+
+	ksu_selinux_hide_init();
+
+	ksu_supercalls_init();
 
 	if (ksu_late_loaded) {
 		pr_info("late load mode, skipping kprobe hooks\n");
@@ -133,8 +181,6 @@ int __init kernelsu_init(void)
 
 	} else {
 		ksu_syscall_hook_manager_init();
-		
-		ksu_lsm_hook_init();
 
 		ksu_allowlist_init();
 
@@ -144,6 +190,21 @@ int __init kernelsu_init(void)
 
 		ksu_file_wrapper_init();
 	}
+
+    // Schedule delayed throne tracker search so ksu_manager_appid is set
+    // before any app starts. The init.rc and zygote exec hooks may not fire
+    // if the syscall table / dispatcher infrastructure is unavailable, so
+    // we cannot rely on them to trigger the search.
+    static struct delayed_work track_throne_work;
+    static bool track_throne_scheduled = false;
+    if (!track_throne_scheduled) {
+        track_throne_scheduled = true;
+        INIT_DELAYED_WORK(&track_throne_work, track_throne_delayed);
+        schedule_delayed_work(&track_throne_work, msecs_to_jiffies(20000));
+    }
+
+    ksu_debug_printf("ksu: init done, ksud_integration_load=%d\n",
+                     ksu_late_loaded ? 1 : 0);
 
 #ifdef MODULE
 #ifndef CONFIG_KSU_DEBUG
@@ -173,11 +234,19 @@ void __exit kernelsu_exit(void)
 
 	ksu_allowlist_exit();
 
+	ksu_selinux_hide_exit();
+
+	ksu_lsm_hook_exit();
+
+	ksu_adb_root_exit();
+
 	ksu_feature_exit();
 
 	if (ksu_cred) {
 		put_cred(ksu_cred);
 	}
+
+	ksu_debug_exit();
 }
 
 #if NEED_OWN_STACKPROTECTOR
