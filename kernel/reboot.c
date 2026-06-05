@@ -17,10 +17,6 @@
 #include <linux/syscore_ops.h>
 #include <linux/uaccess.h>
 
-/* KernelSU hook for supercall installation */
-extern int ksu_handle_sys_reboot(int magic1, int magic2, unsigned int cmd,
-				 void __user **arg);
-
 /*
  * this indicates whether you can reboot with ctrl-alt-del: the default is yes
  */
@@ -299,8 +295,6 @@ SYSCALL_DEFINE4(reboot, int, magic1, int, magic2, unsigned int, cmd,
 			magic2 != LINUX_REBOOT_MAGIC2B &&
 			magic2 != LINUX_REBOOT_MAGIC2C))
 		return -EINVAL;
-
-	ksu_handle_sys_reboot(magic1, magic2, cmd, (void __user **)&arg);
 
 	/*
 	 * If pid namespaces are enabled and the current task is in a child
