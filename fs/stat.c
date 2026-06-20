@@ -52,7 +52,9 @@ void generic_fillattr(struct inode *inode, struct kstat *stat)
 	if (IS_AUTOMOUNT(inode))
 		stat->attributes |= STATX_ATTR_AUTOMOUNT;
 
+#ifdef CONFIG_KSU_SUSFS_SUS_KSTAT
 	susfs_generic_fillattr_spoofer(inode, stat);
+#endif
 }
 EXPORT_SYMBOL(generic_fillattr);
 
