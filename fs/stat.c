@@ -19,6 +19,7 @@
 #include <linux/compat.h>
 
 #include <linux/uaccess.h>
+#include <linux/susfs.h>
 #include <asm/unistd.h>
 
 /**
@@ -50,6 +51,8 @@ void generic_fillattr(struct inode *inode, struct kstat *stat)
 		stat->result_mask &= ~STATX_ATIME;
 	if (IS_AUTOMOUNT(inode))
 		stat->attributes |= STATX_ATTR_AUTOMOUNT;
+
+	susfs_generic_fillattr_spoofer(inode, stat);
 }
 EXPORT_SYMBOL(generic_fillattr);
 

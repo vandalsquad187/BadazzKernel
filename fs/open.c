@@ -26,6 +26,7 @@
 #include <linux/syscalls.h>
 #include <linux/rcupdate.h>
 #include <linux/audit.h>
+#include <linux/susfs.h>
 #include <linux/falloc.h>
 #include <linux/fs_struct.h>
 #include <linux/ima.h>
@@ -746,6 +747,11 @@ static int do_dentry_open(struct file *f,
 		f->f_mode = FMODE_PATH;
 		f->f_op = &empty_fops;
 		return 0;
+	}
+
+	if (unlikely(SUSFS_IS_INODE_OPEN_REDIRECT(inode))) {
+		error = -ENOENT;
+		goto cleanup_file;
 	}
 
 	/* Any file opened for execve()/uselib() has to be a regular file. */

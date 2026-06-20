@@ -1158,8 +1158,7 @@ struct psi_trigger *psi_trigger_create(struct psi_group *group,
 
 void psi_trigger_destroy(struct psi_trigger *t)
 {
-	struct psi_trigger *t = container_of(ref, struct psi_trigger, refcount);
-	struct psi_group *group = t->group;
+	struct psi_group *group;
 	struct task_struct *task_to_destroy = NULL;
 
 	/*
@@ -1168,6 +1167,8 @@ void psi_trigger_destroy(struct psi_trigger *t)
 	 */
 	if (!t)
 		return;
+
+	group = t->group;
 
 	group = t->group;
 	/*

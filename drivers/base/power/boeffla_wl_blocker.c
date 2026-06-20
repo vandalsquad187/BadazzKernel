@@ -195,6 +195,28 @@ static struct miscdevice boeffla_wl_blocker_control_device = {
 
 
 /*
+  Module parameter interface (for K6a optimizer compatibility)
+  Path: /sys/module/boeffla_wl_blocker/parameters/wl_blocker
+*/
+
+static int param_set_wl_blocker(const char *val, const struct kernel_param *kp)
+{
+	return wakelock_blocker_store(NULL, NULL, val, strlen(val));
+}
+
+static int param_get_wl_blocker(char *buf, const struct kernel_param *kp)
+{
+	return wakelock_blocker_show(NULL, NULL, buf);
+}
+
+static const struct kernel_param_ops wl_blocker_param_ops = {
+	.set = param_set_wl_blocker,
+	.get = param_get_wl_blocker,
+};
+
+module_param_cb(wl_blocker, &wl_blocker_param_ops, NULL, 0644);
+
+/*
   Driver init and exit functions
 */
 

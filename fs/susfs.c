@@ -252,6 +252,58 @@ out_copy_to_user:
 	}
 	SUSFS_LOGI("CMD_SUSFS_hide_sus_mnts_for_non_su_procs -> ret: %d\n", info.err);
 }
+
+void susfs_add_sus_mount(void __user **user_info) {
+	struct st_susfs_sus_mount info = {0};
+	struct path path;
+	struct inode *inode = NULL;
+	struct fuse_inode *fi = NULL;
+
+	if (copy_from_user(&info, (struct st_susfs_sus_mount __user*)*user_info, sizeof(info))) {
+		info.err = -EFAULT;
+		goto out_copy_to_user;
+	}
+
+	info.err = kern_path(info.target_pathname, LOOKUP_FOLLOW, &path);
+	if (info.err) {
+		SUSFS_LOGE("failed opening file '%s'\n", info.target_pathname);
+		goto out_copy_to_user;
+	}
+
+	inode = d_backing_inode(path.dentry);
+	if (!inode) {
+		SUSFS_LOGE("inode is NULL\n");
+		info.err = -ENOENT;
+		goto out_path_put;
+	}
+
+	if (inode->i_sb->s_magic == FUSE_SUPER_MAGIC) {
+		fi = get_fuse_inode(inode);
+		if (!fi) {
+			SUSFS_LOGE("fi is NULL\n");
+			info.err = -ENOENT;
+			goto out_path_put;
+		}
+		set_bit(AS_FLAGS_SUS_MOUNT, &fi->inode.i_state);
+		SUSFS_LOGI("flagged AS_FLAGS_SUS_MOUNT on pathname: '%s', fi->nodeid: %llu, ino: %lu\n",
+				info.target_pathname, fi->nodeid, inode->i_ino);
+		info.err = 0;
+		goto out_path_put;
+	}
+
+	set_bit(AS_FLAGS_SUS_MOUNT, &inode->i_state);
+	SUSFS_LOGI("flagged AS_FLAGS_SUS_MOUNT on pathname: '%s', ino: '%lu'\n",
+			info.target_pathname, inode->i_ino);
+	info.err = 0;
+
+out_path_put:
+	path_put(&path);
+out_copy_to_user:
+	if (copy_to_user(&((struct st_susfs_sus_mount __user*)*user_info)->err, &info.err, sizeof(info.err))) {
+		info.err = -EFAULT;
+	}
+	SUSFS_LOGI("CMD_SUSFS_ADD_SUS_MOUNT -> ret: %d\n", info.err);
+}
 #endif // #ifdef CONFIG_KSU_SUSFS_SUS_MOUNT
 
 /* sus_kstat */

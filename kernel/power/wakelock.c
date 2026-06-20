@@ -20,8 +20,41 @@
 #include <linux/slab.h>
 #include <linux/workqueue.h>
 #include <linux/sched.h>
+#include <linux/moduleparam.h>
 
 #include "power.h"
+
+#ifdef CONFIG_BOEFFLA_WL_BLOCKER
+static char wl_blocker_buf[2048];
+module_param_string(wl_blocker, wl_blocker_buf, sizeof(wl_blocker_buf), 0644);
+
+static bool is_wakelock_blocked(const char *name, size_t len)
+{
+	char *buf, *p, *save;
+	bool blocked = false;
+
+	if (!name || !len)
+		return false;
+
+	buf = kstrdup(wl_blocker_buf, GFP_KERNEL);
+	if (!buf)
+		return false;
+
+	save = buf;
+	while ((p = strsep(&save, ",")) != NULL) {
+		while (*p == ' ')
+			p++;
+		if (*p == '\0')
+			continue;
+		if (strlen(p) == len && strncmp(name, p, len) == 0) {
+			blocked = true;
+			break;
+		}
+	}
+	kfree(buf);
+	return blocked;
+}
+#endif
 
 static DEFINE_MUTEX(wakelocks_lock);
 
@@ -239,6 +272,11 @@ int pm_wake_lock(const char *buf)
 	len = str - buf;
 	if (!len)
 		return -EINVAL;
+
+#ifdef CONFIG_BOEFFLA_WL_BLOCKER
+	if (is_wakelock_blocked(buf, len))
+		return 0;
+#endif
 
 	if (*str && *str != '\n') {
 		/* Find out if there's a valid timeout string appended. */

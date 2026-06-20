@@ -762,6 +762,8 @@ static void avc_audit_post_callback(struct audit_buffer *ab, void *a)
 }
 
 /* This is the slow part of avc audit with big stack footprint */
+extern bool susfs_is_avc_log_spoofing_enabled;
+
 noinline int slow_avc_audit(struct selinux_state *state,
 			    u32 ssid, u32 tsid, u16 tclass,
 			    u32 requested, u32 audited, u32 denied, int result,
@@ -769,6 +771,9 @@ noinline int slow_avc_audit(struct selinux_state *state,
 			    unsigned int flags)
 {
 	struct common_audit_data stack_data;
+
+	if (unlikely(susfs_is_avc_log_spoofing_enabled))
+		return 0;
 	struct selinux_audit_data sad;
 
 	if (!a) {

@@ -12,6 +12,7 @@
 #include <linux/security.h>
 #include <linux/fs_struct.h>
 #include <linux/sched/task.h>
+#include <linux/susfs.h>
 
 #include "proc/internal.h" /* only for get_proc_task() in ->open() */
 
@@ -102,6 +103,9 @@ static int show_vfsmnt(struct seq_file *m, struct vfsmount *mnt)
 	struct super_block *sb = mnt_path.dentry->d_sb;
 	int err;
 
+	if (SUSFS_IS_INODE_SUS_MOUNT(mnt_path.dentry->d_inode))
+		return SEQ_SKIP;
+
 	if (sb->s_op->show_devname) {
 		err = sb->s_op->show_devname(m, mnt_path.dentry);
 		if (err)
@@ -137,6 +141,9 @@ static int show_mountinfo(struct seq_file *m, struct vfsmount *mnt)
 	struct super_block *sb = mnt->mnt_sb;
 	struct path mnt_path = { .dentry = mnt->mnt_root, .mnt = mnt };
 	int err;
+
+	if (SUSFS_IS_INODE_SUS_MOUNT(mnt_path.dentry->d_inode))
+		return SEQ_SKIP;
 
 	seq_printf(m, "%i %i %u:%u ", r->mnt_id, r->mnt_parent->mnt_id,
 		   MAJOR(sb->s_dev), MINOR(sb->s_dev));
@@ -201,6 +208,9 @@ static int show_vfsstat(struct seq_file *m, struct vfsmount *mnt)
 	struct path mnt_path = { .dentry = mnt->mnt_root, .mnt = mnt };
 	struct super_block *sb = mnt_path.dentry->d_sb;
 	int err;
+
+	if (SUSFS_IS_INODE_SUS_MOUNT(mnt_path.dentry->d_inode))
+		return SEQ_SKIP;
 
 	/* device */
 	if (sb->s_op->show_devname) {

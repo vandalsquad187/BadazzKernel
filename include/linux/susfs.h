@@ -57,6 +57,11 @@ struct st_susfs_hide_sus_mnts_for_non_su_procs {
 	bool                                    enabled;
 	int                                     err;
 };
+
+struct st_susfs_sus_mount {
+	char                                    target_pathname[SUSFS_MAX_LEN_PATHNAME];
+	int                                     err;
+};
 #endif
 
 /* sus_kstat */
@@ -203,11 +208,13 @@ struct st_susfs_version {
 #ifdef CONFIG_KSU_SUSFS_SUS_PATH
 void susfs_add_sus_path(void __user **user_info);
 void susfs_add_sus_path_loop(void __user **user_info);
+bool susfs_is_inode_sus_path(struct inode *inode);
 #endif
 
 /* sus_mount */
 #ifdef CONFIG_KSU_SUSFS_SUS_MOUNT
 void susfs_set_hide_sus_mnts_for_non_su_procs(void __user **user_info);
+void susfs_add_sus_mount(void __user **user_info);
 #endif // #ifdef CONFIG_KSU_SUSFS_SUS_MOUNT
 
 /* sus_kstat */

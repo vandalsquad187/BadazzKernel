@@ -39,6 +39,7 @@
 #include <linux/bitops.h>
 #include <linux/init_task.h>
 #include <linux/uaccess.h>
+#include <linux/susfs.h>
 
 #include "internal.h"
 #include "mount.h"
@@ -1756,8 +1757,13 @@ static int lookup_fast(struct nameidata *nd,
 	path->mnt = mnt;
 	path->dentry = dentry;
 	err = follow_managed(path, nd);
-	if (likely(err > 0))
+	if (likely(err > 0)) {
 		*inode = d_backing_inode(path->dentry);
+		if (unlikely(susfs_is_inode_sus_path(*inode))) {
+			dput(path->dentry);
+			return -ENOENT;
+		}
+	}
 	return err;
 }
 
@@ -1938,6 +1944,11 @@ static int walk_component(struct nameidata *nd, int flags)
 
 		seq = 0;	/* we are already out of RCU mode */
 		inode = d_backing_inode(path.dentry);
+	}
+
+	if (unlikely(susfs_is_inode_sus_path(inode))) {
+		path_put(&path);
+		return -ENOENT;
 	}
 
 	return step_into(nd, &path, flags, inode, seq);
