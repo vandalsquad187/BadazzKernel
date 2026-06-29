@@ -1749,8 +1749,8 @@
 				type = "passive";
 			};
 			gold_trip: gold-trip {
-				temperature = <50000>;
-				hysteresis = <0>;
+				temperature = <56000>;
+				hysteresis = <3000>;
 				type = "passive";
 			};
 			batt_trip4: batt-trip4 {
@@ -1759,8 +1759,8 @@
 				type = "passive";
 			};
 			skin_gpu_trip: skin-gpu-trip {
-				temperature = <52000>;
-				hysteresis = <4000>;
+				temperature = <57000>;
+				hysteresis = <5000>;
 				type = "passive";
 			};
 			modem_trip2: modem-trip2 {
@@ -1769,8 +1769,8 @@
 				type = "passive";
 			};
 			silver_trip: silver-trip {
-				temperature = <54000>;
-				hysteresis = <0>;
+				temperature = <59000>;
+				hysteresis = <3000>;
 				type = "passive";
 			};
 			modem_trip3: modem-trip3 {
