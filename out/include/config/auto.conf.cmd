@@ -130,6 +130,7 @@ deps_config := \
 	drivers/firmware/google/Kconfig \
 	drivers/firmware/broadcom/Kconfig \
 	drivers/firmware/Kconfig \
+	drivers/kernelsu/Kconfig \
 	drivers/esoc/Kconfig \
 	drivers/sensors/Kconfig \
 	drivers/mux/Kconfig \

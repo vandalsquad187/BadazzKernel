@@ -439,6 +439,7 @@
 		};
 
 		pm6150_bcl: bcl@1d00 {
+			status = "disabled";
 			compatible = "qcom,bcl-v5";
 			reg = <0x1d00 0x100>;
 			interrupts = <0x0 0x1d 0x0 IRQ_TYPE_NONE>,
@@ -451,6 +452,7 @@
 		};
 
 		bcl_soc:bcl-soc {
+			status = "disabled";
 			compatible = "qcom,msm-bcl-soc";
 			#thermal-sensor-cells = <0>;
 		};
