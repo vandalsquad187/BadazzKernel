@@ -2170,7 +2170,7 @@ int kgsl_pwrctrl_init(struct kgsl_device *device)
 	pwr->max_pwrlevel = 0;
 	pwr->min_pwrlevel = pwr->num_pwrlevels - 2;
 	pwr->thermal_pwrlevel = 0;
-	pwr->thermal_pwrlevel_floor = pwr->min_pwrlevel;
+	pwr->thermal_pwrlevel_floor = 4;
 
 	pwr->wakeup_maxpwrlevel = 0;
 
