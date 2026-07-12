@@ -74,8 +74,7 @@ static void proc_command_line_init(void) {
 
 static int cmdline_proc_show(struct seq_file *m, void *v)
 {
-	if (!susfs_spoof_cmdline_or_bootconfig(m))
-		return 0;
+	susfs_spoof_cmdline_or_bootconfig(m);
 #ifdef ALTER_CMDLINE
 	seq_printf(m, "%s\n", proc_command_line);
 #else
