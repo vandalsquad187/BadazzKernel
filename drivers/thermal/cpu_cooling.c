@@ -707,14 +707,12 @@ static int cpufreq_set_cur_state(struct thermal_cooling_device *cdev,
 			thermal_zone_get_zone_by_name("cpu-1-0-usr");
 		if (!IS_ERR(tz) && !thermal_zone_get_temp(tz, &temp) && temp > 0) {
 			unsigned long allowed = cpufreq_cdev->max_level;
-			if (temp < 72000)
+			if (temp < 80000)
 				allowed = min(6UL, cpufreq_cdev->max_level);
-			else if (temp < 78000)
+			else if (temp < 90000)
 				allowed = min(7UL, cpufreq_cdev->max_level);
-			else if (temp < 85000)
-				allowed = min(8UL, cpufreq_cdev->max_level);
 			else if (temp < 92000)
-				allowed = min(9UL, cpufreq_cdev->max_level);
+				allowed = min(8UL, cpufreq_cdev->max_level);
 			if (state > allowed)
 				state = allowed;
 		}
