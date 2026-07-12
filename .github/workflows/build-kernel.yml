@@ -38,6 +38,13 @@ jobs:
           submodules: true
 
       # -------------------------------------------------------
+      # Schritt 1b: SUSFS v2.2.0 Kompatibilitäts-Patches auf KSU-Next anwenden
+      # -------------------------------------------------------
+      - name: Apply KSU-Next SUSFS v2.2.0 compat patches
+        run: |
+          git -C KernelSU-Next apply ../ksu-next-v220-compat.patch
+
+      # -------------------------------------------------------
       # Schritt 2: Cross-Compiler installieren
       # Der Kernel 4.14 baut sauber mit dem distro-eigenen
       # aarch64-linux-gnu-gcc (GCC 13/14).
