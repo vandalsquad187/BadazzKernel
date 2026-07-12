@@ -1,3 +1,16 @@
+diff --git a/kernel/Makefile b/kernel/Makefile
+index c48693d1..648bb24c 100644
+--- a/kernel/Makefile
++++ b/kernel/Makefile
+@@ -12,7 +12,7 @@ $(info -- KDIR: $(KDIR))
+ $(info -- MDIR: $(MDIR))
+ 
+ # KSU VERSION
+-KSU_VERSION := 33129
++KSU_VERSION := 33300
+ KSU_VERSION_TAG := v3.1.0
+ 
+ ccflags-y += -DKSU_VERSION=$(KSU_VERSION)
 diff --git a/kernel/hook/core_hook.c b/kernel/hook/core_hook.c
 index bbd1090a..e21ae681 100644
 --- a/kernel/hook/core_hook.c
