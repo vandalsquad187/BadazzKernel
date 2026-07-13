@@ -65,7 +65,9 @@
 #define AS_FLAGS_OPEN_REDIRECT 36
 #define AS_FLAGS_SUS_MAP 39
 
-#define SUSFS_IS_INODE_SUS_MOUNT(inode) false
+#define SUSFS_IS_INODE_SUS_MOUNT(inode) \
+		inode && inode->i_mapping && \
+		unlikely(test_bit(AS_FLAGS_SUS_MOUNT, &inode->i_mapping->flags))
 
 #define ND_STATE_LOOKUP_LAST 32
 #define ND_STATE_OPEN_LAST 64
@@ -109,9 +111,17 @@ static inline bool susfs_is_current_proc_umounted_app(void) {
 			current_uid().val >= 10000);
 }
 
-#define SUSFS_IS_INODE_SUS_MAP(inode) false
+#define SUSFS_IS_INODE_SUS_MAP(inode) \
+		inode && inode->i_mapping && \
+		unlikely(test_bit(AS_FLAGS_SUS_MAP, &inode->i_mapping->flags)) && \
+		susfs_is_current_proc_umounted_app()
 
-#define SUSFS_IS_INODE_OPEN_REDIRECT_WITHOUT_UID_CHECK(inode) false
+#define SUSFS_IS_INODE_OPEN_REDIRECT_WITHOUT_UID_CHECK(inode) \
+		inode && inode->i_mapping && \
+		unlikely(test_bit(AS_FLAGS_OPEN_REDIRECT, &inode->i_mapping->flags))
 
-#define SUSFS_IS_INODE_OPEN_REDIRECT(inode) false
+#define SUSFS_IS_INODE_OPEN_REDIRECT(inode) \
+		inode && inode->i_mapping && \
+		unlikely(test_bit(AS_FLAGS_OPEN_REDIRECT, &inode->i_mapping->flags)) && \
+		susfs_is_current_proc_umounted_app()
 #endif // #ifndef KSU_SUSFS_DEF_H
