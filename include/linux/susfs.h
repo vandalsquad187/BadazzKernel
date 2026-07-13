@@ -189,6 +189,7 @@ struct st_susfs_version {
 #ifdef CONFIG_KSU_SUSFS_SUS_PATH
 void susfs_add_sus_path(void __user **user_info);
 void susfs_add_sus_path_loop(void __user **user_info);
+void susfs_run_sus_path_loop(void);
 bool susfs_is_inode_sus_path(struct inode *inode);
 #endif
 
@@ -241,5 +242,12 @@ void susfs_start_sdcard_monitor_fn(void);
 
 /* susfs_init */
 void susfs_init(void);
+
+/* Stubs when CONFIG_KSU_SUSFS is not set */
+#ifndef CONFIG_KSU_SUSFS
+static inline bool susfs_is_inode_sus_path(struct inode *inode) { return false; }
+static inline void susfs_spoof_cmdline_or_bootconfig(struct seq_file *m) { }
+#define susfs_is_avc_log_spoofing_enabled 0
+#endif
 
 #endif

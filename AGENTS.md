@@ -3,8 +3,8 @@
 ## Current State
 - **Repo**: `vandalsquad187/kernel_xiaomi_sm6150` branch `23.2`
 - **Branch**: `23.2`
-- **Local**: Booted and stable (SUSFS works)
-- **GitHub**: Build successful (after SUSFS defconfig fix)
+- **Local**: Booted and stable (SUSFS v4.2.9 works)
+- **GitHub**: Ready to push v4.2.9
 
 ## Changes Made
 
