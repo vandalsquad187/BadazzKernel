@@ -22,6 +22,7 @@
 #include <linux/msm_adreno_devfreq.h>
 #include <linux/of_device.h>
 #include <linux/thermal.h>
+#include <linux/proc_fs.h>
 
 #include "kgsl.h"
 #include "kgsl_pwrscale.h"
@@ -171,6 +172,28 @@ static void _ab_buslevel_update(struct kgsl_pwrctrl *pwr,
 static unsigned int _adjust_pwrlevel(struct kgsl_pwrctrl *pwr, int level,
 					struct kgsl_pwr_constraint *pwrc)
 {
+	/* Dynamic GPU thermal floor based on temperature */
+	static unsigned int gpu_thermal_floor_temp_low = 70000;
+	static unsigned int gpu_thermal_floor_temp_high = 85000;
+	static unsigned int gpu_thermal_floor_level_low = 5;
+	static unsigned int gpu_thermal_floor_level_mid = 4;
+	static unsigned int gpu_thermal_floor_level_high = 3;
+
+	/* Update thermal floor based on GPU temperature */
+	{
+		int temp = 0;
+		struct thermal_zone_device *tz =
+			thermal_zone_get_zone_by_name("gpu-thermal");
+		if (!IS_ERR(tz) && !thermal_zone_get_temp(tz, &temp) && temp > 0) {
+			if (temp < gpu_thermal_floor_temp_low)
+				pwr->thermal_pwrlevel_floor = gpu_thermal_floor_level_low;
+			else if (temp < gpu_thermal_floor_temp_high)
+				pwr->thermal_pwrlevel_floor = gpu_thermal_floor_level_mid;
+			else
+				pwr->thermal_pwrlevel_floor = gpu_thermal_floor_level_high;
+		}
+	}
+
 	unsigned int max_pwrlevel = max_t(unsigned int, pwr->thermal_pwrlevel,
 					pwr->max_pwrlevel);
 	unsigned int min_pwrlevel = min_t(unsigned int,
@@ -3330,3 +3353,116 @@ void kgsl_pwrctrl_set_default_gpu_pwrlevel(struct kgsl_device *device)
 	/* Request adjusted DCVS level */
 	kgsl_clk_set_rate(device, pwr->active_pwrlevel);
 }
+
+/* Sysfs interface for dynamic GPU thermal floor configuration */
+static unsigned int gpu_thermal_floor_temp_low = 70000;
+static unsigned int gpu_thermal_floor_temp_high = 85000;
+static unsigned int gpu_thermal_floor_level_low = 5;
+static unsigned int gpu_thermal_floor_level_mid = 4;
+static unsigned int gpu_thermal_floor_level_high = 3;
+
+static ssize_t gpu_thermal_floor_temp_low_show(struct device *dev,
+	struct device_attribute *attr, char *buf)
+{
+	return sprintf(buf, "%u\n", gpu_thermal_floor_temp_low);
+}
+
+static ssize_t gpu_thermal_floor_temp_low_store(struct device *dev,
+	struct device_attribute *attr, const char *buf, size_t count)
+{
+	unsigned long val;
+	int ret;
+
+	ret = kstrtoul(buf, 10, &val);
+	if (ret)
+		return ret;
+
+	if (val > 150000)
+		return -EINVAL;
+
+	gpu_thermal_floor_temp_low = val;
+	return count;
+}
+
+static ssize_t gpu_thermal_floor_temp_high_show(struct device *dev,
+	struct device_attribute *attr, char *buf)
+{
+	return sprintf(buf, "%u\n", gpu_thermal_floor_temp_high);
+}
+
+static ssize_t gpu_thermal_floor_temp_high_store(struct device *dev,
+	struct device_attribute *attr, const char *buf, size_t count)
+{
+	unsigned long val;
+	int ret;
+
+	ret = kstrtoul(buf, 10, &val);
+	if (ret)
+		return ret;
+
+	if (val > 150000)
+		return -EINVAL;
+
+	gpu_thermal_floor_temp_high = val;
+	return count;
+}
+
+static ssize_t gpu_thermal_floor_levels_show(struct device *dev,
+	struct device_attribute *attr, char *buf)
+{
+	return sprintf(buf, "%u %u %u\n",
+		gpu_thermal_floor_level_low,
+		gpu_thermal_floor_level_mid,
+		gpu_thermal_floor_level_high);
+}
+
+static ssize_t gpu_thermal_floor_levels_store(struct device *dev,
+	struct device_attribute *attr, const char *buf, size_t count)
+{
+	unsigned int low, mid, high;
+	int ret;
+
+	ret = sscanf(buf, "%u %u %u", &low, &mid, &high);
+	if (ret != 3)
+		return -EINVAL;
+
+	gpu_thermal_floor_level_low = low;
+	gpu_thermal_floor_level_mid = mid;
+	gpu_thermal_floor_level_high = high;
+	return count;
+}
+
+static DEVICE_ATTR_RW(gpu_thermal_floor_temp_low);
+static DEVICE_ATTR_RW(gpu_thermal_floor_temp_high);
+static DEVICE_ATTR_RW(gpu_thermal_floor_levels);
+
+static struct attribute *gpu_thermal_floor_attrs[] = {
+	&dev_attr_gpu_thermal_floor_temp_low.attr,
+	&dev_attr_gpu_thermal_floor_temp_high.attr,
+	&dev_attr_gpu_thermal_floor_levels.attr,
+	NULL,
+};
+
+static struct attribute_group gpu_thermal_floor_attr_group = {
+	.name = "thermal_floor",
+	.attrs = gpu_thermal_floor_attrs,
+};
+
+static int __init gpu_thermal_floor_init(void)
+{
+	struct class *kgsl_class;
+	struct device *kgsl_dev;
+
+	kgsl_class = class_create(THIS_MODULE, "kgsl");
+	if (IS_ERR(kgsl_class))
+		return PTR_ERR(kgsl_class);
+
+	kgsl_dev = device_create(kgsl_class, NULL, MKDEV(0, 0), NULL, "kgsl-3d0");
+	if (IS_ERR(kgsl_dev)) {
+		class_destroy(kgsl_class);
+		return PTR_ERR(kgsl_dev);
+	}
+
+	return sysfs_create_group(&kgsl_dev->kobj, &gpu_thermal_floor_attr_group);
+}
+module_init(gpu_thermal_floor_init);

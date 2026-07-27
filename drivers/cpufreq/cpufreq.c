@@ -716,6 +716,9 @@ static ssize_t show_scaling_cur_freq(struct cpufreq_policy *policy, char *buf)
 static int cpufreq_set_policy(struct cpufreq_policy *policy,
 				struct cpufreq_policy *new_policy);
 
+/* Counter for invalid min_freq writes from libperfmgr */
+static atomic_t cpufreq_invalid_min_freq_writes = ATOMIC_INIT(0);
+
 /**
  * cpufreq_per_cpu_attr_write() / store_##file_name() - sysfs write access
  */
@@ -745,8 +748,85 @@ static ssize_t store_##file_name					\
 	return ret ? ret : count;					\
 }
 
-store_one(scaling_min_freq, min);
+/**
+ * store_scaling_min_freq - sysfs write with validation for libperfmgr
+ * Validates and clamps invalid min_freq values instead of returning -EINVAL
+ */
+static ssize_t store_scaling_min_freq(
+	struct cpufreq_policy *policy, const char *buf, size_t count)
+{
+	int ret, temp;
+	struct cpufreq_policy new_policy;
+
+	memcpy(&new_policy, policy, sizeof(*policy));
+	new_policy.min = policy->user_policy.min;
+	new_policy.max = policy->user_policy.max;
+
+	new_policy.min = new_policy.user_policy.min;
+	new_policy.max = new_policy.user_policy.max;
+
+	ret = sscanf(buf, "%u", &new_policy.min);
+	if (ret != 1)
+		return -EINVAL;
+
+	/* Validation: Clamp invalid values from libperfmgr */
+	if (new_policy.min > policy->cpuinfo.max_freq) {
+		pr_warn("libperfmgr: Invalid min_freq %u, clamping to max_freq %u\n",
+			new_policy.min, policy->cpuinfo.max_freq);
+		atomic_inc(&cpufreq_invalid_min_freq_writes);
+		new_policy.min = policy->cpuinfo.max_freq;
+	}
+
+	/* Also clamp if min > max */
+	if (new_policy.min > new_policy.max) {
+		pr_warn("libperfmgr: min_freq %u > max_freq %u, clamping to max_freq\n",
+			new_policy.min, new_policy.max);
+		atomic_inc(&cpufreq_invalid_min_freq_writes);
+		new_policy.min = new_policy.max;
+	}
+
+	temp = new_policy.min;
+	ret = cpufreq_set_policy(policy, &new_policy);
+	if (!ret)
+		policy->user_policy.min = temp;
+
+	return ret ? ret : count;
+}
+
 store_one(scaling_max_freq, max);
+
+/* Procfs interface for monitoring invalid writes */
+static int cpufreq_invalid_writes_show(struct seq_hort *m, void *v)
+{
+	seq_printf(m, "%d\n", atomic_read(&cpufreq_invalid_min_freq_writes));
+	return 0;
+}
+
+static int cpufreq_invalid_writes_open(struct inode *inode, struct file *file)
+{
+	return single_open(file, cpufreq_invalid_writes_show, NULL);
+}
+
+static const struct file_operations cpufreq_invalid_writes_fops = {
+	.owner = THIS_MODULE,
+	.open = cpufreq_invalid_writes_open,
+	.read = seq_read,
+	.llseek = seq_lseek,
+	.release = single_release,
+};
+
+static int __init cpufreq_invalid_writes_init(void)
+{
+	struct proc_dir_entry *entry;
+
+	entry = proc_create("cpufreq_invalid_writes", 0444, NULL,
+			    &cpufreq_invalid_writes_fops);
+	if (!entry)
+		pr_warn("cpufreq: Failed to create procfs entry for invalid writes\n");
+
+	return 0;
+}
+module_init(cpufreq_invalid_writes_init);
 
 /**
  * show_cpuinfo_cur_freq - current CPU frequency as detected by hardware

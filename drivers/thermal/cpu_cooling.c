@@ -38,6 +38,138 @@
 #include <trace/events/thermal.h>
 
 #define USE_LMH_DEV	0
+
+/* Dynamic thermal floor thresholds (in millidegrees) - configurable via sysfs */
+static unsigned int thermal_floor_temps[3] = {80000, 90000, 92000};
+static unsigned int thermal_floor_levels[3] = {6, 7, 8};
+
+/* Sysfs interface for runtime thermal floor configuration */
+static int thermal_floor_temp1 = 80000;
+static int thermal_floor_temp2 = 90000;
+static int thermal_floor_temp3 = 92000;
+
+static int get_thermal_floor_level(unsigned int temp)
+{
+	if (temp < thermal_floor_temps[0])
+		return min(thermal_floor_levels[0], 8u);
+	else if (temp < thermal_floor_temps[1])
+		return min(thermal_floor_levels[1], 8u);
+	else if (temp < thermal_floor_temps[2])
+		return min(thermal_floor_levels[2], 8u);
+	return 8;
+}
+
+/* Sysfs handlers for thermal floor configuration */
+static ssize_t thermal_floor_temp1_show(struct kobject *kobj,
+					struct kobj_attribute *attr, char *buf)
+{
+	return sprintf(buf, "%u\n", thermal_floor_temp1);
+}
+
+static ssize_t thermal_floor_temp1_store(struct kobject *kobj,
+					 struct kobj_attribute *attr,
+					 const char *buf, size_t count)
+{
+	int ret;
+	unsigned long val;
+
+	ret = kstrtoul(buf, 10, &val);
+	if (ret)
+		return ret;
+
+	if (val > 150000)
+		return -EINVAL;
+
+	thermal_floor_temp1 = val;
+	thermal_floor_temps[0] = val;
+	return count;
+}
+
+static ssize_t thermal_floor_temp2_show(struct kobject *kobj,
+					struct kobj_attribute *attr, char *buf)
+{
+	return sprintf(buf, "%u\n", thermal_floor_temp2);
+}
+
+static ssize_t thermal_floor_temp2_store(struct kobject *kobj,
+					 struct kobj_attribute *attr,
+					 const char *buf, size_t count)
+{
+	int ret;
+	unsigned long val;
+
+	ret = kstrtoul(buf, 10, &val);
+	if (ret)
+		return ret;
+
+	if (val > 150000)
+		return -EINVAL;
+
+	thermal_floor_temp2 = val;
+	thermal_floor_temps[1] = val;
+	return count;
+}
+
+static ssize_t thermal_floor_temp3_show(struct kobject *kobj,
+					struct kobj_attribute *attr, char *buf)
+{
+	return sprintf(buf, "%u\n", thermal_floor_temp3);
+}
+
+static ssize_t thermal_floor_temp3_store(struct kobject *kobj,
+					 struct kobj_attribute *attr,
+					 const char *buf, size_t count)
+{
+	int ret;
+	unsigned long val;
+
+	ret = kstrtoul(buf, 10, &val);
+	if (ret)
+		return ret;
+
+	if (val > 150000)
+		return -EINVAL;
+
+	thermal_floor_temp3 = val;
+	thermal_floor_temps[2] = val;
+	return count;
+}
+
+static struct kobj_attribute thermal_floor_temp1_attr =
+	__ATTR(thermal_floor_temp1, 0644, thermal_floor_temp1_show,
+	       thermal_floor_temp1_store);
+
+static struct kobj_attribute thermal_floor_temp2_attr =
+	__ATTR(thermal_floor_temp2, 0644, thermal_floor_temp2_show,
+	       thermal_floor_temp2_store);
+
+static struct kobj_attribute thermal_floor_temp3_attr =
+	__ATTR(thermal_floor_temp3, 0644, thermal_floor_temp3_show,
+	       thermal_floor_temp3_store);
+
+static struct attribute *thermal_floor_attrs[] = {
+	&thermal_floor_temp1_attr.attr,
+	&thermal_floor_temp2_attr.attr,
+	&thermal_floor_temp3_attr.attr,
+	NULL,
+};
+
+static struct attribute_group thermal_floor_attr_group = {
+	.attrs = thermal_floor_attrs,
+};
+
+static int __init thermal_floor_init(void)
+{
+	struct kobject *k6a_kobj;
+
+	k6a_kobj = kobject_create_and_add("k6a_thermal", kernel_kobj);
+	if (!k6a_kobj)
+		return -ENOMEM;
+
+	return sysfs_create_group(k6a_kobj, &thermal_floor_attr_group);
+}
+device_initcall(thermal_floor_init);
+
 /*
  * Cooling state <-> CPUFreq frequency
  *
@@ -707,12 +839,8 @@ static int cpufreq_set_cur_state(struct thermal_cooling_device *cdev,
 			thermal_zone_get_zone_by_name("cpu-1-0-usr");
 		if (!IS_ERR(tz) && !thermal_zone_get_temp(tz, &temp) && temp > 0) {
 			unsigned long allowed = cpufreq_cdev->max_level;
-			if (temp < 80000)
-				allowed = min(6UL, cpufreq_cdev->max_level);
-			else if (temp < 90000)
-				allowed = min(7UL, cpufreq_cdev->max_level);
-			else if (temp < 92000)
-				allowed = min(8UL, cpufreq_cdev->max_level);
+			allowed = min((unsigned long)get_thermal_floor_level(temp),
+				      cpufreq_cdev->max_level);
 			if (state > allowed)
 				state = allowed;
 		}

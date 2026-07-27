@@ -38,19 +38,23 @@ jobs:
           submodules: true
 
       # -------------------------------------------------------
-      # Schritt 2: Cross-Compiler installieren
+      # Schritt 2: Cross-Compiler + Build-Tools installieren
       # Der Kernel 4.14 baut sauber mit dem distro-eigenen
       # aarch64-linux-gnu-gcc (GCC 13/14).
+      # ccache für inkrementelle Builds, clang für LTO-Unterstützung.
       # -------------------------------------------------------
       - name: Install toolchain
         run: |
           sudo apt-get update
           sudo apt-get install -y \
             gcc-aarch64-linux-gnu \
-            gcc-arm-linux-gnueabihf
+            gcc-arm-linux-gnueabihf \
+            ccache \
+            clang \
+            llvm
 
       # -------------------------------------------------------
-      # Schritt 3: Kernel + Device Trees bauen
+      # Schritt 3: Kernel + Device Trees konfigurieren
       # -------------------------------------------------------
       - name: Configure kernel
         run: |
@@ -74,7 +78,17 @@ jobs:
           export ARCH=arm64
           export CROSS_COMPILE=aarch64-linux-gnu-
           export CROSS_COMPILE_COMPAT=arm-linux-gnueabihf-
-          make -j$(nproc) Image.gz dtb.img dtbo.img
+          # ccache für schnellere inkrementelle Builds
+          export USE_CCACHE=1
+          export CCACHE_DIR=/tmp/ccache
+          # Parallelität basierend auf verfügbarem RAM
+          # 8 Kerne * clang = >4GB RAM → begrenzen
+          JOBS=$(nproc)
+          MEM_GB=$(grep MemTotal /proc/meminfo | awk '{printf "%.0f", $2/1024/1024}')
+          if [ "$MEM_GB" -lt 8 ]; then
+            JOBS=2
+          fi
+          make -j$JOBS Image.gz dtb.img dtbo.img
 
       # -------------------------------------------------------
       # Schritt 4: AnyKernel3-flashbares ZIP erstellen
@@ -105,7 +119,7 @@ jobs:
           body: |
             **K6A Custom Kernel** für sweet (sweetin / sweet_k6a)
 
-            - **Basis:** 4.14.356-openela-rc1-perf
+            - **Basis:** 4.14.369-openela-rc1-perf
             - **Root:** KernelSU-Next (built-in, non-GKI)
             - **Manager:** KernelSU-Next Manager APK installieren
 
@@ -117,7 +131,7 @@ jobs:
 
             **Changelog gegenüber Build #58:**
             - KoWSU entfernt, KSU Next integriert
-            - Kernel heißt jetzt `4.14.356-openela-rc1-perf` (unscheinbar)
+            - Kernel heißt jetzt `4.14.369-openela-rc1-perf` (unscheinbar)
           files: K6A-Kernel-sweet-*.zip
 
       # -------------------------------------------------------
