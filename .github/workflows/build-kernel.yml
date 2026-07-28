@@ -1,6 +1,6 @@
-# Build Kernel — K6A Custom Kernel for sweet
+# Build Kernel — BadazzKernel for sweet
 # -----------------------------------------------------------
-# Läuft bei jedem Push auf Branch 23.2
+# Läuft bei jedem Push auf Branch main
 # Baut den Kernel + DTBs, packt ein flashbares AnyKernel3-ZIP
 # und veröffentlicht es als GitHub Release.
 #
@@ -17,7 +17,7 @@ name: Build Kernel
 
 on:
   push:
-    branches: [23.2, ksu-next-fix-100]
+    branches: [main, 23.2, ksu-next-fix-100]
   workflow_dispatch:
 
 jobs:
