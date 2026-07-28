@@ -32,6 +32,8 @@
 #include <linux/tick.h>
 #include <linux/sched/topology.h>
 #include <linux/sched/sysctl.h>
+#include <linux/proc_fs.h>
+#include <linux/seq_file.h>
 
 #include <trace/events/power.h>
 
@@ -796,7 +798,7 @@ static ssize_t store_scaling_min_freq(
 store_one(scaling_max_freq, max);
 
 /* Procfs interface for monitoring invalid writes */
-static int cpufreq_invalid_writes_show(struct seq_hort *m, void *v)
+static int cpufreq_invalid_writes_show(struct seq_file *m, void *v)
 {
 	seq_printf(m, "%d\n", atomic_read(&cpufreq_invalid_min_freq_writes));
 	return 0;

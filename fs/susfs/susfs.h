@@ -23,7 +23,7 @@
 #include <linux/hashtable.h>
 #include <linux/delay.h>
 #include <asm/setup.h>
-#include "fuse/fuse_i.h"
+#include "../fuse/fuse_i.h"
 
 extern bool susfs_is_current_ksu_domain(void);
 extern struct cred *ksu_cred;
