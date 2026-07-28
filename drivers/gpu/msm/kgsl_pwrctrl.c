@@ -13,6 +13,8 @@
 
 #include <linux/export.h>
 #include <linux/interrupt.h>
+#include <linux/init.h>
+#include <linux/kobject.h>
 #include <asm/page.h>
 #include <linux/pm_runtime.h>
 #include <linux/msm-bus.h>
@@ -3450,19 +3452,12 @@ static struct attribute_group gpu_thermal_floor_attr_group = {
 
 static int __init gpu_thermal_floor_init(void)
 {
-	struct class *kgsl_class;
-	struct device *kgsl_dev;
+	struct kobject *k6a_gpu_kobj;
 
-	kgsl_class = class_create(THIS_MODULE, "kgsl");
-	if (IS_ERR(kgsl_class))
-		return PTR_ERR(kgsl_class);
+	k6a_gpu_kobj = kobject_create_and_add("k6a_gpu_thermal", kernel_kobj);
+	if (!k6a_gpu_kobj)
+		return -ENOMEM;
 
-	kgsl_dev = device_create(kgsl_class, NULL, MKDEV(0, 0), NULL, "kgsl-3d0");
-	if (IS_ERR(kgsl_dev)) {
-		class_destroy(kgsl_class);
-		return PTR_ERR(kgsl_dev);
-	}
-
-	return sysfs_create_group(&kgsl_dev->kobj, &gpu_thermal_floor_attr_group);
+	return sysfs_create_group(k6a_gpu_kobj, &gpu_thermal_floor_attr_group);
 }
-module_init(gpu_thermal_floor_init);
+device_initcall(gpu_thermal_floor_init);
