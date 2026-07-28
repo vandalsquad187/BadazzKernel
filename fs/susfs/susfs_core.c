@@ -17,3 +17,7 @@ out:
 	if (copy_to_user(&((struct st_susfs_log __user*)*user_info)->err, &info.err, sizeof(info.err)))
 		info.err = -EFAULT;
 }
+
+void susfs_init(void) {
+	SUSFS_LOGI("SUSFS initialized\n");
+}
