@@ -1,18 +1,441 @@
-Linux kernel
-============
+===============================================================================
+K6A KERNEL ANALYSE & VERBESSERUNGSPLAN
+===============================================================================
+Erstellt: 27. Juli 2026
+Kernel: vandalsquad187/kernel_xiaomi_sm6150 (Branch 23.2)
+Version: v4.2.9b
+Basis: Linux 4.14.356-openela-rc1
+Device: Xiaomi SM6150 (sweet/sweetin/sweet_k6a)
+===============================================================================
 
-This file was moved to Documentation/admin-guide/README.rst
+INHALTSVERZEICHNIS
+------------------
+1. KERNEL-ÜBERSICHT
+2. STÄRKENANALYSE
+3. SCHWÄCHEN & VERBESSERUNGSPOTENTIAL
+4. DETAILLIERTER VERBESSERUNGSPLAN (7 PUNKTE)
+5. IMPLEMENTIERUNGSREIHENFOLGE
+6. TECHNISCHE DETAILS
 
-Please notice that there are several guides for kernel developers and users.
-These guides can be rendered in a number of formats, like HTML and PDF.
+===============================================================================
+1. KERNEL-ÜBERSICHT
+===============================================================================
 
-In order to build the documentation, use ``make htmldocs`` or
-``make pdfdocs``.
+Basis-Informationen:
+- Linux Kernel 4.14.356 (openela-rc1)
+- Branch: 23.2
+- Architektur: ARM64 (aarch64)
+- Target: Xiaomi SM6150 (sweet family)
+- Compiler: GCC 13/14 oder Clang
+- Build-System: Make + AnyKernel3
 
-There are various text files in the Documentation/ subdirectory,
-several of them using the Restructured Text markup notation.
-See Documentation/00-INDEX for a list of what is contained in each file.
+Wichtige Komponenten:
+- KernelSU-Next (v33300) mit SUSFS v2.2.0
+- Thermal Management (vbat/BCL deaktiviert)
+- GPU: Adreno 618 (SM7150)
+- CPU: Kryo 460 (Gold/Silver Cluster)
 
-Please read the Documentation/process/changes.rst file, as it contains the
-requirements for building and running the kernel, and information about
-the problems which may result by upgrading your kernel.
+===============================================================================
+2. STÄRKENANALYSE
+===============================================================================
+
+1. EXZELLENTE THERMAL-ANALYSE
+   - Root Cause des CPU-Freeze (vbat/BCL-Zonen) identifiziert
+   - Invertierte Logik in low_limits_cap Governor erkannt
+   - Alle 9 vbat/BCL-Zonen per Device Tree deaktiviert
+   - Workaround für defekte Sensoren (-274°C) implementiert
+
+2. SAUBERE ARCHITEKTUR
+   - Trennung von Kernel-Patches und Userspace-Tuning
+   - k6a-tune als Magisk-Modul
+   - Klare Build-Infrastruktur mit CI
+
+3. UMFASSENDE SUSFS-INTEGRATION
+   - Alle SUSFS-Features v2.2.0 implementiert
+   - LSM Security Hooks statt Kprobes
+   - Bootloop-Fix für UTS-Spoofing
+
+4. GUTES CI-SETUP
+   - Automatisierter Build
+   - Klare Dokumentation bekannter Build-Fehler
+   - Reproduzierbare Builds
+
+===============================================================================
+3. SCHWÄCHEN & VERBESSERUNGSPOTENTIAL
+===============================================================================
+
+1. KERNEL-VERSION
+   - Aktuell: 4.14.356
+   - Aktuellster 4.14 LTS: ~4.14.369+
+   - Fehlende Sicherheits-Patches
+
+2. HARDCODED THERMAL-FLOOR
+   - Temperaturschwellen in cpu_cooling.c hardcoded
+   - Keine Runtime-Konfiguration möglich
+
+3. GPU-THERMAL-FLOOR STATISCH
+   - thermal_pwrlevel_floor = 4 (355 MHz) hardcoded
+   - Keine Anpassung an GPU-Temperatur
+
+4. LIBPERFMGR WORKAROUND
+   - "return 0" statt "return -EINVAL" maskiert das Problem
+   - Keine Validierung der geschriebenen Werte
+
+5. SUSFS CODE ORGANISATION
+   - fs/susfs.c ist 1480 Zeilen (monolithisch)
+   - Schwer zu warten und erweitern
+
+6. BUILD-OPTIMIERUNG
+   - -j2 Workaround für OOM
+   - Ineffizient für schnelle Builds
+
+7. DOKUMENTATION
+   - Keine CONTRIBUTING.md
+   - Externe Entwickler können nicht leicht beitragen
+
+===============================================================================
+4. DETAILLIERTER VERBESSERUNGSPLAN
+===============================================================================
+
+-------------------------------------------------------------------------------
+PUNKT 1: KERNEL-UPGRADE (PRIORITÄT: HOCH)
+-------------------------------------------------------------------------------
+
+Status: 4.14.356 → 4.14.360+ möglich
+
+Problem:
+- Du bist auf 4.14.356 geblieben
+- Aktuelle 4.14 LTS geht bis 4.14.369+
+- Fehlende CVE-Patches (net/, fs/, security/)
+
+Lösung:
+1. Upstream-Commits mergen:
+   git fetch origin 4.14.y
+   git merge v4.14.369
+   
+2. Fokus auf CVE-Patches:
+   - CVE-2024-XXXX (net/*)
+   - CVE-2024-XXXX (fs/*)
+   - CVE-2024-XXXX (security/)
+
+3. Test-Build in CI vor Merge
+
+Datei: Makefile
+Änderung:
+   VERSION = 4
+   PATCHLEVEL = 14
+   SUBLEVEL = 369 (oder aktueller Stand)
+
+-------------------------------------------------------------------------------
+PUNKT 2: THERMAL-FLOOR DYNAMISCH KONFIGURIERBAR (PRIORITÄT: HOCH)
+-------------------------------------------------------------------------------
+
+Status: Hardcoded in cpu_cooling.c:cpufreq_set_cur_state()
+
+Problem:
+- Temperaturschwellen (80°C, 90°C, 92°C) sind hardcoded
+- Keine Anpassung an verschiedene Anwendungsfälle
+
+Lösung - Option B (Device Tree):
+1. Device Tree Eigenschaften hinzufügen:
+   qcom,thermal-floor-temps = <80000 90000 92000>;
+   qcom,thermal-floor-levels = <6 7 8>;
+
+2. cpu_cooling.c anpassen:
+   - DT-Werte auslesen
+   - Fallback auf Standardwerte
+   - Runtime-Konfiguration via sysfs
+
+Code-Beispiel (cpu_cooling.c):
+```c
+static unsigned int thermal_floor_temps[3] = {80000, 90000, 92000};
+static unsigned int thermal_floor_levels[3] = {6, 7, 8};
+
+static int __init thermal_floor_init(void)
+{
+    // DT-Parsing hier implementieren
+    return 0;
+}
+```
+
+Sysfs-Interface:
+/proc/sys/kernel/k6a_thermal_floor_temp1  (default: 80000)
+/proc/sys/kernel/k6a_thermal_floor_temp2  (default: 90000)
+/proc/sys/kernel/k6a_thermal_floor_temp3  (default: 92000)
+
+Datei: drivers/thermal/cpu_cooling.c
+
+-------------------------------------------------------------------------------
+PUNKT 3: GPU-THERMAL-FLOOR DYNAMISCH (PRIORITÄT: MITTEL)
+-------------------------------------------------------------------------------
+
+Status: thermal_pwrlevel_floor = 4 hardcoded in kgsl_pwrctrl.c
+
+Problem:
+- GPU-Floor ist statisch auf 355 MHz (Level 4)
+- Keine Anpassung an GPU-Temperatur
+
+Lösung:
+1. Temperaturabhängige Floor-Logik:
+   - < 70°C → Floor Level 5 (267 MHz)
+   - 70-85°C → Floor Level 4 (355 MHz)
+   - > 85°C → Floor Level 3 (430 MHz)
+
+2. Konfig über sysfs:
+   /sys/class/kgsl/kgsl-3d0/thermal_floor_temp
+
+3. Code-Anpassung in kgsl_pwrctrl.c:
+```c
+static unsigned int get_thermal_floor_level(struct kgsl_device *device)
+{
+    int temp = 0;
+    struct thermal_zone_device *tz;
+    
+    tz = thermal_zone_get_zone_by_name("gpu-thermal");
+    if (!IS_ERR(tz))
+        thermal_zone_get_temp(tz, &temp);
+    
+    if (temp < 70000)
+        return 5;  // 267 MHz
+    else if (temp < 85000)
+        return 4;  // 355 MHz
+    else
+        return 3;  // 430 MHz
+}
+```
+
+Datei: drivers/gpu/msm/kgsl_pwrctrl.c
+
+-------------------------------------------------------------------------------
+PUNKT 4: LIBPERFMGR VALIDATION-LAYER (PRIORITÄT: MITTEL)
+-------------------------------------------------------------------------------
+
+Status: "return 0" statt "return -EINVAL" in cpufreq.c
+
+Problem:
+- vendor.thermal-hal schreibt scaling_min_freq = 999999999
+- Patch maskiert das Problem statt es zu lösen
+
+Lösung:
+1. Validation-Layer in store_scaling_min_freq():
+```c
+static ssize_t store_scaling_min_freq(struct cpufreq_policy *policy,
+                                      const char *buf, size_t count)
+{
+    int ret, temp;
+    struct cpufreq_policy new_policy;
+    
+    memcpy(&new_policy, policy, sizeof(*policy));
+    ret = sscanf(buf, "%u", &new_policy.min);
+    if (ret != 1)
+        return -EINVAL;
+    
+    // VALIDATION: Clamp invalid values
+    if (new_policy.min > policy->cpuinfo.max_freq) {
+        pr_warn("libperfmgr: Invalid min_freq %u, clamping to max_freq %u\n",
+                new_policy.min, policy->cpuinfo.max_freq);
+        new_policy.min = policy->cpuinfo.max_freq;
+        // Optional: Rate-limiting für wiederholte Versuche
+    }
+    
+    temp = new_policy.min;
+    ret = cpufreq_set_policy(policy, &new_policy);
+    if (!ret)
+        policy->user_policy.min = temp;
+    
+    return ret ? ret : count;
+}
+```
+
+2. Procfs-Interface zur Überwachung:
+   /proc/cpufreq_invalid_writes (zeigt Anzahl der geclampten Werte)
+
+Datei: drivers/cpufreq/cpufreq.c
+
+-------------------------------------------------------------------------------
+PUNKT 5: SUSFS CODE MODULARISIEREN (PRIORITÄT: NIEDRIG)
+-------------------------------------------------------------------------------
+
+Status: fs/susfs.c ist 1480 Zeilen (monolithisch)
+
+Problem:
+- Schwierig zu warten
+- Keine klare Trennung der Features
+
+Lösung - Modulare Struktur:
+```
+fs/susfs/
+├── susfs.h              (Gemeinsame Strukturen)
+├── susfs_core.c         (Hauptlogik)
+├── susfs_path.c         (SUS_PATH)
+├── susfs_kstat.c        (SUS_KSTAT)
+├── susfs_mount.c        (SUS_MOUNT)
+├── susfs_spoof.c        (SPOOF_UNAME/CMDLINE)
+└── Makefile
+```
+
+Makefile-Anpassung:
+```makefile
+obj-y += susfs/
+susfs-y := susfs_core.o susfs_path.o susfs_kstat.o susfs_mount.o susfs_spoof.o
+```
+
+Datei: fs/susfs.c → fs/susfs/
+
+-------------------------------------------------------------------------------
+PUNKT 6: BUILD-OPTIMIERUNG (PRIORITÄT: NIEDRIG)
+-------------------------------------------------------------------------------
+
+Status: -j2 Workaround für OOM
+
+Problem:
+- 8 Kerne × clang = >4GB RAM → SIGKILL
+- Ineffizient für schnelle Builds
+
+Lösung - Option B (Memory-Cgroup):
+1. GitHub Actions Runner mit mehr RAM (16GB+)
+2. ccache Integration:
+```yaml
+- name: Install ccache
+  run: sudo apt-get install ccache
+  
+- name: Build with ccache
+  run: |
+    export USE_CCACHE=1
+    export CCACHE_DIR=/tmp/ccache
+    make -j$(nproc) ...
+```
+
+3. LTO deaktivieren für Debug-Builds:
+```makefile
+# In defconfig
+CONFIG_LTO=n
+CONFIG_THINLTO=n
+```
+
+Datei: .github/workflows/build-kernel.yml
+
+-------------------------------------------------------------------------------
+PUNKT 7: DOKUMENTATION (PRIORITÄT: NIEDRIG)
+-------------------------------------------------------------------------------
+
+Status: Keine CONTRIBUTING.md vorhanden
+
+Lösung - CONTRIBUTING.md erstellen:
+
+```markdown
+# Contributing to K6A Kernel
+
+## Build Instructions
+
+### Prerequisites
+- Ubuntu 22.04+ (or equivalent)
+- GCC 13+ or Clang 15+
+- Python 3.8+
+- Perl
+
+### Local Build
+```bash
+make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- \
+    -j$(nproc) Image.gz dtb.img dtbo.img
+```
+
+### CI Build
+Push to branch `23.2` to trigger CI.
+
+## Patch Submission
+
+1. Fork the repository
+2. Create feature branch
+3. Make changes
+4. Test build
+5. Submit PR
+
+## Code Style
+- Follow kernel coding style
+- Use 8-space indentation
+- Max 80 chars per line
+
+## Thermal Management
+See CHANGELOG_K6A_KERNEL.md for thermal zone details.
+
+## SUSFS Features
+See fs/susfs/ for implementation details.
+```
+
+Datei: CONTRIBUTING.md (neu)
+
+===============================================================================
+5. IMPLEMENTIERUNGSREIHENFOLGE
+===============================================================================
+
+Empfohlene Reihenfolge:
+
+1. KERNEL-UPGRADE (Sicherheits-Patches)
+   - Upstream-Merge
+   - CVE-Patches
+   - Test-Build
+
+2. DYNAMISCHE THERMAL-FLOOR-KONFIGURATION
+   - DT-Properties hinzufügen
+   - cpu_cooling.c anpassen
+   - Sysfs-Interface
+
+3. LIBPERFMGR VALIDATION-LAYER
+   - Validation in cpufreq.c
+   - Procfs-Interface
+   - Rate-Limiting
+
+4. GPU-THERMAL-FLOOR DYNAMISCH
+   - Temperaturabhängige Logik
+   - Sysfs-Interface
+   - Testing
+
+5. SUSFS MODULARISIERUNG
+   - Code-Struktur planen
+   - Dateien erstellen
+   - Makefile anpassen
+
+6. BUILD-OPTIMIERUNG
+   - ccache Integration
+   - LTO-Option
+   - CI-Updates
+
+7. DOKUMENTATION
+   - CONTRIBUTING.md
+   - Code-Dokumentation
+   - Wiki-Updates
+
+===============================================================================
+6. TECHNISCHE DETAILS
+===============================================================================
+
+Wichtige Pfade:
+- Kernelquellen: /home/x/vandalsquad-kernel/
+- GitHub: https://github.com/vandalsquad187/kernel_xiaomi_sm6150
+- Branch: 23.2
+
+Build-Artefakte:
+- AnyKernel: anykernel/
+- CI-Release: K6A-Kernel-sweet-<run_number>.zip
+
+Sysfs-Pfade:
+- GPU: /sys/class/kgsl/kgsl-3d0/
+- Gold CPU: /sys/devices/system/cpu/cpufreq/policy6/
+- Temp Gold: /sys/devices/virtual/thermal/thermal_zone26/temp
+
+Thermal-Zonen (SM7150):
+- Zone 0: pm6150-tz (aktiv)
+- Zone 3-5: pm6150-vbat-lvl0/1/2 (disabled)
+- Zone 6-8: pm6150-bcl-lvl0/1/2 (disabled)
+- Zone 14-16: pm6150l-bcl-lvl0/1/2 (disabled)
+- Zone 24: cpu-0-0-usr (Silver Temp)
+- Zone 26: cpu-1-0-usr (Gold Temp)
+- Zone 74: quiet_therm (aktiv)
+
+KSU Version: 33300
+Manager-Kompatibilität: ≥ 33188
+
+===============================================================================
+ENDE DER DATEI
+===============================================================================
