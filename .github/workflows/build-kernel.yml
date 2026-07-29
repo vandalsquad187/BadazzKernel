@@ -1,4 +1,4 @@
-# Build Kernel — BadazzKernel for sweet
+# Build Kernel — Badazz-kernel for sweet
 # -----------------------------------------------------------
 # Läuft bei jedem Push auf Branch main
 # Baut den Kernel + DTBs, packt ein flashbares AnyKernel3-ZIP
@@ -7,10 +7,13 @@
 # Ablauf:
 #   1. Repo clonen
 #   2. AArch64 Cross-Compiler installieren
-#   3. Kernel + DTBs bauen (sweet_defconfig)
-#   4. Artefakte in anykernel/ kopieren
-#   5. Flashbares ZIP erstellen
-#   6. Release erstellen mit ZIP als Artefakt
+#   3. ccache-Cache wiederherstellen (persistent über Runs)
+#   4. Kernel + DTBs bauen (sweet_defconfig)
+#   5. Kritische Configs validieren
+#   6. Artefakte in anykernel/ kopieren
+#   7. Flashbares ZIP + Build-Info erstellen
+#   8. Release erstellen mit ZIP als Artefakt
+#   9. ccache-Cache speichern
 # -----------------------------------------------------------
 
 name: Build Kernel
@@ -34,7 +37,7 @@ jobs:
       - name: Checkout source
         uses: actions/checkout@v4
         with:
-          fetch-depth: 1
+          fetch-depth: 0
           submodules: true
 
       # -------------------------------------------------------
@@ -54,7 +57,38 @@ jobs:
             llvm
 
       # -------------------------------------------------------
-      # Schritt 3: Kernel + Device Trees konfigurieren
+      # Schritt 3: ccache-Cache wiederherstellen
+      # Persistiert über GitHub Actions Cache — Key basiert auf
+      # Kernel-Makefile, um bei Versionswechseln zu invalidieren.
+      # -------------------------------------------------------
+      - name: Restore ccache
+        uses: actions/cache@v4
+        with:
+          path: ~/.ccache
+          key: ccache-${{ runner.os }}-sweet-${{ hashFiles('Makefile') }}
+          restore-keys: |
+            ccache-${{ runner.os }}-sweet-
+
+      # -------------------------------------------------------
+      # Schritt 4: Kernel-Version aus Makefile extrahieren
+      # -------------------------------------------------------
+      - name: Extract kernel version
+        id: kernel_ver
+        run: |
+          VERSION=$(grep "^VERSION = " Makefile | awk '{print $3}')
+          PATCHLEVEL=$(grep "^PATCHLEVEL = " Makefile | awk '{print $3}')
+          SUBLEVEL=$(grep "^SUBLEVEL = " Makefile | awk '{print $3}')
+          echo "full=$VERSION.$PATCHLEVEL.$SUBLEVEL" >> $GITHUB_OUTPUT
+          echo "short=$VERSION.$PATCHLEVEL.$SUBLEVEL" >> $GITHUB_OUTPUT
+
+      - name: Extract KSU version
+        id: ksu_ver
+        run: |
+          KSU_VER=$(grep "KSU_VERSION=" KernelSU-Next/kernel/Makefile | head -1 | sed 's/.*KSU_VERSION=//')
+          echo "version=$KSU_VER" >> $GITHUB_OUTPUT
+
+      # -------------------------------------------------------
+      # Schritt 5: Kernel + Device Trees konfigurieren
       # -------------------------------------------------------
       - name: Configure kernel
         run: |
@@ -62,10 +96,7 @@ jobs:
           export CROSS_COMPILE=aarch64-linux-gnu-
           export CROSS_COMPILE_COMPAT=arm-linux-gnueabihf-
           make sweet_defconfig
-          # GCC verträgt keine LLVM/Polly-Flags
           sed -i 's/CONFIG_LLVM_POLLY=y/# CONFIG_LLVM_POLLY is not set/' .config
-          # GCC 13 (Ubuntu 24.04) erkennt -fstack-protector nicht
-          # im Cross-Compile auf aarch64 — komplett deaktivieren
           sed -i 's/CONFIG_CC_STACKPROTECTOR_STRONG=y/# CONFIG_CC_STACKPROTECTOR_STRONG is not set/' .config
           sed -i 's/.*CONFIG_CC_STACKPROTECTOR_NONE.*/CONFIG_CC_STACKPROTECTOR_NONE=y/' .config
           grep -q 'CONFIG_CC_STACKPROTECTOR_NONE=y' .config || \
@@ -73,16 +104,44 @@ jobs:
           sed -i '/CONFIG_CC_STACKPROTECTOR_REGULAR/d' .config
           make olddefconfig
 
+      # -------------------------------------------------------
+      # Schritt 6: Kritische Kernel-Configs validieren
+      # Verhindert fehlerhafte Builds durch fehlende Optionen.
+      # -------------------------------------------------------
+      - name: Validate kernel config
+        run: |
+          REQUIRED_CONFIGS=(
+            "CONFIG_KSU=y"
+            "CONFIG_KSU_SUSFS=y"
+            "CONFIG_KSU_TAMPER_SYSCALL_TABLE=y"
+          )
+          errors=0
+          for config in "${REQUIRED_CONFIGS[@]}"; do
+            if ! grep -q "^${config}$" .config; then
+              echo "::error::Missing required config: ${config}"
+              errors=$((errors+1))
+            fi
+          done
+          if [ "$errors" -gt 0 ]; then
+            echo "FAILED: $errors required config(s) missing"
+            exit 1
+          fi
+          echo "::notice::All required kernel configs are enabled"
+
+      # -------------------------------------------------------
+      # Schritt 7: Kernel + DTBs bauen
+      # ccache mit Kompression und Größenlimit für schnelle
+      # inkrementelle Builds und minimierten Speicherverbrauch.
+      # -------------------------------------------------------
       - name: Build kernel
         run: |
           export ARCH=arm64
           export CROSS_COMPILE=aarch64-linux-gnu-
           export CROSS_COMPILE_COMPAT=arm-linux-gnueabihf-
-          # ccache für schnellere inkrementelle Builds
           export USE_CCACHE=1
-          export CCACHE_DIR=/tmp/ccache
-          # Parallelität basierend auf verfügbarem RAM
-          # 8 Kerne * clang = >4GB RAM → begrenzen
+          export CCACHE_DIR=~/.ccache
+          export CCACHE_COMPRESS=true
+          export CCACHE_MAXSIZE=2G
           JOBS=$(nproc)
           MEM_GB=$(grep MemTotal /proc/meminfo | awk '{printf "%.0f", $2/1024/1024}')
           if [ "$MEM_GB" -lt 8 ]; then
@@ -91,57 +150,61 @@ jobs:
           make -j$JOBS Image.gz dtb.img dtbo.img
 
       # -------------------------------------------------------
-      # Schritt 4: AnyKernel3-flashbares ZIP erstellen
-      # anykernel/ liegt im Repo und wird nur mit den neuen
-      # Artefakten befüllt.
+      # Schritt 8: AnyKernel3-flashbares ZIP + Metadaten erstellen
       # -------------------------------------------------------
       - name: Build flashable ZIP
         run: |
-          # Kernel + DTBs in den AnyKernel3-Ordner kopieren
+          VERSION="${{ steps.kernel_ver.outputs.short }}"
+          KSU_VER="${{ steps.ksu_ver.outputs.version }}"
+
           cp arch/arm64/boot/Image.gz anykernel/
           cp arch/arm64/boot/dtb.img anykernel/
           cp arch/arm64/boot/dtbo.img anykernel/
-          # ZIP erstellen (ohne .git und README — die sind nur im Repo)
+
+          # Build-Info für Debugging und User-Transparenz
+          cat > anykernel/build-info.txt << EOF
+          KERNEL_VERSION=${VERSION}
+          KSU_VERSION=${KSU_VER}
+          BUILD_DATE=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+          BUILD_NUMBER=${{ github.run_number }}
+          COMMIT_SHA=${{ github.sha }}
+          EOF
+
           cd anykernel
-          zip -r9 ../K6A-Kernel-sweet-${{ github.run_number }}.zip * \
+          zip -r9 ../Badazz-kernel-sweet-v${VERSION}.zip * \
             -x ".git/*" "README.md"
 
       # -------------------------------------------------------
-      # Schritt 5: Release erstellen
-      # Das Release bekommt einen Tag build-<Run-Nummer>
-      # und enthält das flashbare ZIP.
+      # Schritt 9: Release erstellen
+      # Tag-Name und Release-Name basieren auf Kernel-Version
+      # für eine saubere Versionskette.
       # -------------------------------------------------------
       - name: Create Release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: build-${{ github.run_number }}
-          name: "K6A Kernel Build #${{ github.run_number }}"
+          tag_name: v${{ steps.kernel_ver.outputs.short }}-badazz
+          name: "Badazz-kernel v${{ steps.kernel_ver.outputs.short }}"
           body: |
-            **K6A Custom Kernel** für sweet (sweetin / sweet_k6a)
+            **Badazz-kernel** für sweet (sweetin / sweet_k6a)
 
-            - **Basis:** 4.14.369-openela-rc1-perf
-            - **Root:** KernelSU-Next (built-in, non-GKI)
+            - **Basis:** ${{ steps.kernel_ver.outputs.full }}-openela-rc1-perf
+            - **Root:** KernelSU-Next (KSU_VERSION=${{ steps.ksu_ver.outputs.version }}, UAPIv2)
             - **Manager:** KernelSU-Next Manager APK installieren
 
+            **Changelog:**
+            $(git log --oneline HEAD~10..HEAD 2>/dev/null || git log --oneline -10)
+
             **Flashbar via OrangeFox / TWRP** — einfach das ZIP flashen.
-
-            Nach dem Flash die **KernelSU-Next Manager App** installieren
-            (APK von GitHub Releases: https://github.com/rifsxd/KernelSU-Next/releases)
-            und öffnen — Root sollte sofort verfügbar sein.
-
-            **Changelog gegenüber Build #58:**
-            - KoWSU entfernt, KSU Next integriert
-            - Kernel heißt jetzt `4.14.369-openela-rc1-perf` (unscheinbar)
-          files: K6A-Kernel-sweet-*.zip
+          files: Badazz-kernel-sweet-*.zip
 
       # -------------------------------------------------------
-      # Schritt 6: Zusammenfassung der Änderungen ausgeben
+      # Schritt 10: Zusammenfassung
       # -------------------------------------------------------
       - name: Show summary
         run: |
+          VERSION="${{ steps.kernel_ver.outputs.short }}"
+          KSU_VER="${{ steps.ksu_ver.outputs.version }}"
           echo "=== Build abgeschlossen ==="
-          echo "ZIP: K6A-Kernel-sweet-${{ github.run_number }}.zip"
-          echo ""
-          echo "Enthaltene Änderungen:"
-          echo "  - KernelSU-Next built-in"
-          echo "  - Kernel name: 4.14.356-openela-rc1-perf"
+          echo "Kernel: Badazz-kernel v${VERSION}"
+          echo "KSU:    v${KSU_VER} (UAPIv2)"
+          echo "ZIP:    Badazz-kernel-sweet-v${VERSION}.zip"
