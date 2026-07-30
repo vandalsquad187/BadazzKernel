@@ -174,28 +174,6 @@ static void _ab_buslevel_update(struct kgsl_pwrctrl *pwr,
 static unsigned int _adjust_pwrlevel(struct kgsl_pwrctrl *pwr, int level,
 					struct kgsl_pwr_constraint *pwrc)
 {
-	/* Dynamic GPU thermal floor based on temperature */
-	static unsigned int gpu_thermal_floor_temp_low = 70000;
-	static unsigned int gpu_thermal_floor_temp_high = 85000;
-	static unsigned int gpu_thermal_floor_level_low = 5;
-	static unsigned int gpu_thermal_floor_level_mid = 4;
-	static unsigned int gpu_thermal_floor_level_high = 3;
-
-	/* Update thermal floor based on GPU temperature */
-	{
-		int temp = 0;
-		struct thermal_zone_device *tz =
-			thermal_zone_get_zone_by_name("gpu-thermal");
-		if (!IS_ERR(tz) && !thermal_zone_get_temp(tz, &temp) && temp > 0) {
-			if (temp < gpu_thermal_floor_temp_low)
-				pwr->thermal_pwrlevel_floor = gpu_thermal_floor_level_low;
-			else if (temp < gpu_thermal_floor_temp_high)
-				pwr->thermal_pwrlevel_floor = gpu_thermal_floor_level_mid;
-			else
-				pwr->thermal_pwrlevel_floor = gpu_thermal_floor_level_high;
-		}
-	}
-
 	unsigned int max_pwrlevel = max_t(unsigned int, pwr->thermal_pwrlevel,
 					pwr->max_pwrlevel);
 	unsigned int min_pwrlevel = min_t(unsigned int,
