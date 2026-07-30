@@ -182,7 +182,7 @@ jobs:
       - name: Create Release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: v${{ steps.kernel_ver.outputs.short }}-badazz
+          tag_name: v${{ steps.kernel_ver.outputs.short }}-badazz-build${{ github.run_number }}
           name: "Badazz-kernel v${{ steps.kernel_ver.outputs.short }}"
           body: |
             **Badazz-kernel** für sweet (sweetin / sweet_k6a)
