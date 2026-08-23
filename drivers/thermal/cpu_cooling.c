@@ -40,13 +40,13 @@
 #define USE_LMH_DEV	0
 
 /* Dynamic thermal floor thresholds (in millidegrees) - configurable via sysfs */
-static unsigned int thermal_floor_temps[3] = {80000, 90000, 92000};
+static unsigned int thermal_floor_temps[3] = {85000, 90000, 95000};
 static unsigned int thermal_floor_levels[3] = {6, 7, 8};
 
 /* Sysfs interface for runtime thermal floor configuration */
-static int thermal_floor_temp1 = 80000;
+static int thermal_floor_temp1 = 85000;
 static int thermal_floor_temp2 = 90000;
-static int thermal_floor_temp3 = 92000;
+static int thermal_floor_temp3 = 95000;
 
 static int get_thermal_floor_level(unsigned int temp)
 {

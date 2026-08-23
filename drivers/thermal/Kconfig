@@ -480,6 +480,35 @@ config THERMAL_TSENS
 	  thermal userspace client when a threshold is reached. Warm/Cool
 	  temperature thresholds can be set independently for each sensor.
 
+config K6A_FEATURE_FLAGS
+	bool "k6a Feature Flags sysfs interface"
+	depends on THERMAL
+	default y
+	help
+	  Exports /sys/kernel/k6a_features/ with feature flags for userspace
+	  modules (k6a-godmode) to detect kernel capabilities at runtime:
+	  CPU thermal floor, GPU thermal floor, MSM performance, writable trips,
+	  SUSFS active, kernel version, git hash.
+
+config K6A_GOV
+	tristate "k6a In-Kernel Gaming Governor"
+	depends on THERMAL && CPU_FREQ && KGSL
+	select THERMAL_WRITABLE_TRIPS
+	default m
+	help
+	  In-kernel governor for gaming: CPU/GPU thermal management,
+	  cooldown state machine, LMH disable via msm_performance,
+	  boost control, thread pinning hooks.
+
+	  Exposes /sys/kernel/k6a_gov/ for userspace control (k6a-godmode).
+	  Build as module for version-lock with kernel.
+
+	  Legacy mode (default=1): Kernel handles cooldown state machine
+	  + thermal floor writes. Userspace (k6a-godmode) handles boost,
+	  IRQ, VM, props, thread pinning.
+
+source "drivers/thermal/k6a_gov/Kconfig"
+
 menu "Qualcomm thermal drivers"
 depends on (ARCH_QCOM && OF) || COMPILE_TEST
 source "drivers/thermal/qcom/Kconfig"

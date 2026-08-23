@@ -1,0 +1,17 @@
+# SPDX-License-Identifier: GPL-2.0
+config K6A_GOV
+	tristate "k6a In-Kernel Gaming Governor"
+	depends on THERMAL && CPU_FREQ && QCOM_KGSL
+	select THERMAL_WRITABLE_TRIPS
+	default m
+	help
+	  In-kernel governor for gaming: CPU/GPU thermal management,
+	  cooldown state machine, LMH disable via msm_performance,
+	  boost control, thread pinning hooks.
+
+	  Exposes /sys/kernel/k6a_gov/ for userspace control (k6a-godmode).
+	  Build as module for version-lock with kernel.
+
+	  Legacy mode (default=1): Kernel handles cooldown state machine
+	  + thermal floor writes. Userspace (k6a-godmode) handles boost,
+	  IRQ, VM, props, thread pinning.
