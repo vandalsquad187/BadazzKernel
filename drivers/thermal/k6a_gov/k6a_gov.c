@@ -16,7 +16,7 @@
 #include <linux/delay.h>
 #include <linux/workqueue.h>
 
-#define K6A_GOV_VERSION       "1.0.6"
+#define K6A_GOV_VERSION       "1.0.8"
 #define K6A_GOV_KERNEL_VER    KERNEL_VERSION(4,14,369)
 #define K6A_GOV_KTHREAD_SLEEP_MS   250
 #define K6A_GOV_MAX_FREQS     32
@@ -71,11 +71,11 @@ struct k6a_profile_def {
 };
 
 static const struct k6a_profile_def profiles[] = {
-    [K6A_PROFILE_OFF]     = { 0,0,0,0,     0,0,0 },
-    [K6A_PROFILE_GAMING]  = { 80000,82000,88000,76000,  1555200,1200000,1000000 },
-    [K6A_PROFILE_BATTERY] = { 70000,75000,80000,65000,  1400000,1200000,1000000 },
-    [K6A_PROFILE_BADAZZ]  = { 85000,90000,95000,80000,  1800000,1600000,1400000 },
-    [K6A_PROFILE_CUSTOM]  = { 0,0,0,0,     0,0,0 },
+    [K6A_PROFILE_OFF]     = { 0,0,0,0,   0,0,0 },
+    [K6A_PROFILE_GAMING]  = { 80,82,88,76,   1555200,1200000,1000000 },
+    [K6A_PROFILE_BATTERY] = { 70,75,80,65,   1400000,1200000,1000000 },
+    [K6A_PROFILE_BADAZZ]  = { 85,90,95,80,   1800000,1600000,1400000 },
+    [K6A_PROFILE_CUSTOM]  = { 0,0,0,0,       0,0,0 },
 };
 
 /* ── Freq Helpers ────────────────────────────────────────────────── */
@@ -389,6 +389,10 @@ static ssize_t cd_thresholds_store(struct kobject *k, struct kobj_attribute *a, 
     u32 l2t,l3t,l4t,rec,l2g,l3g,l4g;
     if (sscanf(b, "%u %u %u %u %u %u %u",
                &l2t,&l3t,&l4t,&rec,&l2g,&l3g,&l4g) != 7) return -EINVAL;
+    if (l2t < 40 || l2t > 110 || l3t < 45 || l3t > 110 ||
+        l4t < 50 || l4t > 115 || rec < 30 || rec > 100 ||
+        rec >= l2t || l2t >= l3t || l3t >= l4t)
+        return -EINVAL;
     mutex_lock(&gov->lock);
     gov->cd_l2_temp=l2t; gov->cd_l3_temp=l3t; gov->cd_l4_temp=l4t; gov->cd_recover=rec;
     gov->cd_l2_gold_max=l2g; gov->cd_l3_gold_max=l3g; gov->cd_l4_gold_max=l4g;
