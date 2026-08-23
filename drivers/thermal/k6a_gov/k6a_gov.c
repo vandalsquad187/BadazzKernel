@@ -155,9 +155,9 @@ static void enforce_max_freq(void) {
     if (!max) return;
     p = cpufreq_cpu_get(6);
     if (p) {
-        if (p->max > max)
-            p->max = max;
+        if (p->max > max) p->max = max;
         cpufreq_cpu_put(p);
+        cpufreq_update_policy(6);   /* legal here: Kthread = process context */
     }
 }
 
@@ -326,7 +326,8 @@ static ssize_t status_show(struct kobject *k, struct kobj_attribute *a, char *b)
         "legacy_mode=%d\n"
         "enabled=%d\n"
         "gold_freqs=%u\n"
-        "gold_max=%u\n",
+        "gold_max=%u\n"
+        "gold_max_tbl=%u\n",
         K6A_GOV_VERSION,
         state_names[gov->state],
         gov->temp_celsius,
@@ -336,7 +337,8 @@ static ssize_t status_show(struct kobject *k, struct kobj_attribute *a, char *b)
         gov->legacy_mode,
         gov->enabled,
         gov->gold_num,
-        get_cd_max_freq());
+        get_cd_max_freq(),
+        gov->gold_num ? gov->gold_freqs[gov->gold_num - 1] : 0);
 }
 
 static ssize_t game_pid_show(struct kobject *k, struct kobj_attribute *a, char *b) {
