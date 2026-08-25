@@ -15,8 +15,11 @@
 #include <linux/sched.h>
 #include <linux/delay.h>
 #include <linux/workqueue.h>
+#include <linux/power_supply.h>
 
-#define K6A_GOV_VERSION       "1.0.8"
+extern int kgsl_k6a_get_levels(u32 *out, u32 max_n, u32 *cur_idx, u32 *max_idx);
+
+#define K6A_GOV_VERSION       "1.1.2"
 #define K6A_GOV_KERNEL_VER    KERNEL_VERSION(4,14,369)
 #define K6A_GOV_KTHREAD_SLEEP_MS   250
 #define K6A_GOV_MAX_FREQS     32
@@ -35,6 +38,8 @@ struct k6a_gov {
     struct task_struct *kthread;
     bool enabled;
     bool legacy_mode;
+    bool battery_guard;
+    u32 poll_ms;
 
     u32 cd_l2_temp, cd_l3_temp, cd_l4_temp, cd_recover;
     u32 cd_l2_gold_max, cd_l3_gold_max, cd_l4_gold_max;
@@ -118,6 +123,16 @@ static void freq_init_worker(struct work_struct *work) {
     }
     if (policy) cpufreq_cpu_put(policy);
 
+    {
+        u32 gtab[K6A_GOV_MAX_FREQS]; u32 gn = 0, tl = 0;
+        int tl_ret = kgsl_k6a_get_levels(gtab, K6A_GOV_MAX_FREQS, &gn, &tl);
+        if (tl_ret > 0)
+            pr_info("k6a_gov: gpu levels=%u cur_idx=%u max_idx=%u\n",
+                    gn, tl, tl_ret > 0 ? (u32)tl_ret : 0);
+        else
+            pr_info("k6a_gov: gpu levels read failed (%d)\n", tl_ret);
+    }
+
     if (g->gold_num > 0) {
         clamp_cd_freqs();
         pr_info("k6a_gov: freq tables loaded: Gold=%u\n", g->gold_num);
@@ -137,6 +152,7 @@ static void freq_init_worker(struct work_struct *work) {
 }
 
 /* ── CPU Freq Enforcement ────────────────────────────────────────── */
+/* policy6 deckt CPU6+7 ab (Cluster-Policy) — ein Clamp gilt fuer beide */
 static u32 get_cd_max_freq(void) {
     if (!gov || !gov->gold_num) return 0;
     switch (gov->state) {
@@ -161,6 +177,7 @@ static void enforce_max_freq(void) {
     }
 }
 
+/* policy6 deckt CPU6+7 ab (Cluster-Policy) — ein Clamp gilt fuer beide */
 static int cpufreq_notify(struct notifier_block *nb, unsigned long e, void *data) {
     struct cpufreq_policy *p;
     u32 max;
@@ -184,6 +201,10 @@ static int read_temp(void) {
     tz = thermal_zone_get_zone_by_name("cpu-1-0-usr");
     if (!IS_ERR(tz) && !thermal_zone_get_temp(tz, &t) && t > 0) return t / 1000;
     tz = thermal_zone_get_zone_by_name("cpu-0-0-usr");
+    if (!IS_ERR(tz) && !thermal_zone_get_temp(tz, &t) && t > 0) return t / 1000;
+    tz = thermal_zone_get_zone_by_name("xo-therm");
+    if (!IS_ERR(tz) && !thermal_zone_get_temp(tz, &t) && t > 0) return t / 1000;
+    tz = thermal_zone_get_zone_by_name("soc-therm");
     if (!IS_ERR(tz) && !thermal_zone_get_temp(tz, &t) && t > 0) return t / 1000;
     tz = thermal_zone_get_zone_by_name("thermal_zone0");
     if (!IS_ERR(tz) && !thermal_zone_get_temp(tz, &t) && t > 0) return t / 1000;
@@ -241,31 +262,52 @@ static void apply_limits(void) {
     enforce_max_freq();
 }
 
+/* ── Battery Guard ─────────────────────────────────────────────── */
+static int read_bat_temp(void) {
+    struct power_supply *psy;
+    union power_supply_propval val;
+    int ret;
+    psy = power_supply_get_by_name("battery");
+    if (!psy) return 0;
+    ret = psy->desc->get_property(psy, POWER_SUPPLY_PROP_TEMP, &val);
+    power_supply_put(psy);
+    if (ret) return 0;
+    return val.intval / 10;  /* Zehntelgrad → Celsius */
+}
+
 /* ── Kthread ─────────────────────────────────────────────────────── */
 static int gov_thread(void *data) {
     while (!kthread_should_stop()) {
         mutex_lock(&gov->lock);
         if (gov->enabled) {
             gov->temp_celsius = read_temp();
+            if (gov->battery_guard) {
+                int bt = read_bat_temp();
+                if (bt >= 45 && gov->state == K6A_GAMING) {
+                    gov->state = K6A_CD_L2;
+                    gov->state_ts = ktime_to_ms(ktime_get());
+                    pr_warn("k6a_gov: battery guard %dC -> CD_L2\n", bt);
+                }
+            }
             state_machine();
             apply_limits();
         }
         gov->ticks++;
         mutex_unlock(&gov->lock);
-        msleep(K6A_GOV_KTHREAD_SLEEP_MS);
+        msleep(gov->poll_ms);
     }
     return 0;
 }
 
 /* ── Cooling Device ──────────────────────────────────────────────── */
-static int cool_max(struct thermal_cooling_device *c, unsigned long *s) { *s = 8; return 0; }
+static int cool_max(struct thermal_cooling_device *c, unsigned long *s) { *s = K6A_CD_L4; return 0; }
 static int cool_cur(struct thermal_cooling_device *c, unsigned long *s) {
     *s = gov ? gov->state : 0;
     return 0;
 }
 static int cool_set(struct thermal_cooling_device *c, unsigned long s) {
-    if (s > 8) return -EINVAL;
     if (!gov) return -EINVAL;
+    if (s > K6A_CD_L4) s = K6A_CD_L4;   /* thermal-core kann mehr fordern */
     mutex_lock(&gov->lock);
     gov->state = s;
     gov->state_ts = ktime_to_ms(ktime_get());
@@ -316,6 +358,8 @@ static ssize_t profile_store(struct kobject *k, struct kobj_attribute *a, const 
 
 static ssize_t status_show(struct kobject *k, struct kobj_attribute *a, char *b) {
     static const char *state_names[] = {"off","gaming","cd_l2","cd_l3","cd_l4"};
+    unsigned int si = gov->state;
+    if (si > K6A_CD_L4) si = K6A_OFF;
     return sprintf(b,
         "version=%s\n"
         "state=%s\n"
@@ -329,7 +373,7 @@ static ssize_t status_show(struct kobject *k, struct kobj_attribute *a, char *b)
         "gold_max=%u\n"
         "gold_max_tbl=%u\n",
         K6A_GOV_VERSION,
-        state_names[gov->state],
+        state_names[si],
         gov->temp_celsius,
         gov->ticks,
         gov->throttle_events,
@@ -379,6 +423,31 @@ static ssize_t hysteresis_store(struct kobject *k, struct kobj_attribute *a, con
     return c;
 }
 
+static ssize_t battery_guard_show(struct kobject *k, struct kobj_attribute *a, char *b) {
+    return sprintf(b, "%d\n", gov->battery_guard);
+}
+static ssize_t battery_guard_store(struct kobject *k, struct kobj_attribute *a, const char *b, size_t c) {
+    unsigned long v;
+    if (kstrtoul(b, 10, &v)) return -EINVAL;
+    mutex_lock(&gov->lock);
+    gov->battery_guard = !!v;
+    mutex_unlock(&gov->lock);
+    return c;
+}
+
+static ssize_t poll_ms_show(struct kobject *k, struct kobj_attribute *a, char *b) {
+    return sprintf(b, "%u\n", gov->poll_ms);
+}
+static ssize_t poll_ms_store(struct kobject *k, struct kobj_attribute *a, const char *b, size_t c) {
+    unsigned long v;
+    if (kstrtoul(b, 10, &v)) return -EINVAL;
+    if (v < 100 || v > 5000) return -EINVAL;
+    mutex_lock(&gov->lock);
+    gov->poll_ms = v;
+    mutex_unlock(&gov->lock);
+    return c;
+}
+
 static ssize_t cd_thresholds_show(struct kobject *k, struct kobj_attribute *a, char *b) {
     return sprintf(b,
         "%u %u %u %u %u %u %u\n",
@@ -408,6 +477,8 @@ static struct kobj_attribute attr_pid         = __ATTR_RW(game_pid);
 static struct kobj_attribute attr_legacy      = __ATTR_RW(legacy);
 static struct kobj_attribute attr_hysteresis  = __ATTR_RW(hysteresis);
 static struct kobj_attribute attr_cd_thresh   = __ATTR_RW(cd_thresholds);
+static struct kobj_attribute attr_batt_guard  = __ATTR_RW(battery_guard);
+static struct kobj_attribute attr_poll_ms     = __ATTR_RW(poll_ms);
 
 static struct attribute *gov_attrs[] = {
     &attr_enable.attr,
@@ -417,6 +488,8 @@ static struct attribute *gov_attrs[] = {
     &attr_legacy.attr,
     &attr_hysteresis.attr,
     &attr_cd_thresh.attr,
+    &attr_batt_guard.attr,
+    &attr_poll_ms.attr,
     NULL,
 };
 static struct attribute_group gov_attr_group = { .attrs = gov_attrs };
@@ -442,6 +515,7 @@ static int __init k6a_gov_init(void) {
     gov->legacy_mode = legacy_mode;
     gov->hysteresis_fast = 3;
     gov->hysteresis_normal = 10;
+    gov->poll_ms = K6A_GOV_KTHREAD_SLEEP_MS;
     gov->profile = profile;
 
     if (profile <= K6A_PROFILE_CUSTOM) {

@@ -3335,11 +3335,11 @@ void kgsl_pwrctrl_set_default_gpu_pwrlevel(struct kgsl_device *device)
 }
 
 /* Sysfs interface for dynamic GPU thermal floor configuration */
-static unsigned int gpu_thermal_floor_temp_low = 70000;
-static unsigned int gpu_thermal_floor_temp_high = 85000;
-static unsigned int gpu_thermal_floor_level_low = 5;
-static unsigned int gpu_thermal_floor_level_mid = 4;
-static unsigned int gpu_thermal_floor_level_high = 3;
+static unsigned int gpu_thermal_floor_temp_low = 75000;
+static unsigned int gpu_thermal_floor_temp_high = 90000;
+static unsigned int gpu_thermal_floor_level_low = 0;
+static unsigned int gpu_thermal_floor_level_mid = 1;
+static unsigned int gpu_thermal_floor_level_high = 2;
 
 static ssize_t gpu_thermal_floor_temp_low_show(struct device *dev,
 	struct device_attribute *attr, char *buf)
@@ -3439,3 +3439,24 @@ static int __init gpu_thermal_floor_init(void)
 	return sysfs_create_group(k6a_gpu_kobj, &gpu_thermal_floor_attr_group);
 }
 device_initcall(gpu_thermal_floor_init);
+
+/* ── k6a-gov interface: read GPU pwrlevel table (BadazzKernel) ──── */
+int kgsl_k6a_get_levels(u32 *out, u32 max_n, u32 *cur_idx, u32 *max_idx)
+{
+	struct kgsl_device *device = kgsl_get_device(KGSL_DEVICE_3D0);
+	struct kgsl_pwrctrl *pwr;
+	int i, n = 0;
+	if (!device)
+		return -ENODEV;
+	pwr = &device->pwrctrl;
+	mutex_lock(&device->mutex);
+	for (i = 0; i < pwr->num_pwrlevels - 1 && n < max_n; i++)
+		out[n++] = pwr->pwrlevels[i].gpu_freq;
+	if (cur_idx)
+		*cur_idx = pwr->active_pwrlevel;
+	if (max_idx)
+		*max_idx = pwr->num_pwrlevels - 1;
+	mutex_unlock(&device->mutex);
+	return n;
+}
+EXPORT_SYMBOL(kgsl_k6a_get_levels);
