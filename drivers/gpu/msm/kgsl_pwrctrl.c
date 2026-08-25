@@ -3460,3 +3460,29 @@ int kgsl_k6a_get_levels(u32 *out, u32 max_n, u32 *cur_idx, u32 *max_idx)
 	return n;
 }
 EXPORT_SYMBOL(kgsl_k6a_get_levels);
+
+/* ── k6a-gov interface: set GPU max pwrlevel idx (BadazzKernel) ────
+ * Same locking/context as the thermal_pwrlevel sysfs store path.
+ * level 0 = no limit (highest freq). Callable from process context only.
+ */
+int kgsl_k6a_set_max_level_idx(unsigned int level)
+{
+	struct kgsl_device *device = kgsl_get_device(KGSL_DEVICE_3D0);
+	struct kgsl_pwrctrl *pwr;
+
+	if (!device)
+		return -ENODEV;
+
+	pwr = &device->pwrctrl;
+	if (level > pwr->num_pwrlevels - 1)
+		level = pwr->num_pwrlevels - 1;
+
+	mutex_lock(&device->mutex);
+	pwr->thermal_pwrlevel = level;
+	/* Update the current level using the new limit */
+	kgsl_pwrctrl_pwrlevel_change(device, pwr->active_pwrlevel);
+	mutex_unlock(&device->mutex);
+
+	return 0;
+}
+EXPORT_SYMBOL(kgsl_k6a_set_max_level_idx);

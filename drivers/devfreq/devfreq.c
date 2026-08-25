@@ -766,6 +766,42 @@ void devm_devfreq_remove_device(struct device *dev, struct devfreq *devfreq)
 }
 EXPORT_SYMBOL(devm_devfreq_remove_device);
 
+/* ── k6a-gov interface: read devfreq bw stats (BadazzKernel) ───────
+ * Find a registered devfreq by its DT node name (substring match,
+ * e.g. "gpubw", "cpu-llcc-ddr-bw") and report cur/min/max raw values.
+ * Read-only, no votes are changed. Returns 0 on success.
+ */
+int k6a_devfreq_get_bw(const char *name, u32 *cur, u32 *min, u32 *max)
+{
+	struct devfreq *df;
+	int ret = -ENODEV;
+
+	if (!name || !cur || !min || !max)
+		return -EINVAL;
+
+	mutex_lock(&devfreq_list_lock);
+	list_for_each_entry(df, &devfreq_list, node) {
+		struct device_node *np;
+
+		if (!df->dev.parent)
+			continue;
+		np = df->dev.parent->of_node;
+		if (!np || !np->name || !strstr(np->name, name))
+			continue;
+
+		/* Lockless snapshot: monitoring only, native-word reads.
+		 * Avoids lock-order coupling with governor callbacks. */
+		*cur = (u32)df->previous_freq;
+		*min = (u32)df->min_freq;
+		*max = (u32)df->max_freq;
+		ret = 0;
+		break;
+	}
+	mutex_unlock(&devfreq_list_lock);
+	return ret;
+}
+EXPORT_SYMBOL_GPL(k6a_devfreq_get_bw);
+
 /**
  * devfreq_suspend_device() - Suspend devfreq of a device.
  * @devfreq: the devfreq instance to be suspended
