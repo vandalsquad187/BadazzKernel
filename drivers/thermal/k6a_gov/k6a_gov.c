@@ -21,14 +21,15 @@ extern int kgsl_k6a_get_levels(u32 *out, u32 max_n, u32 *cur_idx, u32 *max_idx);
 extern int kgsl_k6a_set_max_level_idx(unsigned int level);
 extern int k6a_devfreq_get_bw(const char *name, u32 *cur, u32 *min, u32 *max);
 
-#define K6A_GOV_VERSION       "1.2.0"
+#define K6A_GOV_VERSION       "1.2.1"
 #define K6A_GOV_KERNEL_VER    KERNEL_VERSION(4,14,369)
 #define K6A_GOV_KTHREAD_SLEEP_MS   250
 #define K6A_GOV_MAX_FREQS     32
 #define K6A_HIST_N            16
 
 enum k6a_state { K6A_OFF=0, K6A_GAMING=1, K6A_CD_L2=2, K6A_CD_L3=3, K6A_CD_L4=4 };
-enum k6a_profile { K6A_PROFILE_OFF=0, K6A_PROFILE_GAMING=1, K6A_PROFILE_BATTERY=2, K6A_PROFILE_BADAZZ=3, K6A_PROFILE_CUSTOM=4 };
+enum k6a_profile { K6A_PROFILE_OFF=0, K6A_PROFILE_GAMING=1, K6A_PROFILE_BATTERY=2, K6A_PROFILE_BADAZZ=3, K6A_PROFILE_CUSTOM=4, K6A_PROFILE_BADAZZ_SAFE=5 };
+#define K6A_PROFILE_MAX K6A_PROFILE_BADAZZ_SAFE
 
 struct k6a_hist_entry {
     u64 ts_ms;
@@ -91,29 +92,31 @@ struct k6a_profile_def {
 };
 
 static const struct k6a_profile_def profiles[] = {
-    [K6A_PROFILE_OFF]     = { 0,0,0,0,   0,0,0,   0,0,0 },
-    [K6A_PROFILE_GAMING]  = { 80,82,88,76,   1555200,1200000,1000000,
-                              650000000,430000000,355000000 },
-    [K6A_PROFILE_BATTERY] = { 70,75,80,65,   1400000,1200000,1000000,
-                              585000000,430000000,305000000 },
-    [K6A_PROFILE_BADAZZ]  = { 85,90,95,80,   1800000,1600000,1400000,
-                              650000000,430000000,355000000 },
-    [K6A_PROFILE_CUSTOM]  = { 0,0,0,0,       0,0,0,   0,0,0 },
+    [K6A_PROFILE_OFF]        = { 0,0,0,0,   0,0,0,   0,0,0 },
+    [K6A_PROFILE_GAMING]     = { 80,82,88,76,   1555200,1200000,1000000,
+                                 650000000,430000000,355000000 },
+    [K6A_PROFILE_BATTERY]    = { 70,75,80,65,   1400000,1200000,1000000,
+                                 585000000,430000000,305000000 },
+    [K6A_PROFILE_BADAZZ]     = { 85,90,95,80,   1800000,1600000,1400000,
+                                 650000000,430000000,355000000 },
+    [K6A_PROFILE_CUSTOM]     = { 0,0,0,0,       0,0,0,   0,0,0 },
+    [K6A_PROFILE_BADAZZ_SAFE]= { 82,87,92,78,   1555200,1200000,1000000,
+                                 585000000,430000000,305000000 },
 };
 
 /* ── Freq Helpers ────────────────────────────────────────────────── */
 static void enforce_max_freq(void);
 
 static u32 clamp_freq(u32 *avail, u32 num, u32 requested) {
-    u32 best, i;
+    u32 best = 0, i;
     if (!num || !avail) return requested;
-    best = avail[0];
     for (i = 0; i < num; i++) {
         if (avail[i] <= requested && avail[i] > best)
             best = avail[i];
-        if (avail[i] == requested) return requested;
+        if (avail[i] == requested)
+            return requested;
     }
-    return best;
+    return best ? best : avail[0];
 }
 
 static void clamp_cd_freqs(void) {
@@ -146,7 +149,7 @@ static void freq_init_worker(struct work_struct *work) {
         int tl_ret = kgsl_k6a_get_levels(gtab, K6A_GOV_MAX_FREQS, &gn, &tl);
         if (tl_ret > 0)
             pr_info("k6a_gov: gpu levels=%u cur_idx=%u max_idx=%u\n",
-                    gn, tl, tl_ret > 0 ? (u32)tl_ret : 0);
+                    tl_ret, gn, tl);
         else
             pr_info("k6a_gov: gpu levels read failed (%d)\n", tl_ret);
     }
@@ -214,10 +217,24 @@ static int cpufreq_notify(struct notifier_block *nb, unsigned long e, void *data
 }
 
 /* ── Temp Read ───────────────────────────────────────────────────── */
+/* KB8: max over all 4 Gold zones (cpu-1-0..3-usr) */
 static int read_temp(void) {
-    struct thermal_zone_device *tz; int t = 0;
-    tz = thermal_zone_get_zone_by_name("cpu-1-0-usr");
-    if (!IS_ERR(tz) && !thermal_zone_get_temp(tz, &t) && t > 0) return t / 1000;
+    struct thermal_zone_device *tz; int t = 0, max_t = 0;
+    int i;
+
+    for (i = 0; i < 4; i++) {
+        char name[16];
+        snprintf(name, sizeof(name), "cpu-1-%d-usr", i);
+        tz = thermal_zone_get_zone_by_name(name);
+        if (!IS_ERR(tz) && !thermal_zone_get_temp(tz, &t) && t > 0) {
+            t /= 1000;
+            if (t > max_t) max_t = t;
+        }
+    }
+
+    if (max_t) return max_t;
+
+    /* Fallbacks for non-Gold zones */
     tz = thermal_zone_get_zone_by_name("cpu-0-0-usr");
     if (!IS_ERR(tz) && !thermal_zone_get_temp(tz, &t) && t > 0) return t / 1000;
     tz = thermal_zone_get_zone_by_name("xo-therm");
@@ -380,7 +397,10 @@ static int gov_thread(void *data) {
 /* ── Cooling Device ──────────────────────────────────────────────── */
 static int cool_max(struct thermal_cooling_device *c, unsigned long *s) { *s = K6A_CD_L4; return 0; }
 static int cool_cur(struct thermal_cooling_device *c, unsigned long *s) {
-    *s = gov ? gov->state : 0;
+    if (!gov) return -EINVAL;
+    mutex_lock(&gov->lock);
+    *s = gov->state;
+    mutex_unlock(&gov->lock);
     return 0;
 }
 static int cool_set(struct thermal_cooling_device *c, unsigned long s) {
@@ -415,13 +435,13 @@ static ssize_t enable_store(struct kobject *k, struct kobj_attribute *a, const c
 }
 
 static ssize_t profile_show(struct kobject *k, struct kobj_attribute *a, char *b) {
-    const char *n[] = {"off","gaming","battery","badazz","custom"};
+    const char *n[] = {"off","gaming","battery","badazz","custom","badazz_safe"};
     return sprintf(b, "%s\n", n[gov->profile]);
 }
 static ssize_t profile_store(struct kobject *k, struct kobj_attribute *a, const char *b, size_t c) {
     unsigned long v;
     if (kstrtoul(b, 10, &v)) return -EINVAL;
-    if (v > K6A_PROFILE_CUSTOM) return -EINVAL;
+    if (v > K6A_PROFILE_MAX) return -EINVAL;
     mutex_lock(&gov->lock);
     gov->profile = v;
     gov->cd_l2_temp=profiles[v].cd_l2_temp;
