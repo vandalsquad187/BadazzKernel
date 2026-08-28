@@ -138,21 +138,46 @@ static void clamp_cd_freqs(void) {
     gov->cd_l4_gold_max = clamp_freq(gov->gold_freqs, gov->gold_num, gov->cd_l4_gold_max);
 }
 
+/* Find a CPU belonging to the "gold" (big) cluster.
+ * Heuristic: highest max frequency among online CPUs. */
+static int find_gold_cpu(void) {
+    struct cpufreq_policy *policy;
+    unsigned int max_freq = 0;
+    int best_cpu = -1;
+    int cpu;
+
+    for_each_online_cpu(cpu) {
+        policy = cpufreq_cpu_get(cpu);
+        if (policy) {
+            if (policy->cpuinfo.max_freq > max_freq) {
+                max_freq = policy->cpuinfo.max_freq;
+                best_cpu = cpu;
+            }
+            cpufreq_cpu_put(policy);
+        }
+    }
+    return best_cpu >= 0 ? best_cpu : 6;  /* fallback to CPU 6 */
+}
+
 static void freq_init_worker(struct work_struct *work) {
     struct k6a_gov *g = container_of(work, struct k6a_gov, freq_init_work.work);
     struct cpufreq_policy *policy;
     struct cpufreq_frequency_table *pos;
-    int n;
+    int n, gold_cpu;
 
-    policy = cpufreq_cpu_get(6);
+    gold_cpu = find_gold_cpu();
+    policy = cpufreq_cpu_get(gold_cpu);
     if (policy && policy->freq_table) {
         n = 0;
         cpufreq_for_each_valid_entry(pos, policy->freq_table) {
             if (pos->frequency != CPUFREQ_ENTRY_INVALID && n < K6A_GOV_MAX_FREQS)
                 g->gold_freqs[n++] = pos->frequency;
         }
+        mutex_lock(&g->lock);
         g->gold_num = n;
-        pr_info("k6a_gov: Gold freqs loaded via cpufreq API: %u entries\n", n);
+        mutex_unlock(&g->lock);
+        pr_info("k6a_gov: Gold freqs loaded via cpufreq API (cpu %d): %u entries\n",
+                gold_cpu, n);
     }
     if (policy) cpufreq_cpu_put(policy);
 
@@ -166,16 +191,16 @@ static void freq_init_worker(struct work_struct *work) {
             pr_info("k6a_gov: gpu levels read failed (%d)\n", tl_ret);
     }
 
+    mutex_lock(&g->lock);
     if (g->gold_num > 0) {
         clamp_cd_freqs();
         pr_info("k6a_gov: freq tables loaded: Gold=%u\n", g->gold_num);
-
-        mutex_lock(&g->lock);
         if (g->state != K6A_OFF && g->enabled && g->legacy_mode)
             enforce_max_freq();
         mutex_unlock(&g->lock);
         return;
     }
+    mutex_unlock(&g->lock);
 
     if (++g->freq_init_retries < 30) {
         schedule_delayed_work(&g->freq_init_work, msecs_to_jiffies(500));
@@ -187,33 +212,45 @@ static void freq_init_worker(struct work_struct *work) {
 /* ── CPU Freq Enforcement ────────────────────────────────────────── */
 /* policy6 deckt CPU6+7 ab (Cluster-Policy) — ein Clamp gilt fuer beide */
 static u32 get_cd_max_freq(void) {
+    u32 max = 0;
     if (!gov || !gov->gold_num) return 0;
+    mutex_lock(&gov->lock);
     switch (gov->state) {
-    case K6A_CD_L2: return gov->cd_l2_gold_max;
-    case K6A_CD_L3: return gov->cd_l3_gold_max;
-    case K6A_CD_L4: return gov->cd_l4_gold_max;
-    default: return 0;
+    case K6A_CD_L2: max = gov->cd_l2_gold_max; break;
+    case K6A_CD_L3: max = gov->cd_l3_gold_max; break;
+    case K6A_CD_L4: max = gov->cd_l4_gold_max; break;
     }
+    mutex_unlock(&gov->lock);
+    return max;
 }
 
 static void enforce_max_freq(void) {
     struct cpufreq_policy *p;
     u32 max;
+    int gold_cpu;
+
     if (!gov || !gov->enabled || !gov->legacy_mode) return;
     max = get_cd_max_freq();
     if (!max) return;
-    p = cpufreq_cpu_get(6);
+
+    gold_cpu = find_gold_cpu();
+    p = cpufreq_cpu_get(gold_cpu);
     if (p) {
-        if (p->max > max) p->max = max;
+        if (p->max > max) {
+            p->max = max;
+            /* cpufreq_update_policy() must NOT be called from notifier/atomic context.
+             * We're in kthread (process context) so it's legal, but the notifier
+             * cpufreq_notify() runs in atomic context - it only clamps p->max. */
+        }
         cpufreq_cpu_put(p);
-        cpufreq_update_policy(6);   /* legal here: Kthread = process context */
     }
 }
 
-/* policy6 deckt CPU6+7 ab (Cluster-Policy) — ein Clamp gilt fuer beide */
 static int cpufreq_notify(struct notifier_block *nb, unsigned long e, void *data) {
     struct cpufreq_policy *p;
     u32 max;
+    int gold_cpu;
+
     if (!gov || !gov->enabled || !gov->legacy_mode || gov->state < K6A_CD_L2)
         return NOTIFY_OK;
     if (e != CPUFREQ_ADJUST && e != CPUFREQ_INCOMPATIBLE)
@@ -221,7 +258,9 @@ static int cpufreq_notify(struct notifier_block *nb, unsigned long e, void *data
     p = data;
     max = get_cd_max_freq();
     if (!max) return NOTIFY_OK;
-    if (p->cpu >= 6 && p->max > max) {
+
+    gold_cpu = find_gold_cpu();
+    if (p->cpu == gold_cpu && p->max > max) {
         p->max = max;
         /* NO cpufreq_update_policy() here — causes recursion! */
     }
@@ -511,7 +550,11 @@ static struct thermal_cooling_device_ops cool_ops = {
 
 /* ── Sysfs ───────────────────────────────────────────────────────── */
 static ssize_t enable_show(struct kobject *k, struct kobj_attribute *a, char *b) {
-    return sprintf(b, "%d\n", gov->enabled);
+    int v;
+    mutex_lock(&gov->lock);
+    v = gov->enabled;
+    mutex_unlock(&gov->lock);
+    return sprintf(b, "%d\n", v);
 }
 static ssize_t enable_store(struct kobject *k, struct kobj_attribute *a, const char *b, size_t c) {
     unsigned long v;
@@ -529,7 +572,11 @@ static ssize_t enable_store(struct kobject *k, struct kobj_attribute *a, const c
 
 static ssize_t profile_show(struct kobject *k, struct kobj_attribute *a, char *b) {
     const char *n[] = {"off","gaming","battery","badazz","custom","badazz_safe"};
-    return sprintf(b, "%s\n", n[gov->profile]);
+    int p;
+    mutex_lock(&gov->lock);
+    p = gov->profile;
+    mutex_unlock(&gov->lock);
+    return sprintf(b, "%s\n", n[p]);
 }
 static ssize_t profile_store(struct kobject *k, struct kobj_attribute *a, const char *b, size_t c) {
     unsigned long v;
@@ -560,10 +607,41 @@ static ssize_t profile_store(struct kobject *k, struct kobj_attribute *a, const 
 
 static ssize_t status_show(struct kobject *k, struct kobj_attribute *a, char *b) {
     static const char *state_names[] = {"off","gaming","cd_l2","cd_l3","cd_l4"};
-    unsigned int si = gov->state;
+    unsigned int si;
+    u32 temp, profile, legacy, enabled, gold_num, gold_max, gold_max_tbl, ticks;
+    u64 throttle_events;
+    u32 gpu_caps[3], gpu_last_idx;
+    u32 bw_floors_gpubw[3], bw_floors_llcc[3];
     u32 bwc, bwmn, bwmx;
     size_t len;
-    int i;
+    int i, hist_len, hist_pos;
+    struct k6a_hist_entry hist[K6A_HIST_N];
+
+    mutex_lock(&gov->lock);
+    si = gov->state;
+    temp = gov->temp_celsius;
+    profile = gov->profile;
+    legacy = gov->legacy_mode;
+    enabled = gov->enabled;
+    gold_num = gov->gold_num;
+    gold_max = get_cd_max_freq();
+    gold_max_tbl = gold_num ? gov->gold_freqs[gold_num - 1] : 0;
+    ticks = gov->ticks;
+    throttle_events = gov->throttle_events;
+    gpu_caps[0] = gov->cd_l2_gpu_max;
+    gpu_caps[1] = gov->cd_l3_gpu_max;
+    gpu_caps[2] = gov->cd_l4_gpu_max;
+    gpu_last_idx = gov->gpu_last_idx;
+    bw_floors_gpubw[0] = gov->cd_l2_bw_gpubw;
+    bw_floors_gpubw[1] = gov->cd_l3_bw_gpubw;
+    bw_floors_gpubw[2] = gov->cd_l4_bw_gpubw;
+    bw_floors_llcc[0] = gov->cd_l2_bw_llcc;
+    bw_floors_llcc[1] = gov->cd_l3_bw_llcc;
+    bw_floors_llcc[2] = gov->cd_l4_bw_llcc;
+    hist_len = gov->hist_len;
+    hist_pos = gov->hist_pos;
+    memcpy(hist, gov->hist, sizeof(hist));
+    mutex_unlock(&gov->lock);
 
     if (si > K6A_CD_L4) si = K6A_OFF;
     len = sprintf(b,
@@ -580,21 +658,21 @@ static ssize_t status_show(struct kobject *k, struct kobj_attribute *a, char *b)
         "gold_max_tbl=%u\n",
         K6A_GOV_VERSION,
         state_names[si],
-        gov->temp_celsius,
-        gov->ticks,
-        gov->throttle_events,
-        gov->profile,
-        gov->legacy_mode,
-        gov->enabled,
-        gov->gold_num,
-        get_cd_max_freq(),
-        gov->gold_num ? gov->gold_freqs[gov->gold_num - 1] : 0);
+        temp,
+        ticks,
+        throttle_events,
+        profile,
+        legacy,
+        enabled,
+        gold_num,
+        gold_max,
+        gold_max_tbl);
 
     len += scnprintf(b + len, PAGE_SIZE - len,
         "gpu_caps=%u %u %u\n"
         "gpu_last_idx=%d\n",
-        gov->cd_l2_gpu_max, gov->cd_l3_gpu_max, gov->cd_l4_gpu_max,
-        gov->gpu_last_idx);
+        gpu_caps[0], gpu_caps[1], gpu_caps[2],
+        gpu_last_idx);
 
     /* KB12M Phase 1: read-only bandwidth monitoring */
     if (!k6a_devfreq_get_bw("gpubw", &bwc, &bwmn, &bwmx))
@@ -608,8 +686,8 @@ static ssize_t status_show(struct kobject *k, struct kobj_attribute *a, char *b)
     len += scnprintf(b + len, PAGE_SIZE - len,
         "bw_floor_gpubw=%u %u %u\n"
         "bw_floor_llcc=%u %u %u\n",
-        gov->cd_l2_bw_gpubw, gov->cd_l3_bw_gpubw, gov->cd_l4_bw_gpubw,
-        gov->cd_l2_bw_llcc, gov->cd_l3_bw_llcc, gov->cd_l4_bw_llcc);
+        bw_floors_gpubw[0], bw_floors_gpubw[1], bw_floors_gpubw[2],
+        bw_floors_llcc[0], bw_floors_llcc[1], bw_floors_llcc[2]);
 
     /* KB15: hash verification */
     len += scnprintf(b + len, PAGE_SIZE - len,
@@ -617,11 +695,11 @@ static ssize_t status_show(struct kobject *k, struct kobj_attribute *a, char *b)
 
     /* KB7: throttle history, oldest first */
     len += scnprintf(b + len, PAGE_SIZE - len, "hist=");
-    for (i = 0; i < gov->hist_len && len < PAGE_SIZE - 48; i++) {
+    for (i = 0; i < hist_len && len < PAGE_SIZE - 48; i++) {
         struct k6a_hist_entry *e;
-        unsigned int hi = (gov->hist_pos + K6A_HIST_N - gov->hist_len + i)
+        unsigned int hi = (hist_pos + K6A_HIST_N - hist_len + i)
                           % K6A_HIST_N;
-        e = &gov->hist[hi];
+        e = &hist[hi];
         if (e->from > K6A_CD_L4 || e->to > K6A_CD_L4) continue;
         len += scnprintf(b + len, PAGE_SIZE - len,
             "%s%llu:%d:%s>%s", i ? "," : "",
@@ -633,7 +711,11 @@ static ssize_t status_show(struct kobject *k, struct kobj_attribute *a, char *b)
 }
 
 static ssize_t game_pid_show(struct kobject *k, struct kobj_attribute *a, char *b) {
-    return sprintf(b, "%d\n", gov->game_pid);
+    pid_t pid;
+    mutex_lock(&gov->lock);
+    pid = gov->game_pid;
+    mutex_unlock(&gov->lock);
+    return sprintf(b, "%d\n", pid);
 }
 static ssize_t game_pid_store(struct kobject *k, struct kobj_attribute *a, const char *b, size_t c) {
     unsigned long v;
@@ -645,7 +727,11 @@ static ssize_t game_pid_store(struct kobject *k, struct kobj_attribute *a, const
 }
 
 static ssize_t legacy_show(struct kobject *k, struct kobj_attribute *a, char *b) {
-    return sprintf(b, "%d\n", gov->legacy_mode);
+    bool v;
+    mutex_lock(&gov->lock);
+    v = gov->legacy_mode;
+    mutex_unlock(&gov->lock);
+    return sprintf(b, "%d\n", v);
 }
 static ssize_t legacy_store(struct kobject *k, struct kobj_attribute *a, const char *b, size_t c) {
     unsigned long v;
@@ -657,7 +743,12 @@ static ssize_t legacy_store(struct kobject *k, struct kobj_attribute *a, const c
 }
 
 static ssize_t hysteresis_show(struct kobject *k, struct kobj_attribute *a, char *b) {
-    return sprintf(b, "fast=%u normal=%u\n", gov->hysteresis_fast, gov->hysteresis_normal);
+    u32 fast, normal;
+    mutex_lock(&gov->lock);
+    fast = gov->hysteresis_fast;
+    normal = gov->hysteresis_normal;
+    mutex_unlock(&gov->lock);
+    return sprintf(b, "fast=%u normal=%u\n", fast, normal);
 }
 static ssize_t hysteresis_store(struct kobject *k, struct kobj_attribute *a, const char *b, size_t c) {
     u32 fast, normal;
@@ -671,7 +762,11 @@ static ssize_t hysteresis_store(struct kobject *k, struct kobj_attribute *a, con
 }
 
 static ssize_t battery_guard_show(struct kobject *k, struct kobj_attribute *a, char *b) {
-    return sprintf(b, "%d\n", gov->battery_guard);
+    bool v;
+    mutex_lock(&gov->lock);
+    v = gov->battery_guard;
+    mutex_unlock(&gov->lock);
+    return sprintf(b, "%d\n", v);
 }
 static ssize_t battery_guard_store(struct kobject *k, struct kobj_attribute *a, const char *b, size_t c) {
     unsigned long v;
@@ -683,7 +778,11 @@ static ssize_t battery_guard_store(struct kobject *k, struct kobj_attribute *a, 
 }
 
 static ssize_t poll_ms_show(struct kobject *k, struct kobj_attribute *a, char *b) {
-    return sprintf(b, "%u\n", gov->poll_ms);
+    u32 v;
+    mutex_lock(&gov->lock);
+    v = gov->poll_ms;
+    mutex_unlock(&gov->lock);
+    return sprintf(b, "%u\n", v);
 }
 static ssize_t poll_ms_store(struct kobject *k, struct kobj_attribute *a, const char *b, size_t c) {
     unsigned long v;
@@ -696,10 +795,14 @@ static ssize_t poll_ms_store(struct kobject *k, struct kobj_attribute *a, const 
 }
 
 static ssize_t cd_thresholds_show(struct kobject *k, struct kobj_attribute *a, char *b) {
+    u32 l2t, l3t, l4t, rec, l2g, l3g, l4g;
+    mutex_lock(&gov->lock);
+    l2t = gov->cd_l2_temp; l3t = gov->cd_l3_temp; l4t = gov->cd_l4_temp; rec = gov->cd_recover;
+    l2g = gov->cd_l2_gold_max; l3g = gov->cd_l3_gold_max; l4g = gov->cd_l4_gold_max;
+    mutex_unlock(&gov->lock);
     return sprintf(b,
         "%u %u %u %u %u %u %u\n",
-        gov->cd_l2_temp, gov->cd_l3_temp, gov->cd_l4_temp, gov->cd_recover,
-        gov->cd_l2_gold_max, gov->cd_l3_gold_max, gov->cd_l4_gold_max);
+        l2t, l3t, l4t, rec, l2g, l3g, l4g);
 }
 static ssize_t cd_thresholds_store(struct kobject *k, struct kobj_attribute *a, const char *b, size_t c) {
     u32 l2t,l3t,l4t,rec,l2g,l3g,l4g;
@@ -718,8 +821,11 @@ static ssize_t cd_thresholds_store(struct kobject *k, struct kobj_attribute *a, 
 }
 
 static ssize_t gpu_caps_show(struct kobject *k, struct kobj_attribute *a, char *b) {
-    return sprintf(b, "%u %u %u\n",
-        gov->cd_l2_gpu_max, gov->cd_l3_gpu_max, gov->cd_l4_gpu_max);
+    u32 l2g, l3g, l4g;
+    mutex_lock(&gov->lock);
+    l2g = gov->cd_l2_gpu_max; l3g = gov->cd_l3_gpu_max; l4g = gov->cd_l4_gpu_max;
+    mutex_unlock(&gov->lock);
+    return sprintf(b, "%u %u %u\n", l2g, l3g, l4g);
 }
 static ssize_t gpu_caps_store(struct kobject *k, struct kobj_attribute *a, const char *b, size_t c) {
     u32 l2g,l3g,l4g;
@@ -731,11 +837,16 @@ static ssize_t gpu_caps_store(struct kobject *k, struct kobj_attribute *a, const
 }
 
 static ssize_t bw_floors_show(struct kobject *k, struct kobj_attribute *a, char *b) {
+    u32 gpubw[3], llcc[3];
+    mutex_lock(&gov->lock);
+    gpubw[0] = gov->cd_l2_bw_gpubw; gpubw[1] = gov->cd_l3_bw_gpubw; gpubw[2] = gov->cd_l4_bw_gpubw;
+    llcc[0] = gov->cd_l2_bw_llcc; llcc[1] = gov->cd_l3_bw_llcc; llcc[2] = gov->cd_l4_bw_llcc;
+    mutex_unlock(&gov->lock);
     return sprintf(b,
         "gpubw %u %u %u\n"
         "llcc %u %u %u\n",
-        gov->cd_l2_bw_gpubw, gov->cd_l3_bw_gpubw, gov->cd_l4_bw_gpubw,
-        gov->cd_l2_bw_llcc, gov->cd_l3_bw_llcc, gov->cd_l4_bw_llcc);
+        gpubw[0], gpubw[1], gpubw[2],
+        llcc[0], llcc[1], llcc[2]);
 }
 static ssize_t bw_floors_store(struct kobject *k, struct kobj_attribute *a, const char *b, size_t c) {
     u32 gpubw_l2,gpubw_l3,gpubw_l4, llcc_l2,llcc_l3,llcc_l4;
@@ -820,19 +931,6 @@ static int __init k6a_gov_init(void) {
     }
     gov->gpu_last_idx = -1;
 
-    /* KB15: Read build hash from k6a_features */
-    {
-        struct thermal_zone_device *tz;
-        tz = thermal_zone_get_zone_by_name("k6a_features");
-        if (!IS_ERR(tz)) {
-            /* hash is exposed via git_hash attribute, read via sysfs would be cleaner
-             * but we're in init context. For now use a simple approach: the hash is
-             * also available as a module parameter or can be read from sysfs later.
-             * We'll do the verification lazily in the first kthread iteration. */
-            thermal_zone_put(tz);
-        }
-    }
-
     INIT_DELAYED_WORK(&gov->freq_init_work, freq_init_worker);
     gov->freq_init_retries = 0;
     schedule_delayed_work(&gov->freq_init_work, 0);
@@ -842,28 +940,36 @@ static int __init k6a_gov_init(void) {
     ret = sysfs_create_group(gov->kobj, &gov_attr_group);
     if (ret) { kobject_put(gov->kobj); goto err; }
 
-    cpufreq_register_notifier(&k6a_cpufreq_nb, CPUFREQ_POLICY_NOTIFIER);
+    ret = cpufreq_register_notifier(&k6a_cpufreq_nb, CPUFREQ_POLICY_NOTIFIER);
+    if (ret) {
+        pr_err("k6a_gov: cpufreq_register_notifier failed: %d\n", ret);
+        goto err_sysfs;
+    }
 
     gov->cooling_dev = thermal_cooling_device_register("k6a_gov", gov, &cool_ops);
-    if (IS_ERR(gov->cooling_dev))
-        pr_warn("k6a_gov: cooling device registration failed\n");
+    if (IS_ERR(gov->cooling_dev)) {
+        ret = PTR_ERR(gov->cooling_dev);
+        pr_err("k6a_gov: cooling device registration failed: %d\n", ret);
+        goto err_cpufreq;
+    }
 
     gov->enabled = true;
     gov->kthread = kthread_run(gov_thread, gov, "k6a_gov");
     if (IS_ERR(gov->kthread)) {
         pr_err("k6a_gov: kthread creation failed\n");
         ret = PTR_ERR(gov->kthread);
-        goto err_kthread;
+        goto err_cooling;
     }
 
     pr_info("k6a_gov v%s loaded (legacy=%d profile=%d freq_init=deferred)\n",
             K6A_GOV_VERSION, gov->legacy_mode, gov->profile);
     return 0;
 
-err_kthread:
-    if (gov->cooling_dev && !IS_ERR(gov->cooling_dev))
-        thermal_cooling_device_unregister(gov->cooling_dev);
+err_cooling:
+    thermal_cooling_device_unregister(gov->cooling_dev);
+err_cpufreq:
     cpufreq_unregister_notifier(&k6a_cpufreq_nb, CPUFREQ_POLICY_NOTIFIER);
+err_sysfs:
     sysfs_remove_group(gov->kobj, &gov_attr_group);
     kobject_put(gov->kobj);
 err:
