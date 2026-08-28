@@ -766,6 +766,42 @@ void devm_devfreq_remove_device(struct device *dev, struct devfreq *devfreq)
 }
 EXPORT_SYMBOL(devm_devfreq_remove_device);
 
+/* ── k6a-gov interface: write devfreq bw floors (BadazzKernel) ──────
+ * Find a registered devfreq by DT node name and set min/max freq.
+ * Called from process context (governor kthread). Returns 0 on success.
+ */
+int k6a_devfreq_set_bw(const char *name, u32 min, u32 max)
+{
+	struct devfreq *df;
+	int ret = -ENODEV;
+
+	if (!name)
+		return -EINVAL;
+
+	mutex_lock(&devfreq_list_lock);
+	list_for_each_entry(df, &devfreq_list, node) {
+		struct device_node *np;
+
+		if (!df->dev.parent)
+			continue;
+		np = df->dev.parent->of_node;
+		if (!np || !np->name || !strstr(np->name, name))
+			continue;
+
+		mutex_lock(&df->lock);
+		if (min)
+			df->min_freq = min;
+		if (max)
+			df->max_freq = max;
+		mutex_unlock(&df->lock);
+		ret = 0;
+		break;
+	}
+	mutex_unlock(&devfreq_list_lock);
+	return ret;
+}
+EXPORT_SYMBOL_GPL(k6a_devfreq_set_bw);
+
 /* ── k6a-gov interface: read devfreq bw stats (BadazzKernel) ───────
  * Find a registered devfreq by its DT node name (substring match,
  * e.g. "gpubw", "cpu-llcc-ddr-bw") and report cur/min/max raw values.
