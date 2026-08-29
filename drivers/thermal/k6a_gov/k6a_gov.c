@@ -210,18 +210,15 @@ static void freq_init_worker(struct work_struct *work) {
 }
 
 /* ── CPU Freq Enforcement ────────────────────────────────────────── */
-/* policy6 deckt CPU6+7 ab (Cluster-Policy) — ein Clamp gilt fuer beide */
+/* Caller must hold gov->lock. */
 static u32 get_cd_max_freq(void) {
-    u32 max = 0;
     if (!gov || !gov->gold_num) return 0;
-    mutex_lock(&gov->lock);
     switch (gov->state) {
-    case K6A_CD_L2: max = gov->cd_l2_gold_max; break;
-    case K6A_CD_L3: max = gov->cd_l3_gold_max; break;
-    case K6A_CD_L4: max = gov->cd_l4_gold_max; break;
+    case K6A_CD_L2: return gov->cd_l2_gold_max;
+    case K6A_CD_L3: return gov->cd_l3_gold_max;
+    case K6A_CD_L4: return gov->cd_l4_gold_max;
+    default: return 0;
     }
-    mutex_unlock(&gov->lock);
-    return max;
 }
 
 static void enforce_max_freq(void) {
