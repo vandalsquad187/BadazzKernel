@@ -23,7 +23,7 @@ extern int kgsl_k6a_set_max_level_idx(unsigned int level);
 extern int k6a_devfreq_get_bw(const char *name, u32 *cur, u32 *min, u32 *max);
 extern int k6a_devfreq_set_bw(const char *name, u32 min, u32 max);
 
-#define K6A_GOV_VERSION       "1.3.0"
+#define K6A_GOV_VERSION       "1.3.1"
 #define K6A_GOV_KERNEL_VER    KERNEL_VERSION(4,14,369)
 #define K6A_GOV_KTHREAD_SLEEP_MS   250
 #define K6A_GOV_MAX_FREQS     32
@@ -645,7 +645,7 @@ static ssize_t status_show(struct kobject *k, struct kobj_attribute *a, char *b)
         "version=%s\n"
         "state=%s\n"
         "temp=%d\n"
-        "ticks=%llu\n"
+        "ticks=%u\n"
         "throttle_events=%llu\n"
         "profile=%u\n"
         "legacy_mode=%d\n"
