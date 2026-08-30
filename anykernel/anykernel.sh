@@ -1,7 +1,7 @@
 # Badazz-kernel for sweet (Xiaomi Mi 10T Lite / Redmi Note 9 Pro / POCO M2 Pro)
 # Flashbar via OrangeFox / TWRP — basiert auf AnyKernel3
 
-kernel.string=Badazz-kernel for sweet @BadazZ89
+kernel.string=BadazzKernel for sweet @BadazZ89 v1.3.1
 do.devicecheck=1
 do.modules=0
 do.cleanup=1

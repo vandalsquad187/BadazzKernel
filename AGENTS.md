@@ -33,7 +33,7 @@
 - `CONFIG_KSU=y` `33300` UAPIv2, `CONFIG_KSU_SUSFS=y` + all sub-options + `TAMPER_SYSCALL_TABLE`
 - `CONFIG_SCHED_TUNE=y` `CONFIG_KSM=y` `CONFIG_BOEFFLA_WL_BLOCKER=y`
 - `CONFIG_MSM_PERFORMANCE=y` `CONFIG_CPU_FREQ_TIMES=y` `CONFIG_PSI=y`
-- `LOCALVERSION="-OurKernel-sweet-v4.2.9"` (legacy string, kernel is BadazzKernel)
+- `LOCALVERSION="-BadazzKernel-sweet-v1.3.1"`
 
 ### Build
 ```bash
