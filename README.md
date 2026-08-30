@@ -1,7 +1,7 @@
 <div align="center">
   <img src="assets/logo.png" alt="Badazz89" width="180"/>
   <h1>BadazzKernel</h1>
-  <p>Gaming-optimierter Kernel für <b>SM7150 (sweet / sweetin)</b> — 4.14.369</p>
+  <p>Gaming-optimierter Kernel für <b>SM7150 (sweet2/sweet k6a)</b> — 4.14.369</p>
   <p>
     <img src="https://img.shields.io/badge/Kernel-4.14.369-blue?style=flat-square">
     <img src="https://img.shields.io/badge/k6a__gov-1.3.1-orange?style=flat-square">
