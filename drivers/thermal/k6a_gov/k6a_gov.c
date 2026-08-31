@@ -751,7 +751,7 @@ static ssize_t hysteresis_show(struct kobject *k, struct kobj_attribute *a, char
 static ssize_t hysteresis_store(struct kobject *k, struct kobj_attribute *a, const char *b, size_t c) {
     u32 fast, normal;
     if (sscanf(b, "%u %u", &fast, &normal) != 2) return -EINVAL;
-    if (fast < 1 || fast > 100 || normal < 1 || normal > 1000) return -EINVAL;
+    if (fast < 1 || fast > 1000 || normal < 1 || normal > 5000) return -EINVAL;
     mutex_lock(&gov->lock);
     gov->hysteresis_fast = fast;
     gov->hysteresis_normal = normal;
