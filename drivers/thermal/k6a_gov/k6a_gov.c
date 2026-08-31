@@ -51,6 +51,7 @@ struct k6a_gov {
     bool enabled;
     bool legacy_mode;
     bool battery_guard;
+    u32 battery_guard_temp;
     u32 poll_ms;
 
     u32 cd_l2_temp, cd_l3_temp, cd_l4_temp, cd_recover;
@@ -507,7 +508,7 @@ static int gov_thread(void *data) {
             gov->temp_celsius = read_temp();
             if (gov->battery_guard) {
                 int bt = read_bat_temp();
-                if (bt >= 45 && gov->state == K6A_GAMING) {
+                if (bt >= (int)gov->battery_guard_temp && gov->state == K6A_GAMING) {
                     set_state_locked(K6A_CD_L2);
                     pr_warn("k6a_gov: battery guard %dC -> CD_L2\n", bt);
                 }
@@ -773,6 +774,22 @@ static ssize_t battery_guard_store(struct kobject *k, struct kobj_attribute *a, 
     mutex_unlock(&gov->lock);
     return c;
 }
+static ssize_t battery_guard_temp_show(struct kobject *k, struct kobj_attribute *a, char *b) {
+    u32 v;
+    mutex_lock(&gov->lock);
+    v = gov->battery_guard_temp;
+    mutex_unlock(&gov->lock);
+    return sprintf(b, "%u\n", v);
+}
+static ssize_t battery_guard_temp_store(struct kobject *k, struct kobj_attribute *a, const char *b, size_t c) {
+    unsigned long v;
+    if (kstrtoul(b, 10, &v)) return -EINVAL;
+    if (v < 35 || v > 60) return -EINVAL;
+    mutex_lock(&gov->lock);
+    gov->battery_guard_temp = v;
+    mutex_unlock(&gov->lock);
+    return c;
+}
 
 static ssize_t poll_ms_show(struct kobject *k, struct kobj_attribute *a, char *b) {
     u32 v;
@@ -865,6 +882,7 @@ static struct kobj_attribute attr_legacy      = __ATTR_RW(legacy);
 static struct kobj_attribute attr_hysteresis  = __ATTR_RW(hysteresis);
 static struct kobj_attribute attr_cd_thresh   = __ATTR_RW(cd_thresholds);
 static struct kobj_attribute attr_batt_guard  = __ATTR_RW(battery_guard);
+static struct kobj_attribute attr_batt_guard_temp = __ATTR_RW(battery_guard_temp);
 static struct kobj_attribute attr_poll_ms     = __ATTR_RW(poll_ms);
 static struct kobj_attribute attr_gpu_caps    = __ATTR_RW(gpu_caps);
 static struct kobj_attribute attr_bw_floors   = __ATTR_RW(bw_floors);
@@ -878,6 +896,7 @@ static struct attribute *gov_attrs[] = {
     &attr_hysteresis.attr,
     &attr_cd_thresh.attr,
     &attr_batt_guard.attr,
+    &attr_batt_guard_temp.attr,
     &attr_poll_ms.attr,
     &attr_gpu_caps.attr,
     &attr_bw_floors.attr,
@@ -904,8 +923,9 @@ static int __init k6a_gov_init(void) {
     mutex_init(&gov->lock);
 
     gov->legacy_mode = legacy_mode;
-    gov->hysteresis_fast = 3;
-    gov->hysteresis_normal = 10;
+    gov->hysteresis_fast = 500;
+    gov->hysteresis_normal = 2000;
+    gov->battery_guard_temp = 45;
     gov->poll_ms = K6A_GOV_KTHREAD_SLEEP_MS;
     gov->profile = profile;
 
