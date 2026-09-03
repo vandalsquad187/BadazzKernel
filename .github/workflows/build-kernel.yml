@@ -97,11 +97,8 @@ jobs:
           export CROSS_COMPILE_COMPAT=arm-linux-gnueabihf-
           make sweet_defconfig
           sed -i 's/CONFIG_LLVM_POLLY=y/# CONFIG_LLVM_POLLY is not set/' .config
-          sed -i 's/CONFIG_CC_STACKPROTECTOR_STRONG=y/# CONFIG_CC_STACKPROTECTOR_STRONG is not set/' .config
-          sed -i 's/.*CONFIG_CC_STACKPROTECTOR_NONE.*/CONFIG_CC_STACKPROTECTOR_NONE=y/' .config
-          grep -q 'CONFIG_CC_STACKPROTECTOR_NONE=y' .config || \
-            echo 'CONFIG_CC_STACKPROTECTOR_NONE=y' >> .config
-          sed -i '/CONFIG_CC_STACKPROTECTOR_REGULAR/d' .config
+          grep -q 'CONFIG_CC_STACKPROTECTOR_STRONG=y' .config || \
+            echo 'CONFIG_CC_STACKPROTECTOR_STRONG=y' >> .config
           make olddefconfig
 
       # -------------------------------------------------------
