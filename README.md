@@ -128,6 +128,7 @@ k6a-ctl: `check_module.sh` validiert delegated/profile, WebUI zeigt Gov-Status l
 
 | Version | Highlights |
 |---------|------------|
+| **unreleased** | Hardening: `STACKPROTECTOR_STRONG`, `CRYPTO_ZSTD` + `F2FS_ZSTD` (ZRAM bleibt `lz4`), `JUMP_LABEL`, `hysteresis 500/2000`, `battery_guard_temp`, Gaming-Tune `83/86/90` + `GPU 800` + `BW 4000` |
 | **v1.3.1** | Hardening: `find_gold_cpu`, notifier/mutex fixes, `cool_cur`/`status_show` locked, `ticks` fix |
 | v1.3.0 | BW Floors write, hash coupling, `badazz_safe` Profil 5 |
 | v1.2.1 | `badazz_safe`, multi-zone temp, `clamp_freq` fix |
