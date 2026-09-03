@@ -49,6 +49,7 @@ linux-4.14.369
 | **Net** | BBR | Low-latency |
 | **Wakelock** | BOEFFLA_WL_BLOCKER | Blockiert unnötige Wakelocks |
 | **Monitor** | MSM_PERFORMANCE, PSI | `cpu_freq_times`, Pressure-Stall |
+| **NFC** | PN80T I2C-Treiber | `CONFIG_NFC=n` bewusst (NCI in userspace), `CONFIG_NFC_NQ_PN80T=y` liefert `/dev/nq-nci` — Fix via [Sweet2NfcFIX](https://github.com/vandalsquad187/Sweet2NfcFIX) Modul |
 
 ---
 

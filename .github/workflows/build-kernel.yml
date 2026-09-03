@@ -114,6 +114,8 @@ jobs:
             "CONFIG_KSU=y"
             "CONFIG_KSU_SUSFS=y"
             "CONFIG_KSU_TAMPER_SYSCALL_TABLE=y"
+            "CONFIG_K6A_GOV=y"
+            "CONFIG_NFC_NQ_PN80T=y"
           )
           errors=0
           for config in "${REQUIRED_CONFIGS[@]}"; do
