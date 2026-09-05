@@ -179,6 +179,7 @@ jobs:
       # für eine saubere Versionskette.
       # -------------------------------------------------------
       - name: Create Release
+        if: github.ref == 'refs/heads/main'
         uses: softprops/action-gh-release@v2
         with:
           tag_name: v${{ steps.kernel_ver.outputs.short }}-badazz-build${{ github.run_number }}
