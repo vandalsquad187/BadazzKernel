@@ -174,6 +174,16 @@ jobs:
             -x ".git/*" "README.md"
 
       # -------------------------------------------------------
+      # Schritt 8b: ZIP als Artifact hochladen (Test-Branches)
+      # -------------------------------------------------------
+      - name: Upload flashable ZIP
+        if: github.ref != 'refs/heads/main'
+        uses: actions/upload-artifact@v4
+        with:
+          name: Badazz-kernel-sweet-v${{ steps.kernel_ver.outputs.short }}-build${{ github.run_number }}
+          path: Badazz-kernel-sweet-*.zip
+
+      # -------------------------------------------------------
       # Schritt 9: Release erstellen
       # Tag-Name und Release-Name basieren auf Kernel-Version
       # für eine saubere Versionskette.
