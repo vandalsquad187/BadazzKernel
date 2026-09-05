@@ -107,12 +107,16 @@ jobs:
       # -------------------------------------------------------
       - name: Validate kernel config
         run: |
+          echo "=== USB/PHY config dump ==="
+          grep -E "^CONFIG_(PHY_QCOM_QUSB2|USB_DWC3|USB_DWC3_MSM|MSM_QUSB_PHY|USB_MSM_SSPHY_QMP|GENERIC_PHY|OF|ARCH_QCOM|NVMEM)=" .config || true
+          echo "=== end dump ==="
           REQUIRED_CONFIGS=(
             "CONFIG_KSU=y"
             "CONFIG_KSU_SUSFS=y"
             "CONFIG_KSU_TAMPER_SYSCALL_TABLE=y"
             "CONFIG_K6A_GOV=y"
             "CONFIG_NFC_NQ_PN80T=y"
+            "CONFIG_PHY_QCOM_QUSB2=y"
           )
           errors=0
           for config in "${REQUIRED_CONFIGS[@]}"; do
