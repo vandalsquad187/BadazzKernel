@@ -2963,6 +2963,9 @@ static int dwc3_msm_resume(struct dwc3_msm *mdwc)
 	clk_prepare_enable(mdwc->utmi_clk);
 	if (mdwc->bus_aggr_clk)
 		clk_prepare_enable(mdwc->bus_aggr_clk);
+	/* rev 00000000 -> core not clocked yet, delay for GCTL/RAMCLKSEL
+	 * stabilization before DEPCMD/TRB access (Stock vs Badazz diff) */
+	usleep_range(50000, 60000);
 
 	/*
 	 * Disable any wakeup events that were enabled if pwr_event_irq
