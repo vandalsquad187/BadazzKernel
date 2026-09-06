@@ -4755,6 +4755,10 @@ static int dwc3_otg_start_peripheral(struct dwc3_msm *mdwc, int on)
 		dev_dbg(mdwc->dev, "%s: turn on gadget %s\n",
 					__func__, dwc->gadget.name);
 
+		if (mdwc->bus_aggr_clk)
+			clk_prepare_enable(mdwc->bus_aggr_clk);
+		if (mdwc->noc_aggr_clk)
+			clk_prepare_enable(mdwc->noc_aggr_clk);
 		dwc3_override_vbus_status(mdwc, true);
 		usb_phy_notify_connect(mdwc->hs_phy, USB_SPEED_HIGH);
 		usb_phy_notify_connect(mdwc->ss_phy, USB_SPEED_SUPER);
