@@ -98,7 +98,7 @@
 			snps,usb3_lpm_capable;
 			usb-core-id = <0>;
 			tx-fifo-resize;
-			maximum-speed = "super-speed";
+			maximum-speed = "high-speed";
 			dr_mode = "otg";
 		};
 
