@@ -3013,10 +3013,11 @@ static int dwc3_msm_resume(struct dwc3_msm *mdwc)
 		if (mdwc->iommu_map) {
 			ret = arm_iommu_attach_device(mdwc->dev,
 					mdwc->iommu_map);
-			if (ret)
+			if (ret) {
 				dev_err(mdwc->dev, "IOMMU attach failed (%d)\n",
 						ret);
-			else
+				return ret;
+			} else
 				dev_dbg(mdwc->dev, "attached to IOMMU\n");
 		}
 
