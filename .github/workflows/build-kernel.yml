@@ -153,6 +153,25 @@ jobs:
           make -j$JOBS Image.gz dtb.img dtbo.img
 
       # -------------------------------------------------------
+      # Schritt 7b: Post-Build Config verifizieren + QUSB2-Objekt prüfen
+      # -------------------------------------------------------
+      - name: Verify post-build config
+        run: |
+          echo "=== post-build .config QUSB2 ==="
+          grep -E "QUSB2" .config || echo "QUSB2 MISSING FROM POST-BUILD .config!"
+          echo "=== QUSB2 object check ==="
+          ls -la drivers/phy/qualcomm/phy-qcom-qusb2.o 2>&1 || echo "phy-qcom-qusb2.o NOT BUILT!"
+          if ! grep -q "^CONFIG_PHY_QCOM_QUSB2=y$" .config; then
+            echo "::error::QUSB2 dropped during build! Post-build .config lacks it."
+            exit 1
+          fi
+          if [ ! -f drivers/phy/qualcomm/phy-qcom-qusb2.o ]; then
+            echo "::error::QUSB2 object not compiled!"
+            exit 1
+          fi
+          echo "::notice::QUSB2 verified in post-build config and objects"
+
+      # -------------------------------------------------------
       # Schritt 8: AnyKernel3-flashbares ZIP + Metadaten erstellen
       # -------------------------------------------------------
       - name: Build flashable ZIP
