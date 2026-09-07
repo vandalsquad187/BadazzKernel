@@ -4775,6 +4775,8 @@ static int dwc3_otg_start_peripheral(struct dwc3_msm *mdwc, int on)
 		dwc3_set_prtcap(dwc, DWC3_GCTL_PRTCAP_DEVICE);
 		dwc3_dis_sleep_mode(dwc);
 		mdwc->in_device_mode = true;
+		if (dwc->gadget.ops && dwc->gadget.ops->pullup)
+			dwc->gadget.ops->pullup(&dwc->gadget, 1);
 
 		/* Reduce the U3 exit handshake timer from 8us to approximately
 		 * 300ns to avoid lfps handshake interoperability issues
