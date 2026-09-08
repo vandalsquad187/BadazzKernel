@@ -193,7 +193,7 @@ jobs:
           EOF
 
           cd anykernel
-          zip -r9 ../Badazz-kernel-sweet-v${VERSION}.zip * \
+          zip -r9 ../Badazz-kernel-sweet-v${VERSION}-build${{ github.run_number }}.zip * \
             -x ".git/*" "README.md"
 
       # -------------------------------------------------------
@@ -216,7 +216,7 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: v${{ steps.kernel_ver.outputs.short }}-badazz-build${{ github.run_number }}
-          name: "Badazz-kernel v${{ steps.kernel_ver.outputs.short }}"
+          name: "Badazz-kernel v${{ steps.kernel_ver.outputs.short }}-badazz-build${{ github.run_number }}"
           body: |
             **Badazz-kernel** für sweet (sweetin / sweet_k6a)
 
@@ -238,6 +238,6 @@ jobs:
           VERSION="${{ steps.kernel_ver.outputs.short }}"
           KSU_VER="${{ steps.ksu_ver.outputs.version }}"
           echo "=== Build abgeschlossen ==="
-          echo "Kernel: Badazz-kernel v${VERSION}"
+          echo "Kernel: Badazz-kernel v${VERSION}-badazz-build${{ github.run_number }}"
           echo "KSU:    v${KSU_VER} (UAPIv2)"
-          echo "ZIP:    Badazz-kernel-sweet-v${VERSION}.zip"
+          echo "ZIP:    Badazz-kernel-sweet-v${VERSION}-build${{ github.run_number }}.zip"
