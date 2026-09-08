@@ -20,15 +20,19 @@ name: Build Kernel
 
 on:
   push:
-    branches: [main, 23.2, ksu-next-fix-100]
+    branches: [main, 23.2, ksu-next-fix-100, miui/**]
   workflow_dispatch:
 
 jobs:
   build:
-    name: Build sweet kernel
+    name: Build sweet kernel (${{ matrix.variant }})
     runs-on: ubuntu-latest
     permissions:
       contents: write
+    strategy:
+      matrix:
+        variant: [aosp, miui]
+      fail-fast: false
 
     steps:
       # -------------------------------------------------------
@@ -95,11 +99,19 @@ jobs:
           export ARCH=arm64
           export CROSS_COMPILE=aarch64-linux-gnu-
           export CROSS_COMPILE_COMPAT=arm-linux-gnueabihf-
-          make sweet_defconfig
+          if [ "${{ matrix.variant }}" = "miui" ]; then
+            scripts/kconfig/merge_config.sh arch/arm64/configs/sweet_defconfig arch/arm64/configs/sweet_miui.config
+            cp .config arch/arm64/configs/tmp_miui_defconfig
+            make tmp_miui_defconfig
+          else
+            make sweet_defconfig
+          fi
           sed -i 's/CONFIG_LLVM_POLLY=y/# CONFIG_LLVM_POLLY is not set/' .config
           grep -q 'CONFIG_CC_STACKPROTECTOR_STRONG=y' .config || \
             echo 'CONFIG_CC_STACKPROTECTOR_STRONG=y' >> .config
           make olddefconfig
+          echo "=== ${{ matrix.variant }} config ==="
+          grep -E "ARCH_SM6150|MSM_GCC_SM8150|MSM_CAMCC_SM8150|QTI_PDC_SM6150|MIUI_ZRAM" .config | head -20
 
       # -------------------------------------------------------
       # Schritt 6: Kritische Kernel-Configs validieren
@@ -178,6 +190,8 @@ jobs:
         run: |
           VERSION="${{ steps.kernel_ver.outputs.short }}"
           KSU_VER="${{ steps.ksu_ver.outputs.version }}"
+          VARIANT="${{ matrix.variant }}"
+          if [ "$VARIANT" = "miui" ]; then SUFFIX="-miui"; else SUFFIX=""; fi
 
           cp arch/arm64/boot/Image.gz anykernel/
           cp arch/arm64/boot/dtb.img anykernel/
@@ -187,13 +201,14 @@ jobs:
           cat > anykernel/build-info.txt << EOF
           KERNEL_VERSION=${VERSION}
           KSU_VERSION=${KSU_VER}
+          VARIANT=${VARIANT}
           BUILD_DATE=$(date -u +%Y-%m-%dT%H:%M:%SZ)
           BUILD_NUMBER=${{ github.run_number }}
           COMMIT_SHA=${{ github.sha }}
           EOF
 
           cd anykernel
-          zip -r9 ../Badazz-kernel-sweet-v${VERSION}-build${{ github.run_number }}.zip * \
+          zip -r9 ../Badazz-kernel-sweet-v${VERSION}-build${{ github.run_number }}${SUFFIX}.zip * \
             -x ".git/*" "README.md"
 
       # -------------------------------------------------------
@@ -203,7 +218,7 @@ jobs:
         if: github.ref != 'refs/heads/main'
         uses: actions/upload-artifact@v4
         with:
-          name: Badazz-kernel-sweet-v${{ steps.kernel_ver.outputs.short }}-build${{ github.run_number }}
+          name: Badazz-kernel-sweet-v${{ steps.kernel_ver.outputs.short }}-build${{ github.run_number }}-${{ matrix.variant }}
           path: Badazz-kernel-sweet-*.zip
 
       # -------------------------------------------------------
@@ -237,7 +252,9 @@ jobs:
         run: |
           VERSION="${{ steps.kernel_ver.outputs.short }}"
           KSU_VER="${{ steps.ksu_ver.outputs.version }}"
-          echo "=== Build abgeschlossen ==="
-          echo "Kernel: Badazz-kernel v${VERSION}-badazz-build${{ github.run_number }}"
+          VARIANT="${{ matrix.variant }}"
+          if [ "$VARIANT" = "miui" ]; then SUFFIX="-miui"; else SUFFIX=""; fi
+          echo "=== Build abgeschlossen ($VARIANT) ==="
+          echo "Kernel: Badazz-kernel v${VERSION}-badazz-build${{ github.run_number }}${SUFFIX}"
           echo "KSU:    v${KSU_VER} (UAPIv2)"
-          echo "ZIP:    Badazz-kernel-sweet-v${VERSION}-build${{ github.run_number }}.zip"
+          echo "ZIP:    Badazz-kernel-sweet-v${VERSION}-build${{ github.run_number }}${SUFFIX}.zip"
