@@ -2963,6 +2963,9 @@ static int dwc3_msm_resume(struct dwc3_msm *mdwc)
 	clk_prepare_enable(mdwc->utmi_clk);
 	if (mdwc->bus_aggr_clk)
 		clk_prepare_enable(mdwc->bus_aggr_clk);
+	/* rev 00000000 -> core not clocked yet, delay for GCTL/RAMCLKSEL
+	 * stabilization before DEPCMD/TRB access (Stock vs Badazz diff) */
+	usleep_range(50000, 60000);
 
 	/*
 	 * Disable any wakeup events that were enabled if pwr_event_irq
@@ -3013,10 +3016,11 @@ static int dwc3_msm_resume(struct dwc3_msm *mdwc)
 		if (mdwc->iommu_map) {
 			ret = arm_iommu_attach_device(mdwc->dev,
 					mdwc->iommu_map);
-			if (ret)
+			if (ret) {
 				dev_err(mdwc->dev, "IOMMU attach failed (%d)\n",
 						ret);
-			else
+				return ret;
+			} else
 				dev_dbg(mdwc->dev, "attached to IOMMU\n");
 		}
 
@@ -4755,6 +4759,10 @@ static int dwc3_otg_start_peripheral(struct dwc3_msm *mdwc, int on)
 		dev_dbg(mdwc->dev, "%s: turn on gadget %s\n",
 					__func__, dwc->gadget.name);
 
+		if (mdwc->bus_aggr_clk)
+			clk_prepare_enable(mdwc->bus_aggr_clk);
+		if (mdwc->noc_aggr_clk)
+			clk_prepare_enable(mdwc->noc_aggr_clk);
 		dwc3_override_vbus_status(mdwc, true);
 		usb_phy_notify_connect(mdwc->hs_phy, USB_SPEED_HIGH);
 		usb_phy_notify_connect(mdwc->ss_phy, USB_SPEED_SUPER);
@@ -4767,6 +4775,7 @@ static int dwc3_otg_start_peripheral(struct dwc3_msm *mdwc, int on)
 		dwc3_set_prtcap(dwc, DWC3_GCTL_PRTCAP_DEVICE);
 		dwc3_dis_sleep_mode(dwc);
 		mdwc->in_device_mode = true;
+		usb_gadget_vbus_connect(&dwc->gadget);
 
 		/* Reduce the U3 exit handshake timer from 8us to approximately
 		 * 300ns to avoid lfps handshake interoperability issues
