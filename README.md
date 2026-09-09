@@ -17,6 +17,8 @@
 
 BadazzKernel ist ein auf Performance und Gaming getrimmter Kernel für das **Redmi Note 12 Pro 4G (sweet / sweetin)**. Kernstück ist der In-Kernel-Governor **k6a_gov v1.3.1** — optimale Basis für das Begleitmodul **[k6a-ctl](https://github.com/vandalsquad187/k6a-ctl)**. Beide arbeiten im Delegated-Modus Hand in Hand: Kernel drosselt, Modul steuert.
 
+🤌🏻Join my Telegramm channel: https://t.me/Badazz89
+
 ---
 
 ## Architektur
