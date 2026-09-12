@@ -27,3 +27,15 @@
 	qcom,msm-id = <365 0x0>;
 	qcom,board-id = <46 0>;
 };
+
+// pstore/ramoops backend for crash logs (matches stock 0xb0000000+4M reservation)
+&reserved_memory {
+	ramoops@b0000000 {
+		compatible = "ramoops";
+		reg = <0x0 0xb0000000 0x0 0x400000>;
+		record-size = <0x0 0x20000>;
+		console-size = <0x0 0x20000>;
+		ftrace-size = <0x0 0x20000>;
+		pmsg-size = <0x0 0x20000>;
+	};
+};
