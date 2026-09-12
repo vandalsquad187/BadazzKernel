@@ -100,13 +100,16 @@ jobs:
           export ARCH=arm64
           export CROSS_COMPILE=aarch64-linux-gnu-
           export CROSS_COMPILE_COMPAT=arm-linux-gnueabihf-
-          if [ "${{ matrix.variant }}" = "miui" ]; then
+<          if [ "${{ matrix.variant }}" = "miui" ]; then
             scripts/kconfig/merge_config.sh arch/arm64/configs/sweet_defconfig arch/arm64/configs/sweet_miui.config
             cp .config arch/arm64/configs/tmp_miui_defconfig
             make tmp_miui_defconfig
           else
             make sweet_defconfig
           fi
+          # Build-Nummer in Kernel-Version einbetten (Identifikation per uname/dmesg)
+          sed -i 's/CONFIG_LOCALVERSION="-BadazzKernel-sweet-v1.3.2"/CONFIG_LOCALVERSION="-BadazzKernel-sweet-v1.3.2-build${{ github.run_number }}"/' .config || true
+          grep -E "^CONFIG_LOCALVERSION=" .config || true
           sed -i 's/CONFIG_LLVM_POLLY=y/# CONFIG_LLVM_POLLY is not set/' .config
           grep -q 'CONFIG_CC_STACKPROTECTOR_STRONG=y' .config || \
             echo 'CONFIG_CC_STACKPROTECTOR_STRONG=y' >> .config
