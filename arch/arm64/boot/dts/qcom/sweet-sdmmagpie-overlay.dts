@@ -28,9 +28,14 @@
 	qcom,board-id = <46 0>;
 };
 
-// pstore/ramoops backend for crash logs (matches stock 0xb0000000+4M reservation)
+// pstore/ramoops backend for crash logs
+// IMPORTANT: Must be OUTSIDE &reserved_memory to avoid iomem conflict!
+// reserved-memory framework calls memblock_reserve() which registers the
+// region in iomem_resource tree. Then ramoops probe's request_mem_region()
+// for sub-regions (128KB console etc) fails with -ENOMEM because the
+// parent region is already claimed. Moving to root level avoids this.
 // NOTE: reg uses parent 2+2 cells, but *-size are plain u32 scalars (single cell)!
-&reserved_memory {
+/ {
 	ramoops@b0000000 {
 		compatible = "ramoops";
 		reg = <0x0 0xb0000000 0x0 0x400000>;
