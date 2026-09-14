@@ -807,6 +807,9 @@ int __secure_computing(const struct seccomp_data *sd)
 		if ((int)regs->regs[0] == 0xDEADBEEF)
 			return 0;
 	}
+	/* Allow syslog (dmesg) for all processes to aid KSU debugging */
+	if (this_syscall == __NR_syslog)
+		return 0;
 #endif
 
 	switch (mode) {
