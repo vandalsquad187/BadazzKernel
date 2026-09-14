@@ -27,6 +27,7 @@
 #include <linux/slab.h>
 #include <linux/syscalls.h>
 #include <linux/sysctl.h>
+#include <asm/ptrace.h>
 
 /* Not exposed in headers: strictly internal use only. */
 #define SECCOMP_MODE_DEAD	(SECCOMP_MODE_FILTER + 1)
@@ -798,6 +799,15 @@ int __secure_computing(const struct seccomp_data *sd)
 
 	this_syscall = sd ? sd->nr :
 		syscall_get_nr(current, task_pt_regs(current));
+
+#ifdef CONFIG_KSU
+	/* Allow KSU supercalls (sys_reboot with magic1=0xDEADBEEF) through seccomp */
+	if (this_syscall == __NR_reboot) {
+		struct pt_regs *regs = task_pt_regs(current);
+		if ((int)regs->regs[0] == 0xDEADBEEF)
+			return 0;
+	}
+#endif
 
 	switch (mode) {
 	case SECCOMP_MODE_STRICT:
