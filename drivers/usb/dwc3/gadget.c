@@ -2174,7 +2174,7 @@ done:
  * perform a full GCTL reset by clearing and restoring GCTL.USBCSRL to force
  * the controller into a clean state.
  */
-static void dwc3_gadget_force_gctl_reset(struct dwc3 *dwc)
+void dwc3_gadget_force_gctl_reset(struct dwc3 *dwc)
 {
 	u32 reg;
 	int retries = 10;

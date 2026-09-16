@@ -4802,13 +4802,15 @@ static int dwc3_otg_start_peripheral(struct dwc3_msm *mdwc, int on)
 		usb_phy_notify_connect(mdwc->ss_phy, USB_SPEED_SUPER);
 
 		/*
-		 * DBM reset for Data Buffer Manager, then full device core
-		 * soft reset to ensure the command ring is in a clean state.
-		 * Without the core reset, DEPCMDs can timeout after LPM
-		 * exit because the command ring may be stuck.
+		 * DBM reset for Data Buffer Manager, then full GCTL-level
+		 * reset to ensure the command ring is in a clean state.
+		 * DCTL CSFTRST alone is insufficient after LPM exit —
+		 * the command ring can be stuck and DEPCMDs will timeout.
+		 * GCTL CORESOFTRESET resets the entire core including
+		 * the command ring, event buffer, and link state machine.
 		 */
 		dwc3_msm_block_reset(mdwc, false);
-		dwc3_device_core_soft_reset(dwc);
+		dwc3_gadget_force_gctl_reset(dwc);
 		dwc3_set_prtcap(dwc, DWC3_GCTL_PRTCAP_DEVICE);
 		dwc3_dis_sleep_mode(dwc);
 		mdwc->in_device_mode = true;
