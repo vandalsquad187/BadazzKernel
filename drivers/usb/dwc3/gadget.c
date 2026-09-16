@@ -2163,6 +2163,57 @@ done:
 }
 
 #define MIN_RUN_STOP_DELAY_MS 50
+#define MAX_VBUS_SESSION_SOFT_RESETS 3
+
+/**
+ * dwc3_gadget_force_gctl_reset - Force a full GCTL-level reset
+ * @dwc: pointer to our context structure
+ *
+ * When DCTL soft reset (CSFTRST) is insufficient to recover the controller
+ * (e.g. after repeated run_stop timeouts caused by charger↔DWC3 race),
+ * perform a full GCTL reset by clearing and restoring GCTL.USBCSRL to force
+ * the controller into a clean state.
+ */
+static void dwc3_gadget_force_gctl_reset(struct dwc3 *dwc)
+{
+	u32 reg;
+	int retries = 10;
+
+	/* Clear RUNSTOP bit first */
+	reg = dwc3_readl(dwc->regs, DWC3_DCTL);
+	reg &= ~DWC3_DCTL_RUN_STOP;
+	dwc3_writel(dwc->regs, DWC3_DCTL, reg);
+
+	/* Assert and deassert CoreSoftReset via GCTL */
+	reg = dwc3_readl(dwc->regs, DWC3_GCTL);
+	reg &= ~DWC3_GCTL_CORESOFTRESET;
+	dwc3_writel(dwc->regs, DWC3_GCTL, reg);
+
+	usleep_range(1000, 1200);
+
+	reg = dwc3_readl(dwc->regs, DWC3_GCTL);
+	reg |= DWC3_GCTL_CORESOFTRESET;
+	dwc3_writel(dwc->regs, DWC3_GCTL, reg);
+
+	/* Also try DCTL CSFTRST as fallback */
+	reg = dwc3_readl(dwc->regs, DWC3_DCTL);
+	reg |= DWC3_DCTL_CSFTRST;
+	dwc3_writel(dwc->regs, DWC3_DCTL, reg);
+
+	do {
+		reg = dwc3_readl(dwc->regs, DWC3_DCTL);
+		if (!(reg & DWC3_DCTL_CSFTRST))
+			goto done;
+		usleep_range(1000, 1100);
+	} while (--retries);
+
+	dev_err(dwc->dev, "%s: DCTL CSFTRST also timed out\n", __func__);
+
+done:
+	/* 50ms phy sync delay as per data book */
+	msleep(50);
+	dev_err(dwc->dev, "GCTL force reset complete\n");
+}
 
 static int dwc3_gadget_run_stop(struct dwc3 *dwc, int is_on, int suspend)
 {
@@ -2482,8 +2533,34 @@ static int dwc3_gadget_vbus_session(struct usb_gadget *_gadget, int is_active)
 
 	spin_unlock_irqrestore(&dwc->lock, flags);
 	if (!is_active && ret == -ETIMEDOUT) {
-		dev_err(dwc->dev, "%s: Core soft reset...\n", __func__);
-		dwc3_device_core_soft_reset(dwc);
+		/*
+		 * Rate-limit soft resets to break the charger↔DWC3 loop:
+		 * charger hard-reset → VBUS drop → run_stop timeout →
+		 * soft reset → charger re-detects → VBUS → re-start →
+		 * EP0 fails → run_stop timeout → soft reset → repeat
+		 *
+		 * After MAX_VBUS_SESSION_SOFT_RESETS consecutive failures,
+		 * force GCTL reset and mark err_evt_seen to prevent the
+		 * OTG state machine from re-starting peripheral.
+		 */
+		dwc->soft_reset_count++;
+		if (dwc->soft_reset_count > MAX_VBUS_SESSION_SOFT_RESETS) {
+			dev_err(dwc->dev,
+				"%s: %d consecutive soft resets, forcing GCTL reset\n",
+				__func__, dwc->soft_reset_count);
+			dwc3_gadget_force_gctl_reset(dwc);
+			dwc->err_evt_seen = true;
+		} else {
+			dev_err(dwc->dev, "%s: Core soft reset... (%d/%d)\n",
+				__func__, dwc->soft_reset_count,
+				MAX_VBUS_SESSION_SOFT_RESETS);
+			dwc3_device_core_soft_reset(dwc);
+		}
+	}
+
+	if (!is_active && ret == 0) {
+		/* Successful stop — reset the counter */
+		dwc->soft_reset_count = 0;
 	}
 
 	enable_irq(dwc->irq);

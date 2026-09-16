@@ -3524,6 +3524,16 @@ static int dwc3_msm_vbus_notifier(struct notifier_block *nb,
 
 	mdwc->vbus_active = event;
 
+	/*
+	 * Fresh cable connect: clear soft reset loop protection so that
+	 * a physical replug can start peripheral cleanly. The charger↔DWC3
+	 * loop only manifests as rapid toggles on the same connection.
+	 */
+	if (event) {
+		dwc->soft_reset_count = 0;
+		dwc->err_evt_seen = false;
+	}
+
 	if (get_psy_type(mdwc) == POWER_SUPPLY_TYPE_USB_CDP &&
 			mdwc->vbus_active) {
 		dev_dbg(mdwc->dev, "Connected to CDP, pull DP up\n");
@@ -5003,6 +5013,11 @@ static void dwc3_otg_sm_work(struct work_struct *w)
 			mdwc->drd_state = DRD_STATE_HOST_IDLE;
 			work = 1;
 		} else if (test_bit(B_SESS_VLD, &mdwc->inputs)) {
+			if (dwc->err_evt_seen) {
+				dev_err(mdwc->dev,
+					"err_evt_seen, skip peripheral start\n");
+				break;
+			}
 			dev_dbg(mdwc->dev, "b_sess_vld\n");
 			if (get_psy_type(mdwc) == POWER_SUPPLY_TYPE_USB_FLOAT)
 				queue_delayed_work(mdwc->dwc3_wq,
