@@ -3215,9 +3215,33 @@ static void dwc3_resume_work(struct work_struct *w)
 
 	if (atomic_read(&mdwc->pm_suspended)) {
 		dbg_event(0xFF, "RWrk PMSus", 0);
-		/* let pm resume kick in resume work later */
+		/*
+		 * Set inputs now; sm_usb_wq is frozen during PM suspend
+		 * and will run after PM resume thaws it.  Skipping the
+		 * flush_delayed_work inside dwc3_ext_event_notify() avoids
+		 * a hang on the freezable workqueue.
+		 */
+		clear_bit(WAIT_FOR_LPM, &mdwc->inputs);
+		if (mdwc->id_state == DWC3_ID_FLOAT)
+			set_bit(ID, &mdwc->inputs);
+		else
+			clear_bit(ID, &mdwc->inputs);
+		if (mdwc->vbus_active && !mdwc->in_restart)
+			set_bit(B_SESS_VLD, &mdwc->inputs);
+		else
+			clear_bit(B_SESS_VLD, &mdwc->inputs);
+		if (mdwc->suspend)
+			set_bit(B_SUSPEND, &mdwc->inputs);
+		else
+			clear_bit(B_SUSPEND, &mdwc->inputs);
+		queue_delayed_work(mdwc->sm_usb_wq, &mdwc->sm_work, 0);
 		return;
 	}
+	/*
+	 * Clear stale error flag so SM can attempt start_peripheral(1).
+	 * The flag will be re-set by hardware if the error persists.
+	 */
+	dwc->err_evt_seen = false;
 	dwc3_ext_event_notify(mdwc);
 }
 
