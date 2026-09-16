@@ -4784,6 +4784,8 @@ static void dwc3_override_vbus_status(struct dwc3_msm *mdwc, bool vbus_present)
 static int dwc3_otg_start_peripheral(struct dwc3_msm *mdwc, int on)
 {
 	struct dwc3 *dwc = platform_get_drvdata(mdwc->dwc3);
+	int retries;
+	u32 reg;
 
 	pm_runtime_get_sync(mdwc->dev);
 	dbg_event(0xFF, "StrtGdgt gsync",
@@ -4802,15 +4804,32 @@ static int dwc3_otg_start_peripheral(struct dwc3_msm *mdwc, int on)
 		usb_phy_notify_connect(mdwc->ss_phy, USB_SPEED_SUPER);
 
 		/*
-		 * DBM reset for Data Buffer Manager, then full GCTL-level
-		 * reset to ensure the command ring is in a clean state.
+		 * DBM reset for Data Buffer Manager, then GCTL-level reset
+		 * to ensure the command ring is in a clean state.
 		 * DCTL CSFTRST alone is insufficient after LPM exit —
 		 * the command ring can be stuck and DEPCMDs will timeout.
-		 * GCTL CORESOFTRESET resets the entire core including
-		 * the command ring, event buffer, and link state machine.
 		 */
 		dwc3_msm_block_reset(mdwc, false);
-		dwc3_gadget_force_gctl_reset(dwc);
+		/* GCTL CORESOFTRESET: assert (clear bit 31), wait, deassert */
+		reg = dwc3_readl(dwc->regs, DWC3_GCTL);
+		reg &= ~DWC3_GCTL_CORESOFTRESET;
+		dwc3_writel(dwc->regs, DWC3_GCTL, reg);
+		udelay(500);
+		reg = dwc3_readl(dwc->regs, DWC3_GCTL);
+		reg |= DWC3_GCTL_CORESOFTRESET;
+		dwc3_writel(dwc->regs, DWC3_GCTL, reg);
+		/* DCTL CSFTRST as fallback */
+		reg = dwc3_readl(dwc->regs, DWC3_DCTL);
+		reg |= DWC3_DCTL_CSFTRST;
+		dwc3_writel(dwc->regs, DWC3_DCTL, reg);
+		retries = 10;
+		do {
+			reg = dwc3_readl(dwc->regs, DWC3_DCTL);
+			if (!(reg & DWC3_DCTL_CSFTRST))
+				break;
+			udelay(500);
+		} while (--retries);
+		mdelay(10);
 		dwc3_set_prtcap(dwc, DWC3_GCTL_PRTCAP_DEVICE);
 		dwc3_dis_sleep_mode(dwc);
 		mdwc->in_device_mode = true;
