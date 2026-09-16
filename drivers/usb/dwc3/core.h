@@ -1429,6 +1429,7 @@ int dwc3_send_gadget_generic_command(struct dwc3 *dwc, unsigned cmd, u32 param);
 int dwc3_gadget_resize_tx_fifos(struct dwc3 *dwc, struct dwc3_ep *dep);
 void dwc3_gadget_disable_irq(struct dwc3 *dwc);
 int dwc3_core_init(struct dwc3 *dwc);
+int dwc3_device_core_soft_reset(struct dwc3 *dwc);
 int dwc3_event_buffers_setup(struct dwc3 *dwc);
 #else
 static inline int dwc3_gadget_init(struct dwc3 *dwc)

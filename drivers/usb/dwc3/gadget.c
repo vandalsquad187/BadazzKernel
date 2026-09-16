@@ -2134,7 +2134,7 @@ static int dwc3_gadget_set_selfpowered(struct usb_gadget *g,
  * dwc3_device_core_soft_reset - Issues device core soft reset
  * @dwc: pointer to our context structure
  */
-static int dwc3_device_core_soft_reset(struct dwc3 *dwc)
+int dwc3_device_core_soft_reset(struct dwc3 *dwc)
 {
 	u32             reg;
 	int             retries = 10;

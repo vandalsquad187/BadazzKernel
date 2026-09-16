@@ -4778,13 +4778,23 @@ static int dwc3_otg_start_peripheral(struct dwc3_msm *mdwc, int on)
 		usb_phy_notify_connect(mdwc->ss_phy, USB_SPEED_SUPER);
 
 		/*
-		 * Core reset is not required during start peripheral. Only
-		 * DBM reset is required, hence perform only DBM reset here.
+		 * DBM reset for Data Buffer Manager, then full device core
+		 * soft reset to ensure the command ring is in a clean state.
+		 * Without the core reset, DEPCMDs can timeout after LPM
+		 * exit because the command ring may be stuck.
 		 */
 		dwc3_msm_block_reset(mdwc, false);
+		dwc3_device_core_soft_reset(dwc);
 		dwc3_set_prtcap(dwc, DWC3_GCTL_PRTCAP_DEVICE);
 		dwc3_dis_sleep_mode(dwc);
 		mdwc->in_device_mode = true;
+		dev_info(mdwc->dev,
+			"peripheral start: GCTL=0x%08x DCTL=0x%08x "
+			"DALEPENA=0x%08x DSTS=0x%08x\n",
+			dwc3_readl(dwc->regs, DWC3_GCTL),
+			dwc3_readl(dwc->regs, DWC3_DCTL),
+			dwc3_readl(dwc->regs, DWC3_DALEPENA),
+			dwc3_readl(dwc->regs, DWC3_DSTS));
 		usb_gadget_vbus_connect(&dwc->gadget);
 
 		/* Reduce the U3 exit handshake timer from 8us to approximately
@@ -4802,7 +4812,7 @@ static int dwc3_otg_start_peripheral(struct dwc3_msm *mdwc, int on)
 					DWC31_LINK_LU3LFPSRXTIM(0)));
 		}
 
-		usb_gadget_vbus_connect(&dwc->gadget);
+		/* usb_gadget_vbus_connect already called above */
 #ifdef CONFIG_SMP
 		mdwc->pm_qos_req_dma.type = PM_QOS_REQ_AFFINE_IRQ;
 		mdwc->pm_qos_req_dma.irq = dwc->irq;
