@@ -1175,6 +1175,7 @@ struct dwc3 {
 	unsigned		ssp_u3_u0_quirk:1;
 	unsigned		tx_de_emphasis:2;
 	unsigned		err_evt_seen:1;
+	unsigned		soft_reset_count;
 	unsigned		disable_clk_gating:1;
 	unsigned		enable_bus_suspend:1;
 	unsigned		usb3_u1u2_disable:1;
@@ -1428,6 +1429,7 @@ int dwc3_send_gadget_generic_command(struct dwc3 *dwc, unsigned cmd, u32 param);
 int dwc3_gadget_resize_tx_fifos(struct dwc3 *dwc, struct dwc3_ep *dep);
 void dwc3_gadget_disable_irq(struct dwc3 *dwc);
 int dwc3_core_init(struct dwc3 *dwc);
+int dwc3_device_core_soft_reset(struct dwc3 *dwc);
 int dwc3_event_buffers_setup(struct dwc3 *dwc);
 #else
 static inline int dwc3_gadget_init(struct dwc3 *dwc)

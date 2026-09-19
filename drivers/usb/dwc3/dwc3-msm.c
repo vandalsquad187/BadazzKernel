@@ -3215,9 +3215,33 @@ static void dwc3_resume_work(struct work_struct *w)
 
 	if (atomic_read(&mdwc->pm_suspended)) {
 		dbg_event(0xFF, "RWrk PMSus", 0);
-		/* let pm resume kick in resume work later */
+		/*
+		 * Set inputs now; sm_usb_wq is frozen during PM suspend
+		 * and will run after PM resume thaws it.  Skipping the
+		 * flush_delayed_work inside dwc3_ext_event_notify() avoids
+		 * a hang on the freezable workqueue.
+		 */
+		clear_bit(WAIT_FOR_LPM, &mdwc->inputs);
+		if (mdwc->id_state == DWC3_ID_FLOAT)
+			set_bit(ID, &mdwc->inputs);
+		else
+			clear_bit(ID, &mdwc->inputs);
+		if (mdwc->vbus_active && !mdwc->in_restart)
+			set_bit(B_SESS_VLD, &mdwc->inputs);
+		else
+			clear_bit(B_SESS_VLD, &mdwc->inputs);
+		if (mdwc->suspend)
+			set_bit(B_SUSPEND, &mdwc->inputs);
+		else
+			clear_bit(B_SUSPEND, &mdwc->inputs);
+		queue_delayed_work(mdwc->sm_usb_wq, &mdwc->sm_work, 0);
 		return;
 	}
+	/*
+	 * Clear stale error flag so SM can attempt start_peripheral(1).
+	 * The flag will be re-set by hardware if the error persists.
+	 */
+	dwc->err_evt_seen = false;
 	dwc3_ext_event_notify(mdwc);
 }
 
@@ -3523,6 +3547,16 @@ static int dwc3_msm_vbus_notifier(struct notifier_block *nb,
 	dev_dbg(mdwc->dev, "vbus:%ld event received\n", event);
 
 	mdwc->vbus_active = event;
+
+	/*
+	 * Fresh cable connect: clear soft reset loop protection so that
+	 * a physical replug can start peripheral cleanly. The charger↔DWC3
+	 * loop only manifests as rapid toggles on the same connection.
+	 */
+	if (event) {
+		dwc->soft_reset_count = 0;
+		dwc->err_evt_seen = false;
+	}
 
 	if (get_psy_type(mdwc) == POWER_SUPPLY_TYPE_USB_CDP &&
 			mdwc->vbus_active) {
@@ -4750,6 +4784,8 @@ static void dwc3_override_vbus_status(struct dwc3_msm *mdwc, bool vbus_present)
 static int dwc3_otg_start_peripheral(struct dwc3_msm *mdwc, int on)
 {
 	struct dwc3 *dwc = platform_get_drvdata(mdwc->dwc3);
+	int retries;
+	u32 reg;
 
 	pm_runtime_get_sync(mdwc->dev);
 	dbg_event(0xFF, "StrtGdgt gsync",
@@ -4768,13 +4804,42 @@ static int dwc3_otg_start_peripheral(struct dwc3_msm *mdwc, int on)
 		usb_phy_notify_connect(mdwc->ss_phy, USB_SPEED_SUPER);
 
 		/*
-		 * Core reset is not required during start peripheral. Only
-		 * DBM reset is required, hence perform only DBM reset here.
+		 * DBM reset for Data Buffer Manager, then GCTL-level reset
+		 * to ensure the command ring is in a clean state.
+		 * DCTL CSFTRST alone is insufficient after LPM exit —
+		 * the command ring can be stuck and DEPCMDs will timeout.
 		 */
 		dwc3_msm_block_reset(mdwc, false);
+		/* GCTL CORESOFTRESET: assert (clear bit 31), wait, deassert */
+		reg = dwc3_readl(dwc->regs, DWC3_GCTL);
+		reg &= ~DWC3_GCTL_CORESOFTRESET;
+		dwc3_writel(dwc->regs, DWC3_GCTL, reg);
+		udelay(500);
+		reg = dwc3_readl(dwc->regs, DWC3_GCTL);
+		reg |= DWC3_GCTL_CORESOFTRESET;
+		dwc3_writel(dwc->regs, DWC3_GCTL, reg);
+		/* DCTL CSFTRST as fallback */
+		reg = dwc3_readl(dwc->regs, DWC3_DCTL);
+		reg |= DWC3_DCTL_CSFTRST;
+		dwc3_writel(dwc->regs, DWC3_DCTL, reg);
+		retries = 10;
+		do {
+			reg = dwc3_readl(dwc->regs, DWC3_DCTL);
+			if (!(reg & DWC3_DCTL_CSFTRST))
+				break;
+			udelay(500);
+		} while (--retries);
+		mdelay(10);
 		dwc3_set_prtcap(dwc, DWC3_GCTL_PRTCAP_DEVICE);
 		dwc3_dis_sleep_mode(dwc);
 		mdwc->in_device_mode = true;
+		dev_info(mdwc->dev,
+			"peripheral start: GCTL=0x%08x DCTL=0x%08x "
+			"DALEPENA=0x%08x DSTS=0x%08x\n",
+			dwc3_readl(dwc->regs, DWC3_GCTL),
+			dwc3_readl(dwc->regs, DWC3_DCTL),
+			dwc3_readl(dwc->regs, DWC3_DALEPENA),
+			dwc3_readl(dwc->regs, DWC3_DSTS));
 		usb_gadget_vbus_connect(&dwc->gadget);
 
 		/* Reduce the U3 exit handshake timer from 8us to approximately
@@ -4792,7 +4857,7 @@ static int dwc3_otg_start_peripheral(struct dwc3_msm *mdwc, int on)
 					DWC31_LINK_LU3LFPSRXTIM(0)));
 		}
 
-		usb_gadget_vbus_connect(&dwc->gadget);
+		/* usb_gadget_vbus_connect already called above */
 #ifdef CONFIG_SMP
 		mdwc->pm_qos_req_dma.type = PM_QOS_REQ_AFFINE_IRQ;
 		mdwc->pm_qos_req_dma.irq = dwc->irq;
@@ -5003,6 +5068,11 @@ static void dwc3_otg_sm_work(struct work_struct *w)
 			mdwc->drd_state = DRD_STATE_HOST_IDLE;
 			work = 1;
 		} else if (test_bit(B_SESS_VLD, &mdwc->inputs)) {
+			if (dwc->err_evt_seen) {
+				dev_err(mdwc->dev,
+					"err_evt_seen, skip peripheral start\n");
+				break;
+			}
 			dev_dbg(mdwc->dev, "b_sess_vld\n");
 			if (get_psy_type(mdwc) == POWER_SUPPLY_TYPE_USB_FLOAT)
 				queue_delayed_work(mdwc->dwc3_wq,
