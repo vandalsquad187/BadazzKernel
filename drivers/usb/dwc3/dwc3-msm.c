@@ -3242,6 +3242,17 @@ static void dwc3_resume_work(struct work_struct *w)
 	 * The flag will be re-set by hardware if the error persists.
 	 */
 	dwc->err_evt_seen = false;
+
+	/*
+	 * After LPM exit the device-side command ring may be stuck
+	 * (DEPCMD timeout on ep0out after suspend).  A DCTL Core Soft
+	 * Reset clears the stuck TRB/DEPCMD state, and re-initialising
+	 * the event buffers guarantees a clean software read-pointer.
+	 * This must happen *before* start_peripheral() tries to run_stop.
+	 */
+	dwc3_device_core_soft_reset(dwc);
+	dwc3_event_buffers_setup(dwc);
+
 	dwc3_ext_event_notify(mdwc);
 }
 
