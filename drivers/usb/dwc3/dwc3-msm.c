@@ -4787,6 +4787,8 @@ static int dwc3_otg_start_peripheral(struct dwc3_msm *mdwc, int on)
 		atomic_read(&mdwc->dev->power.usage_count));
 
 	if (on) {
+		u32 reg;
+
 		dev_dbg(mdwc->dev, "%s: turn on gadget %s\n",
 					__func__, dwc->gadget.name);
 
@@ -4798,15 +4800,47 @@ static int dwc3_otg_start_peripheral(struct dwc3_msm *mdwc, int on)
 		usb_phy_notify_connect(mdwc->hs_phy, USB_SPEED_HIGH);
 		usb_phy_notify_connect(mdwc->ss_phy, USB_SPEED_SUPER);
 
-		/*
-		 * Core reset is not required during start peripheral. Only
-		 * DBM reset is required, hence perform only DBM reset here.
-		 */
 		dwc3_msm_block_reset(mdwc, false);
 		dwc3_set_prtcap(dwc, DWC3_GCTL_PRTCAP_DEVICE);
 		dwc3_dis_sleep_mode(dwc);
+
+		/*
+		 * GCTL Core Soft Reset clears the device-side command ring
+		 * state. Without this, a stuck TRB or pending DEPCMD from a
+		 * previous session or LPM exit causes SETEPCONFIG timeout
+		 * on ep0out during gadget init.
+		 */
+		reg = dwc3_readl(dwc->regs, DWC3_GCTL);
+		reg |= DWC3_GCTL_CORESOFTRESET;
+		dwc3_writel(dwc->regs, DWC3_GCTL, reg);
+		udelay(10);
+
+		/* DCTL CSFTRST clears device-specific state including EP config */
+		reg = dwc3_readl(dwc->regs, DWC3_DCTL);
+		reg |= DWC3_DCTL_CSFTRST;
+		dwc3_writel(dwc->regs, DWC3_DCTL, reg);
+
+		{
+			int retries = 1000;
+			while (retries--) {
+				reg = dwc3_readl(dwc->regs, DWC3_DCTL);
+				if (!(reg & DWC3_DCTL_CSFTRST))
+					break;
+				udelay(1);
+			}
+			if (!retries)
+				dev_err(mdwc->dev, "DCTL CSFTRST timed out\n");
+			else
+				usleep_range(50, 60); /* PHY sync delay per data book */
+		}
+
+		/* Re-set port capability after core reset */
+		dwc3_set_prtcap(dwc, DWC3_GCTL_PRTCAP_DEVICE);
+
+		/* Re-init event buffer after core reset */
+		dwc3_event_buffers_setup(dwc);
+
 		mdwc->in_device_mode = true;
-		usb_gadget_vbus_connect(&dwc->gadget);
 
 		/* Reduce the U3 exit handshake timer from 8us to approximately
 		 * 300ns to avoid lfps handshake interoperability issues
