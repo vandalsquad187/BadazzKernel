@@ -368,9 +368,9 @@ static int min_sink_current = 900;
 module_param(min_sink_current, int, 0600);
 
 #ifdef CONFIG_CC_SRC_LIMIT
-static const u32 default_src_caps[] = { 0x36019032 };	/* VSafe5V @ 0.5A */
+static const u32 default_src_caps[] = { 0x16019032 };	/* VSafe5V @ 0.5A, no DRP/PR_SWAP */
 #else
-static const u32 default_src_caps[] = { 0x36019096 };   /* VSafe5V @ 1.5A */
+static const u32 default_src_caps[] = { 0x16019096 };   /* VSafe5V @ 1.5A, no DRP/PR_SWAP */
 #endif
 static const u32 default_snk_caps[] = { 0x2601912C };	/* VSafe5V @ 3A */
 
