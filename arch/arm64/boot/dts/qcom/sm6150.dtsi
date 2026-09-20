@@ -2997,7 +2997,11 @@
 #include "sm6150-usb.dtsi"
 
 &usb0 {
-	extcon = <&pm6150_pdphy>, <&pm6150_charger>;
+	extcon = <&pm6150_charger>;
+};
+
+&pm6150_pdphy {
+	status = "disabled";
 };
 
 &pm6150_vadc {
