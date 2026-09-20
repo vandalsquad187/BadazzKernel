@@ -2946,15 +2946,30 @@ static int smb5_configure_typec(struct smb_charger *chg)
 	 * Without PD PHY, the PMIC DRP state machine has no PD negotiation
 	 * to determine role and defaults to Source (typec_mode:6), causing
 	 * unstable CC detection and APSD rerun loops.
-	 * Force SNK-only so the PMIC correctly recognizes as Sink.
+	 * Must disable Type-C first, write SNK-only, then re-enable —
+	 * the PMIC ignores the mode register change without the cycle.
 	 */
 	rc = smblib_masked_write(chg, TYPE_C_MODE_CFG_REG,
-				TYPEC_POWER_ROLE_CMD_MASK,
-				EN_SNK_ONLY_BIT);
-	if (rc < 0)
-		dev_err(chg->dev, "Couldn't force SNK-only mode rc=%d\n", rc);
-	else
-		dev_err(chg->dev, "Forced SNK-only mode for non-PD PHY\n");
+				TYPEC_DISABLE_CMD_BIT, TYPEC_DISABLE_CMD_BIT);
+	if (rc < 0) {
+		dev_err(chg->dev, "Couldn't disable Type-C rc=%d\n", rc);
+	} else {
+		msleep(50);
+		rc = smblib_masked_write(chg, TYPE_C_MODE_CFG_REG,
+					TYPEC_POWER_ROLE_CMD_MASK,
+					EN_SNK_ONLY_BIT);
+		if (rc < 0) {
+			dev_err(chg->dev, "Couldn't force SNK-only rc=%d\n", rc);
+		} else {
+			msleep(50);
+			rc = smblib_masked_write(chg, TYPE_C_MODE_CFG_REG,
+						TYPEC_DISABLE_CMD_BIT, 0);
+			if (rc < 0)
+				dev_err(chg->dev, "Couldn't re-enable Type-C rc=%d\n", rc);
+			else
+				dev_err(chg->dev, "SNK-only mode active (disable→write→enable)\n");
+		}
+	}
 
 	rc = smblib_read(chg, LEGACY_CABLE_STATUS_REG, &val);
 	if (rc < 0) {
