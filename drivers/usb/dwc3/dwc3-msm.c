@@ -4804,8 +4804,8 @@ static int dwc3_otg_start_peripheral(struct dwc3_msm *mdwc, int on)
 	if (on) {
 		u32 reg;
 
-		dev_dbg(mdwc->dev, "%s: turn on gadget %s\n",
-					__func__, dwc->gadget.name);
+		dev_err(mdwc->dev, "start_peripheral: turn on gadget %s\n",
+					dwc->gadget.name);
 
 		if (mdwc->bus_aggr_clk)
 			clk_prepare_enable(mdwc->bus_aggr_clk);
@@ -5040,7 +5040,10 @@ static void dwc3_otg_sm_work(struct work_struct *w)
 	}
 
 	state = dwc3_drd_state_string(mdwc->drd_state);
-	dev_dbg(mdwc->dev, "%s state\n", state);
+	dev_err(mdwc->dev, "sm_work: state=%s inputs[ID=%d BSV=%d BSLP=%d]\n",
+		state, test_bit(ID, &mdwc->inputs),
+		test_bit(B_SESS_VLD, &mdwc->inputs),
+		test_bit(B_SUSPEND, &mdwc->inputs));
 	dbg_event(0xFF, state, 0);
 
 	/* Check OTG state */
@@ -5083,7 +5086,7 @@ static void dwc3_otg_sm_work(struct work_struct *w)
 			mdwc->drd_state = DRD_STATE_HOST_IDLE;
 			work = 1;
 		} else if (test_bit(B_SESS_VLD, &mdwc->inputs)) {
-			dev_dbg(mdwc->dev, "b_sess_vld\n");
+			dev_err(mdwc->dev, "sm_work: BIDLE->PERIPHERAL b_sess_vld\n");
 			if (get_psy_type(mdwc) == POWER_SUPPLY_TYPE_USB_FLOAT)
 				queue_delayed_work(mdwc->dwc3_wq,
 						&mdwc->sdp_check,
