@@ -2941,6 +2941,21 @@ static int smb5_configure_typec(struct smb_charger *chg)
 	/* Enable extcon notifications so charger fires EXTCON_USB on SDP */
 	chg->use_extcon = true;
 
+	/*
+	 * Force Sink-only mode when PD PHY is not active.
+	 * Without PD PHY, the PMIC DRP state machine has no PD negotiation
+	 * to determine role and defaults to Source (typec_mode:6), causing
+	 * unstable CC detection and APSD rerun loops.
+	 * Force SNK-only so the PMIC correctly recognizes as Sink.
+	 */
+	rc = smblib_masked_write(chg, TYPE_C_MODE_CFG_REG,
+				TYPEC_POWER_ROLE_CMD_MASK,
+				EN_SNK_ONLY_BIT);
+	if (rc < 0)
+		dev_err(chg->dev, "Couldn't force SNK-only mode rc=%d\n", rc);
+	else
+		dev_err(chg->dev, "Forced SNK-only mode for non-PD PHY\n");
+
 	rc = smblib_read(chg, LEGACY_CABLE_STATUS_REG, &val);
 	if (rc < 0) {
 		dev_err(chg->dev, "Couldn't read Legacy status rc=%d\n", rc);

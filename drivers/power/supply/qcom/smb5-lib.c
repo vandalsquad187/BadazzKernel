@@ -10253,8 +10253,18 @@ static void smblib_charger_type_recheck(struct work_struct *work)
 		return;
 	}
 
-	if (smblib_get_prop_dfp_mode(chg) != POWER_SUPPLY_TYPEC_NONE)
-		goto check_next;
+	/*
+	 * If PD PHY is disabled, the PMIC may report DFP (Source) mode due to
+	 * default DRP behavior. Break the recheck loop to avoid APSD reruns
+	 * that toggle extcon and destabilize USB peripheral link.
+	 * With SNK-only forced in smb5_configure_typec(), this path should
+	 * not trigger, but keep as safety net.
+	 */
+	if (smblib_get_prop_dfp_mode(chg) != POWER_SUPPLY_TYPEC_NONE) {
+		smblib_dbg(chg, PR_OEM, "DFP mode detected, break recheck\n");
+		check_count = 0;
+		return;
+	}
 
 	if (!chg->recheck_charger)
 		chg->precheck_charger_type = chg->real_charger_type;
