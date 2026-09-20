@@ -3062,14 +3062,11 @@ static void usbpd_sm(struct work_struct *w)
 
 			dr_swap(pd);
 		} else if (IS_CTRL(rx_msg, MSG_PR_SWAP)) {
-			/* we'll happily accept Src->Sink requests anytime */
-			ret = pd_send_msg(pd, MSG_ACCEPT, NULL, 0, SOP_MSG);
+			ret = pd_send_msg(pd, MSG_REJECT, NULL, 0, SOP_MSG);
 			if (ret) {
 				usbpd_set_state(pd, PE_SEND_SOFT_RESET);
 				break;
 			}
-
-			usbpd_set_state(pd, PE_PRS_SRC_SNK_TRANSITION_TO_OFF);
 			break;
 		} else if (IS_CTRL(rx_msg, MSG_VCONN_SWAP)) {
 			ret = pd_send_msg(pd, MSG_ACCEPT, NULL, 0, SOP_MSG);
@@ -3353,14 +3350,11 @@ static void usbpd_sm(struct work_struct *w)
 			dr_swap(pd);
 			break;
 		} else if (IS_CTRL(rx_msg, MSG_PR_SWAP)) {
-			/* TODO: should we Reject in certain circumstances? */
-			ret = pd_send_msg(pd, MSG_ACCEPT, NULL, 0, SOP_MSG);
+			ret = pd_send_msg(pd, MSG_REJECT, NULL, 0, SOP_MSG);
 			if (ret) {
 				usbpd_set_state(pd, PE_SEND_SOFT_RESET);
 				break;
 			}
-
-			usbpd_set_state(pd, PE_PRS_SNK_SRC_TRANSITION_TO_OFF);
 			break;
 		} else if (IS_CTRL(rx_msg, MSG_VCONN_SWAP)) {
 			ret = pd_send_msg(pd, MSG_ACCEPT, NULL, 0, SOP_MSG);
