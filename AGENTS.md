@@ -3,8 +3,9 @@
 ## Current State
 - **Repo**: `vandalsquad187/BadazzKernel` branch `main`
 - **Kernel**: `4.14.369` — `K6A_GOV v1.3.1` built-in
-- **Local**: Clean, GH `main` @ `81d69ae` (v1.3.1 + deadlock fix)
+- **Local**: Clean, GH `main` @ `c7d6fc70b` (Build 279: Build 273 base + USB DCTL fix)
 - **GitHub**: Up to date, CI builds on `main`
+- **KSU-Next Submodule**: `b100bd28` (dev-4.14-prctl-fix, UAPI v4, synchronous execve hook)
 
 ## k6a_gov v1.3.1
 
@@ -76,6 +77,37 @@ dfcb96b v1.2.1: KB14 badazz_safe, KB8 multi-zone temp, clamp_freq fix
 2. **SUSFS implicit declaration**: guard calls with `#ifdef CONFIG_KSU_SUSFS_*`
 3. **Deadlock on cat status**: fixed in d4835b6 — `get_cd_max_freq` must not take mutex
 4. **Hardcoded CPU6**: fixed — use `find_gold_cpu()` portable
+5. **Boot hang at crDroid logo** (Build 267-278): see Boot-Hang Root Cause below
+
+## Boot-Hang Root Cause (Build 267-278)
+- **Symptom**: Boot hängt bei crDroid Boot-Logo (95%), intermittierend
+- **Regression-Commit**: `be83f8e5` — aktiviert `ksu_execve_hook_ksud_common()` auf 4.14 (execve-Hook für init second_stage + zygote)
+- **Root Cause**: **Zygisk Next + Magic Mount RS** Modul-Kombination verursacht den Hang
+- **Beweis**: 
+  - Build 273 + Zygisk Next + Magic Mount RS → hängt
+  - Build 273 + Brezygisk + Hybrid Mount → bootet 100%
+  - OrangeFox "Fix SELinux contexts" rettet den Boot (Workaround, nicht Fix)
+- **Nicht der Kernel**: `apply_kernelsu_rules()` im execve-Hook ist NICHT der Auslöser — der Hook ist seit `be83f8e5` aktiv und funktioniert korrekt mit den richtigen Modulen
+- **Workqueue-Fix (Build 277/278) nicht nötig**: War ein Umweg, verursachte zusätzlich EACCES in der Allowlist
+
+## Module-Kompatibilität
+
+### Getestet und funktioniert
+| Modul | Status | Anmerkung |
+|---|---|---|
+| **Brezygisk** | ✅ | Zygisk-Alternative, kompatibel mit 4.14 KernelSU-Next |
+| **Hybrid Mount** | ✅ | Systemless Mount, kompatibel |
+| **k6a-ctl** | ✅ | Kernel-eigen, immer kompatibel |
+| **nfc_sweet2_fix** | ✅ | Kernel-Modul |
+| **FastCharging** | ✅ | Kernel-Modul |
+| **padazz89** | ✅ | Kernel-Modul |
+| **tricky_store** | ✅ | Key Attestation |
+
+### Inkompatibel / Verursacht Boot-Hang
+| Modul | Status | Anmerkung |
+|---|---|---|
+| **Zygisk Next** | ❌ | Verursacht Boot-Hang in Kombination mit Magic Mount RS |
+| **Magic Mount RS** | ❌ | Verursacht Boot-Hang in Kombination mit Zygisk Next |
 
 ## NFC sweet2 PN557 (bewusst so)
 - `CONFIG_NFC=n` + `CONFIG_NFC_NQ=n` bewusst — `net/nfc` (pn544/pn533) ungenutzt, NCI liegt in userspace
