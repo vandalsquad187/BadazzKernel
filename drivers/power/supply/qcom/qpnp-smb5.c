@@ -2938,6 +2938,9 @@ static int smb5_configure_typec(struct smb_charger *chg)
 	int rc;
 	u8 val = 0;
 
+	/* Enable extcon notifications so charger fires EXTCON_USB on SDP */
+	chg->use_extcon = true;
+
 	rc = smblib_read(chg, LEGACY_CABLE_STATUS_REG, &val);
 	if (rc < 0) {
 		dev_err(chg->dev, "Couldn't read Legacy status rc=%d\n", rc);
