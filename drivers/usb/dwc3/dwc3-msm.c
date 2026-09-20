@@ -3142,7 +3142,8 @@ static void dwc3_resume_work(struct work_struct *w)
 	struct extcon_dev *edev = NULL;
 	int ret = 0;
 
-	dev_dbg(mdwc->dev, "%s: dwc3 resume work\n", __func__);
+	dev_err(mdwc->dev, "resume_work: vbus_active=%d id_state=%d in_restart=%d ext_idx=%d\n",
+		mdwc->vbus_active, mdwc->id_state, mdwc->in_restart, mdwc->ext_idx);
 
 	if (mdwc->extcon && mdwc->vbus_active && !mdwc->in_restart) {
 		extcon_id = EXTCON_USB;
@@ -3546,6 +3547,9 @@ static int dwc3_msm_vbus_notifier(struct notifier_block *nb,
 
 	dbg_event(0xFF, "extcon idx", enb->idx);
 
+	dev_err(mdwc->dev, "vbus_notifier: event=%ld vbus_active=%d dr_mode=%d\n",
+		event, mdwc->vbus_active, dwc ? dwc->dr_mode : -1);
+
 	if (mdwc->vbus_active == event)
 		return NOTIFY_DONE;
 
@@ -3561,8 +3565,13 @@ static int dwc3_msm_vbus_notifier(struct notifier_block *nb,
 		usb_phy_drive_dp_pulse(mdwc->hs_phy, DP_PULSE_WIDTH_MSEC);
 	}
 
-	if ((dwc->dr_mode == USB_DR_MODE_OTG) && !mdwc->in_restart)
+	dev_err(mdwc->dev, "vbus_notifier: dr_mode=%d OTG=%d in_restart=%d\n",
+		dwc->dr_mode, USB_DR_MODE_OTG, mdwc->in_restart);
+
+	if ((dwc->dr_mode == USB_DR_MODE_OTG) && !mdwc->in_restart) {
+		dev_err(mdwc->dev, "vbus_notifier: queueing resume_work\n");
 		queue_work(mdwc->dwc3_wq, &mdwc->resume_work);
+	}
 
 	return NOTIFY_DONE;
 }
@@ -3604,8 +3613,14 @@ static int dwc3_msm_extcon_register(struct dwc3_msm *mdwc)
 						dwc3_msm_vbus_notifier;
 		ret = extcon_register_notifier(edev, EXTCON_USB,
 						&mdwc->extcon[idx].vbus_nb);
-		if (ret < 0)
+		if (ret < 0) {
 			check_vbus_state = false;
+			dev_err(mdwc->dev, "extcon[%d] register EXTCON_USB notifier failed: %d\n",
+				idx, ret);
+		} else {
+			dev_err(mdwc->dev, "extcon[%d] register EXTCON_USB notifier OK (state=%d)\n",
+				idx, extcon_get_state(edev, EXTCON_USB));
+		}
 
 		mdwc->extcon[idx].id_nb.notifier_call = dwc3_msm_id_notifier;
 		ret = extcon_register_notifier(edev, EXTCON_USB_HOST,
