@@ -3034,16 +3034,12 @@ static int smb5_configure_typec(struct smb_charger *chg)
 		return rc;
 	}
 
-	/* enable try.snk and clear force sink for DRP mode */
-	rc = smblib_masked_write(chg, TYPE_C_MODE_CFG_REG,
-				EN_TRY_SNK_BIT | EN_SNK_ONLY_BIT,
-				EN_TRY_SNK_BIT);
-	if (rc < 0) {
-		dev_err(chg->dev,
-			"Couldn't configure TYPE_C_MODE_CFG_REG rc=%d\n",
-				rc);
-		return rc;
-	} else {
+	/*
+	 * Keep SNK-only from the disable→write→enable sequence above.
+	 * Do NOT restore DRP+try-snk — without PD PHY, DRP defaults to
+	 * Source (typec_mode:6) which breaks peripheral detection.
+	 */
+	if (!chg->pd_not_supported) {
 		chg->typec_try_mode |= EN_TRY_SNK_BIT;
 	}
 
