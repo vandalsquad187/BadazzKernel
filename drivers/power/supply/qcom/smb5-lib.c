@@ -10254,14 +10254,13 @@ static void smblib_charger_type_recheck(struct work_struct *work)
 	}
 
 	/*
-	 * If PD PHY is disabled, the PMIC may report DFP (Source) mode due to
-	 * default DRP behavior. Break the recheck loop to avoid APSD reruns
-	 * that toggle extcon and destabilize USB peripheral link.
-	 * With SNK-only forced in smb5_configure_typec(), this path should
-	 * not trigger, but keep as safety net.
+	 * If PMIC is in Source mode (typec_mode >= SOURCE_DEFAULT), there is
+	 * no valid Sink on CC. Without PD PHY, the PMIC cannot negotiate role.
+	 * Breaking here prevents APSD reruns that toggle DPDM and block D+/D-
+	 * needed for USB peripheral enumeration.
 	 */
-	if (smblib_get_prop_dfp_mode(chg) != POWER_SUPPLY_TYPEC_NONE) {
-		smblib_dbg(chg, PR_OEM, "DFP mode detected, break recheck\n");
+	if (chg->typec_mode >= POWER_SUPPLY_TYPEC_SOURCE_DEFAULT) {
+		smblib_dbg(chg, PR_OEM, "Source mode detected, break recheck\n");
 		check_count = 0;
 		return;
 	}
