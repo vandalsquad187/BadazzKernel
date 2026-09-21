@@ -678,13 +678,13 @@ And public attribution of xiaomi platforms(like F3 and so and)
 
 &usb0 {
 	dwc3@a600000 {
-		usb-phy = <&qusb_phy0>, <&usb_qmp_dp_phy>;
-		maximum-speed = "super-speed";
+		usb-phy = <&qusb_phy0>, <&usb_nop_phy>;
+		maximum-speed = "high-speed";
 	};
 };
 
 &usb_qmp_dp_phy {
-	status = "okay";
+	status = "disabled";
 };
 
 &qupv3_se7_i2c{
