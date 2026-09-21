@@ -3801,35 +3801,6 @@ static int smb5_post_init(struct smb5 *chip)
 		return rc;
 	}
 
-	/*
-	 * Force Sink-only mode — last write to TYPE_C_MODE_CFG_REG wins.
-	 * Must come after PR_DUAL (line above) to not get overwritten.
-	 * Without PD PHY, DRP defaults to Source (typec_mode:6) which
-	 * breaks peripheral detection. Disable→write→enable cycle is
-	 * required for PMIC to latch the new mode.
-	 */
-	rc = smblib_masked_write(chg, TYPE_C_MODE_CFG_REG,
-				TYPEC_DISABLE_CMD_BIT, TYPEC_DISABLE_CMD_BIT);
-	if (rc == 0) {
-		msleep(50);
-		rc = smblib_masked_write(chg, TYPE_C_MODE_CFG_REG,
-					TYPEC_POWER_ROLE_CMD_MASK,
-					EN_SNK_ONLY_BIT);
-		if (rc == 0) {
-			msleep(50);
-			rc = smblib_masked_write(chg, TYPE_C_MODE_CFG_REG,
-						TYPEC_DISABLE_CMD_BIT, 0);
-			if (rc == 0)
-				dev_err(chg->dev, "SNK-only mode active (last write wins)\n");
-			else
-				dev_err(chg->dev, "Couldn't re-enable Type-C rc=%d\n", rc);
-		} else {
-			dev_err(chg->dev, "Couldn't write SNK-only rc=%d\n", rc);
-		}
-	} else {
-		dev_err(chg->dev, "Couldn't disable Type-C rc=%d\n", rc);
-	}
-
 	rerun_election(chg->temp_change_irq_disable_votable);
 
 	return 0;

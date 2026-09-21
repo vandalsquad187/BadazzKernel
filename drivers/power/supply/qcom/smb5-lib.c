@@ -10253,17 +10253,8 @@ static void smblib_charger_type_recheck(struct work_struct *work)
 		return;
 	}
 
-	/*
-	 * If PMIC is in Source mode (typec_mode >= SOURCE_DEFAULT), there is
-	 * no valid Sink on CC. Without PD PHY, the PMIC cannot negotiate role.
-	 * Breaking here prevents APSD reruns that toggle DPDM and block D+/D-
-	 * needed for USB peripheral enumeration.
-	 */
-	if (chg->typec_mode >= POWER_SUPPLY_TYPEC_SOURCE_DEFAULT) {
-		smblib_dbg(chg, PR_OEM, "Source mode detected, break recheck\n");
-		check_count = 0;
-		return;
-	}
+	if (smblib_get_prop_dfp_mode(chg) != POWER_SUPPLY_TYPEC_NONE)
+		goto check_next;
 
 	if (!chg->recheck_charger)
 		chg->precheck_charger_type = chg->real_charger_type;
