@@ -2941,36 +2941,6 @@ static int smb5_configure_typec(struct smb_charger *chg)
 	/* Enable extcon notifications so charger fires EXTCON_USB on SDP */
 	chg->use_extcon = true;
 
-	/*
-	 * Force Sink-only mode when PD PHY is not active.
-	 * Without PD PHY, the PMIC DRP state machine has no PD negotiation
-	 * to determine role and defaults to Source (typec_mode:6), causing
-	 * unstable CC detection and APSD rerun loops.
-	 * Must disable Type-C first, write SNK-only, then re-enable —
-	 * the PMIC ignores the mode register change without the cycle.
-	 */
-	rc = smblib_masked_write(chg, TYPE_C_MODE_CFG_REG,
-				TYPEC_DISABLE_CMD_BIT, TYPEC_DISABLE_CMD_BIT);
-	if (rc < 0) {
-		dev_err(chg->dev, "Couldn't disable Type-C rc=%d\n", rc);
-	} else {
-		msleep(50);
-		rc = smblib_masked_write(chg, TYPE_C_MODE_CFG_REG,
-					TYPEC_POWER_ROLE_CMD_MASK,
-					EN_SNK_ONLY_BIT);
-		if (rc < 0) {
-			dev_err(chg->dev, "Couldn't force SNK-only rc=%d\n", rc);
-		} else {
-			msleep(50);
-			rc = smblib_masked_write(chg, TYPE_C_MODE_CFG_REG,
-						TYPEC_DISABLE_CMD_BIT, 0);
-			if (rc < 0)
-				dev_err(chg->dev, "Couldn't re-enable Type-C rc=%d\n", rc);
-			else
-				dev_err(chg->dev, "SNK-only mode active (disable→write→enable)\n");
-		}
-	}
-
 	rc = smblib_read(chg, LEGACY_CABLE_STATUS_REG, &val);
 	if (rc < 0) {
 		dev_err(chg->dev, "Couldn't read Legacy status rc=%d\n", rc);
@@ -3829,6 +3799,35 @@ static int smb5_post_init(struct smb5 *chip)
 		dev_err(chg->dev, "Couldn't configure DRP role rc=%d\n",
 				rc);
 		return rc;
+	}
+
+	/*
+	 * Force Sink-only mode — last write to TYPE_C_MODE_CFG_REG wins.
+	 * Must come after PR_DUAL (line above) to not get overwritten.
+	 * Without PD PHY, DRP defaults to Source (typec_mode:6) which
+	 * breaks peripheral detection. Disable→write→enable cycle is
+	 * required for PMIC to latch the new mode.
+	 */
+	rc = smblib_masked_write(chg, TYPE_C_MODE_CFG_REG,
+				TYPEC_DISABLE_CMD_BIT, TYPEC_DISABLE_CMD_BIT);
+	if (rc == 0) {
+		msleep(50);
+		rc = smblib_masked_write(chg, TYPE_C_MODE_CFG_REG,
+					TYPEC_POWER_ROLE_CMD_MASK,
+					EN_SNK_ONLY_BIT);
+		if (rc == 0) {
+			msleep(50);
+			rc = smblib_masked_write(chg, TYPE_C_MODE_CFG_REG,
+						TYPEC_DISABLE_CMD_BIT, 0);
+			if (rc == 0)
+				dev_err(chg->dev, "SNK-only mode active (last write wins)\n");
+			else
+				dev_err(chg->dev, "Couldn't re-enable Type-C rc=%d\n", rc);
+		} else {
+			dev_err(chg->dev, "Couldn't write SNK-only rc=%d\n", rc);
+		}
+	} else {
+		dev_err(chg->dev, "Couldn't disable Type-C rc=%d\n", rc);
 	}
 
 	rerun_election(chg->temp_change_irq_disable_votable);
