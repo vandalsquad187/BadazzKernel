@@ -949,6 +949,7 @@ static void dwc3_ep0_inspect_setup(struct dwc3 *dwc,
 	 * Restart USB gadget if such delayed SETUP packet is inspected.
 	 */
 	if (!dwc->connected) {
+		dev_err(dwc->dev, "Setup_restart: SETUP while !connected\n");
 		dbg_event(0x0, "Setup_restart", 0);
 		dwc3_notify_event(dwc, DWC3_CONTROLLER_RESTART_USB_SESSION, 0);
 		return;

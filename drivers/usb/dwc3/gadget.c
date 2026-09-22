@@ -2690,6 +2690,7 @@ static int dwc3_gadget_restart_usb_session(struct usb_gadget *g)
 {
 	struct dwc3		*dwc = gadget_to_dwc(g);
 
+	dev_err(dwc->dev, "gadget_ops: restart_usb_session\n");
 	dbg_event(0xFF, "RestartUSBSession", 0);
 	return dwc3_notify_event(dwc, DWC3_CONTROLLER_RESTART_USB_SESSION, 0);
 }

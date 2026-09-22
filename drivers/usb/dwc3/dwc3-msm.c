@@ -2080,7 +2080,7 @@ static void dwc3_msm_notify_event(struct dwc3 *dwc, unsigned int event,
 		schedule_work(&mdwc->vbus_draw_work);
 		break;
 	case DWC3_CONTROLLER_RESTART_USB_SESSION:
-		dev_dbg(mdwc->dev, "DWC3_CONTROLLER_RESTART_USB_SESSION received\n");
+		dev_err(mdwc->dev, "DWC3_CONTROLLER_RESTART_USB_SESSION received\n");
 		schedule_work(&mdwc->restart_usb_work);
 		break;
 	case DWC3_GSI_EVT_BUF_ALLOC:
