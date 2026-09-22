@@ -4772,6 +4772,9 @@ static int dwc3_otg_start_peripheral(struct dwc3_msm *mdwc, int on)
 		atomic_read(&mdwc->dev->power.usage_count));
 
 	if (on) {
+		u32 gctl, dctl, dsts;
+		int retries;
+
 		dev_err(mdwc->dev, "start_peripheral: turn on gadget %s\n",
 					dwc->gadget.name);
 
@@ -4786,6 +4789,67 @@ static int dwc3_otg_start_peripheral(struct dwc3_msm *mdwc, int on)
 		dwc3_msm_block_reset(mdwc, false);
 		dwc3_set_prtcap(dwc, DWC3_GCTL_PRTCAP_DEVICE);
 		dwc3_dis_sleep_mode(dwc);
+
+		/*
+		 * Diagnose controller state before first DEPCMD. CMDACT never
+		 * clearing means CORESOFTRESET stuck, wrong PRTCAP, or clock
+		 * gated (registers read 0 / constants).
+		 */
+		gctl = dwc3_readl(dwc->regs, DWC3_GCTL);
+		dctl = dwc3_readl(dwc->regs, DWC3_DCTL);
+		dsts = dwc3_readl(dwc->regs, DWC3_DSTS);
+		dev_err(mdwc->dev,
+			"pre-connect GCTL=%08x PRTCAP=%u CSFTRST=%u DCTL=%08x DSTS=%08x HLT=%u\n",
+			gctl, DWC3_GCTL_PRTCAP(gctl),
+			!!(gctl & DWC3_GCTL_CORESOFTRESET),
+			dctl, dsts, !!(dsts & DWC3_DSTS_DEVCTRLHLT));
+
+		/*
+		 * Build 280: stuck command ring / CORESOFTRESET from ERROR_EVENT
+		 * makes CMDACT never clear (SETEPCONFIG/SETTRANSFRESOURCE/DEPSTARTCFG
+		 * timeout). Assert+deassert GCTL.CORESOFTRESET properly, then
+		 * DCTL.CSFTRST, then re-init PRTCAP + event buffers.
+		 */
+		if (gctl & DWC3_GCTL_CORESOFTRESET) {
+			dev_err(mdwc->dev, "CORESOFTRESET was stuck, clearing\n");
+			gctl &= ~DWC3_GCTL_CORESOFTRESET;
+			dwc3_writel(dwc->regs, DWC3_GCTL, gctl);
+			udelay(10);
+		}
+
+		gctl = dwc3_readl(dwc->regs, DWC3_GCTL);
+		gctl |= DWC3_GCTL_CORESOFTRESET;
+		dwc3_writel(dwc->regs, DWC3_GCTL, gctl);
+		udelay(10);
+		gctl = dwc3_readl(dwc->regs, DWC3_GCTL);
+		gctl &= ~DWC3_GCTL_CORESOFTRESET;
+		dwc3_writel(dwc->regs, DWC3_GCTL, gctl);
+
+		dctl = dwc3_readl(dwc->regs, DWC3_DCTL);
+		dctl |= DWC3_DCTL_CSFTRST;
+		dwc3_writel(dwc->regs, DWC3_DCTL, dctl);
+		retries = 1000;
+		while (retries--) {
+			dctl = dwc3_readl(dwc->regs, DWC3_DCTL);
+			if (!(dctl & DWC3_DCTL_CSFTRST))
+				break;
+			udelay(1);
+		}
+		if (!retries)
+			dev_err(mdwc->dev, "DCTL CSFTRST timed out\n");
+		msleep(50);
+
+		dwc3_set_prtcap(dwc, DWC3_GCTL_PRTCAP_DEVICE);
+		dwc3_dis_sleep_mode(dwc);
+		dwc3_event_buffers_setup(dwc);
+
+		gctl = dwc3_readl(dwc->regs, DWC3_GCTL);
+		dsts = dwc3_readl(dwc->regs, DWC3_DSTS);
+		dev_err(mdwc->dev,
+			"post-reset GCTL=%08x PRTCAP=%u DSTS=%08x HLT=%u\n",
+			gctl, DWC3_GCTL_PRTCAP(gctl), dsts,
+			!!(dsts & DWC3_DSTS_DEVCTRLHLT));
+
 		mdwc->in_device_mode = true;
 		usb_gadget_vbus_connect(&dwc->gadget);
 
