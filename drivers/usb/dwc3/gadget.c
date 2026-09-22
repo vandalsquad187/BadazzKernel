@@ -488,9 +488,41 @@ int dwc3_send_gadget_ep_cmd(struct dwc3_ep *dep, unsigned cmd,
 	} while (--timeout);
 
 	if (timeout == 0) {
+		u32 depcmd, par0, par1, par2, gctl, dctl, dsts, dcfg, dale,
+		    usb2phy, gsnps;
+		int act, st;
+
 		ret = -ETIMEDOUT;
 		dev_err(dwc->dev, "%s command timeout for %s\n",
 			dwc3_gadget_ep_cmd_string(cmd), dep->name);
+
+		/* Build 307: dump command-interface state at timeout.
+		 * DEPCMD CMDACT stuck=1 → write landed but HW not completing
+		 * (clock/reset/command engine hung).
+		 * DEPCMD CMDACT=0 with ST=0 → write never landed (wrong
+		 * dep->regs / AXI issue) or already completed with 0.
+		 */
+		depcmd = dwc3_readl(dep->regs, DWC3_DEPCMD);
+		par0 = dwc3_readl(dep->regs, DWC3_DEPCMDPAR0);
+		par1 = dwc3_readl(dep->regs, DWC3_DEPCMDPAR1);
+		par2 = dwc3_readl(dep->regs, DWC3_DEPCMDPAR2);
+		gctl = dwc3_readl(dwc->regs, DWC3_GCTL);
+		dctl = dwc3_readl(dwc->regs, DWC3_DCTL);
+		dsts = dwc3_readl(dwc->regs, DWC3_DSTS);
+		dcfg = dwc3_readl(dwc->regs, DWC3_DCFG);
+		dale = dwc3_readl(dwc->regs, DWC3_DALEPENA);
+		usb2phy = dwc3_readl(dwc->regs, DWC3_GUSB2PHYCFG(0));
+		gsnps = dwc3_readl(dwc->regs, DWC3_GSNPSID);
+		act = !!(depcmd & DWC3_DEPCMD_CMDACT);
+		st = DWC3_DEPCMD_STATUS(depcmd);
+		dev_err(dwc->dev,
+			"ep cmd dump: dep=%s wcmd=%08x rcmd=%08x act=%d st=%d par0=%08x par1=%08x par2=%08x GCTL=%08x DCTL=%08x DSTS=%08x HLT=%u DCFG=%08x DALE=%08x U2PHY=%08x speed=%u rev=%08x GSNPS=%08x ep_off=%lx\n",
+			dep->name, cmd, depcmd, act, st, par0, par1, par2,
+			gctl, dctl, dsts, !!(dsts & DWC3_DSTS_DEVCTRLHLT),
+			dcfg, dale, usb2phy, dwc->gadget.speed,
+			dwc->revision, gsnps,
+			(unsigned long)dep->regs);
+
 		if (DWC3_DEPCMD_CMD(cmd) != DWC3_DEPCMD_ENDTRANSFER) {
 			dwc->ep_cmd_timeout_cnt++;
 			dwc3_notify_event(dwc,

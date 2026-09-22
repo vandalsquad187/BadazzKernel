@@ -4772,8 +4772,8 @@ static int dwc3_otg_start_peripheral(struct dwc3_msm *mdwc, int on)
 		atomic_read(&mdwc->dev->power.usage_count));
 
 	if (on) {
-		u32 gctl, dctl, dsts;
-		int retries;
+		u32 gctl, dctl, dsts, dcfg, dale, usb2phy;
+		unsigned long r_core, r_iface, r_bus, r_noc, r_utmi, r_xo;
 
 		dev_err(mdwc->dev, "start_peripheral: turn on gadget %s\n",
 					dwc->gadget.name);
@@ -4790,65 +4790,47 @@ static int dwc3_otg_start_peripheral(struct dwc3_msm *mdwc, int on)
 		dwc3_set_prtcap(dwc, DWC3_GCTL_PRTCAP_DEVICE);
 		dwc3_dis_sleep_mode(dwc);
 
-		/*
-		 * Diagnose controller state before first DEPCMD. CMDACT never
-		 * clearing means CORESOFTRESET stuck, wrong PRTCAP, or clock
-		 * gated (registers read 0 / constants).
+		/* Build 307: clocks first — CMDACT never clears if AHB/AXI
+		 * clock for the EP command interface is gated, even when
+		 * GCTL reads back healthy (GCTL is on the always-on path).
 		 */
+		if (mdwc->iface_clk)
+			clk_prepare_enable(mdwc->iface_clk);
+		if (mdwc->core_clk)
+			clk_prepare_enable(mdwc->core_clk);
+		if (mdwc->sleep_clk)
+			clk_prepare_enable(mdwc->sleep_clk);
+		if (mdwc->utmi_clk)
+			clk_prepare_enable(mdwc->utmi_clk);
+
+		r_core = mdwc->core_clk ? clk_get_rate(mdwc->core_clk) : 0;
+		r_iface = mdwc->iface_clk ? clk_get_rate(mdwc->iface_clk) : 0;
+		r_bus = mdwc->bus_aggr_clk ? clk_get_rate(mdwc->bus_aggr_clk) : 0;
+		r_noc = mdwc->noc_aggr_clk ? clk_get_rate(mdwc->noc_aggr_clk) : 0;
+		r_utmi = mdwc->utmi_clk ? clk_get_rate(mdwc->utmi_clk) : 0;
+		r_xo = mdwc->xo_clk ? clk_get_rate(mdwc->xo_clk) : 0;
+
 		gctl = dwc3_readl(dwc->regs, DWC3_GCTL);
 		dctl = dwc3_readl(dwc->regs, DWC3_DCTL);
 		dsts = dwc3_readl(dwc->regs, DWC3_DSTS);
+		dcfg = dwc3_readl(dwc->regs, DWC3_DCFG);
+		dale = dwc3_readl(dwc->regs, DWC3_DALEPENA);
+		usb2phy = dwc3_readl(dwc->regs, DWC3_GUSB2PHYCFG(0));
 		dev_err(mdwc->dev,
-			"pre-connect GCTL=%08x PRTCAP=%u CSFTRST=%u DCTL=%08x DSTS=%08x HLT=%u\n",
+			"pre-connect GCTL=%08x PRTCAP=%u CSFTRST=%u DCTL=%08x DSTS=%08x HLT=%u DCFG=%08x DALE=%08x U2PHY=%08x rev=%08x GSNPS=%08x clk core=%lu iface=%lu bus=%lu noc=%lu utmi=%lu xo=%lu\n",
 			gctl, DWC3_GCTL_PRTCAP(gctl),
 			!!(gctl & DWC3_GCTL_CORESOFTRESET),
-			dctl, dsts, !!(dsts & DWC3_DSTS_DEVCTRLHLT));
+			dctl, dsts, !!(dsts & DWC3_DSTS_DEVCTRLHLT),
+			dcfg, dale, usb2phy, dwc->revision,
+			dwc3_readl(dwc->regs, DWC3_GSNPSID),
+			r_core, r_iface, r_bus, r_noc, r_utmi, r_xo);
 
-		/*
-		 * Build 280: stuck command ring / CORESOFTRESET from ERROR_EVENT
-		 * makes CMDACT never clear (SETEPCONFIG/SETTRANSFRESOURCE/DEPSTARTCFG
-		 * timeout). Assert+deassert GCTL.CORESOFTRESET properly, then
-		 * DCTL.CSFTRST, then re-init PRTCAP + event buffers.
+		/* Build 307: no forced GCTL/DCTL core reset here — Build 306
+		 * showed GCTL already healthy (PRTCAP=2, CSFTRST=0, HLT=0)
+		 * and the reset did not clear the EP-CMD timeout.
+		 * Match memeDo path: only DBM reset + set_prtcap.
 		 */
-		if (gctl & DWC3_GCTL_CORESOFTRESET) {
-			dev_err(mdwc->dev, "CORESOFTRESET was stuck, clearing\n");
-			gctl &= ~DWC3_GCTL_CORESOFTRESET;
-			dwc3_writel(dwc->regs, DWC3_GCTL, gctl);
-			udelay(10);
-		}
-
-		gctl = dwc3_readl(dwc->regs, DWC3_GCTL);
-		gctl |= DWC3_GCTL_CORESOFTRESET;
-		dwc3_writel(dwc->regs, DWC3_GCTL, gctl);
-		udelay(10);
-		gctl = dwc3_readl(dwc->regs, DWC3_GCTL);
-		gctl &= ~DWC3_GCTL_CORESOFTRESET;
-		dwc3_writel(dwc->regs, DWC3_GCTL, gctl);
-
-		dctl = dwc3_readl(dwc->regs, DWC3_DCTL);
-		dctl |= DWC3_DCTL_CSFTRST;
-		dwc3_writel(dwc->regs, DWC3_DCTL, dctl);
-		retries = 1000;
-		while (retries--) {
-			dctl = dwc3_readl(dwc->regs, DWC3_DCTL);
-			if (!(dctl & DWC3_DCTL_CSFTRST))
-				break;
-			udelay(1);
-		}
-		if (!retries)
-			dev_err(mdwc->dev, "DCTL CSFTRST timed out\n");
-		msleep(50);
-
-		dwc3_set_prtcap(dwc, DWC3_GCTL_PRTCAP_DEVICE);
-		dwc3_dis_sleep_mode(dwc);
 		dwc3_event_buffers_setup(dwc);
-
-		gctl = dwc3_readl(dwc->regs, DWC3_GCTL);
-		dsts = dwc3_readl(dwc->regs, DWC3_DSTS);
-		dev_err(mdwc->dev,
-			"post-reset GCTL=%08x PRTCAP=%u DSTS=%08x HLT=%u\n",
-			gctl, DWC3_GCTL_PRTCAP(gctl), dsts,
-			!!(dsts & DWC3_DSTS_DEVCTRLHLT));
 
 		mdwc->in_device_mode = true;
 		usb_gadget_vbus_connect(&dwc->gadget);
