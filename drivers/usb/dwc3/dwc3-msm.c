@@ -4778,30 +4778,17 @@ static int dwc3_otg_start_peripheral(struct dwc3_msm *mdwc, int on)
 		dev_err(mdwc->dev, "start_peripheral: turn on gadget %s\n",
 					dwc->gadget.name);
 
-		if (mdwc->bus_aggr_clk)
-			clk_prepare_enable(mdwc->bus_aggr_clk);
-		if (mdwc->noc_aggr_clk)
-			clk_prepare_enable(mdwc->noc_aggr_clk);
 		dwc3_override_vbus_status(mdwc, true);
 		usb_phy_notify_connect(mdwc->hs_phy, USB_SPEED_HIGH);
 		usb_phy_notify_connect(mdwc->ss_phy, USB_SPEED_SUPER);
 
+		/*
+		 * Core reset is not required during start peripheral. Only
+		 * DBM reset is required, hence perform only DBM reset here.
+		 */
 		dwc3_msm_block_reset(mdwc, false);
 		dwc3_set_prtcap(dwc, DWC3_GCTL_PRTCAP_DEVICE);
 		dwc3_dis_sleep_mode(dwc);
-
-		/* Build 307: clocks first — CMDACT never clears if AHB/AXI
-		 * clock for the EP command interface is gated, even when
-		 * GCTL reads back healthy (GCTL is on the always-on path).
-		 */
-		if (mdwc->iface_clk)
-			clk_prepare_enable(mdwc->iface_clk);
-		if (mdwc->core_clk)
-			clk_prepare_enable(mdwc->core_clk);
-		if (mdwc->sleep_clk)
-			clk_prepare_enable(mdwc->sleep_clk);
-		if (mdwc->utmi_clk)
-			clk_prepare_enable(mdwc->utmi_clk);
 
 		r_core = mdwc->core_clk ? clk_get_rate(mdwc->core_clk) : 0;
 		r_iface = mdwc->iface_clk ? clk_get_rate(mdwc->iface_clk) : 0;
@@ -4825,15 +4812,7 @@ static int dwc3_otg_start_peripheral(struct dwc3_msm *mdwc, int on)
 			dwc3_readl(dwc->regs, DWC3_GSNPSID),
 			r_core, r_iface, r_bus, r_noc, r_utmi, r_xo);
 
-		/* Build 307: no forced GCTL/DCTL core reset here — Build 306
-		 * showed GCTL already healthy (PRTCAP=2, CSFTRST=0, HLT=0)
-		 * and the reset did not clear the EP-CMD timeout.
-		 * Match memeDo path: only DBM reset + set_prtcap.
-		 */
-		dwc3_event_buffers_setup(dwc);
-
 		mdwc->in_device_mode = true;
-		usb_gadget_vbus_connect(&dwc->gadget);
 
 		/* Reduce the U3 exit handshake timer from 8us to approximately
 		 * 300ns to avoid lfps handshake interoperability issues
