@@ -4834,7 +4834,7 @@ static int dwc3_otg_start_peripheral(struct dwc3_msm *mdwc, int on)
 		}
 
 		/*
-		 * Build311 A: RS=0 && HLT=0 is an impossible intermediate
+		 * Build312 A: RS=0 && HLT=0 is an impossible intermediate
 		 * state for the DWC3 command engine — force a defined
 		 * stopped state (HLT=1) before pullup / ep0 enable.
 		 */
@@ -4845,13 +4845,13 @@ static int dwc3_otg_start_peripheral(struct dwc3_msm *mdwc, int on)
 			int sret;
 
 			dev_warn(mdwc->dev,
-				"Build311: RS=0 HLT=0 invalid state DCTL=%08x DSTS=%08x → core soft reset\n",
+				"Build312: RS=0 HLT=0 invalid state DCTL=%08x DSTS=%08x → core soft reset\n",
 				dctl, dsts);
 			sret = dwc3_device_core_soft_reset(dwc);
 			dctl = dwc3_readl(dwc->regs, DWC3_DCTL);
 			dsts = dwc3_readl(dwc->regs, DWC3_DSTS);
 			dev_err(mdwc->dev,
-				"Build311: post-softreset ret=%d DCTL=%08x DSTS=%08x RS=%u HLT=%u DCFG=%08x\n",
+				"Build312: post-softreset ret=%d DCTL=%08x DSTS=%08x RS=%u HLT=%u DCFG=%08x\n",
 				sret, dctl, dsts,
 				!!(dctl & DWC3_DCTL_RUN_STOP),
 				!!(dsts & DWC3_DSTS_DEVCTRLHLT),
@@ -4872,7 +4872,7 @@ static int dwc3_otg_start_peripheral(struct dwc3_msm *mdwc, int on)
 			dwc->pullups_connected, dwc->connected);
 
 		if (dwc->err_evt_seen) {
-			dev_err(mdwc->dev, "Build311: clearing err_evt_seen\n");
+			dev_err(mdwc->dev, "Build312: clearing err_evt_seen\n");
 			dwc->err_evt_seen = false;
 		}
 
@@ -4881,7 +4881,7 @@ static int dwc3_otg_start_peripheral(struct dwc3_msm *mdwc, int on)
 			int rs;
 
 			dev_err(mdwc->dev,
-				"Build311: pre-force DCTL=%08x DSTS=%08x DCFG=%08x DALE=%08x U3PIPE=%08x err_evt=%u softconn=%u pullups=%u connected=%u\n",
+				"Build312: pre-force DCTL=%08x DSTS=%08x DCFG=%08x DALE=%08x U3PIPE=%08x err_evt=%u softconn=%u pullups=%u connected=%u\n",
 				dctl,
 				dwc3_readl(dwc->regs, DWC3_DSTS),
 				dwc3_readl(dwc->regs, DWC3_DCFG),
@@ -4891,11 +4891,11 @@ static int dwc3_otg_start_peripheral(struct dwc3_msm *mdwc, int on)
 				dwc->pullups_connected, dwc->connected);
 
 			dev_err(mdwc->dev,
-				"Build311: forcing gadget run_stop=1\n");
+				"Build312: forcing gadget run_stop=1\n");
 			rs = dwc3_force_gadget_run_stop(dwc);
 
 			dev_err(mdwc->dev,
-				"Build311: run_stop ret=%d DCTL=%08x DSTS=%08x\n",
+				"Build312: run_stop ret=%d DCTL=%08x DSTS=%08x\n",
 				rs,
 				dwc3_readl(dwc->regs, DWC3_DCTL),
 				dwc3_readl(dwc->regs, DWC3_DSTS));

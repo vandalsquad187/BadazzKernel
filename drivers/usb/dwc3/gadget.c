@@ -2240,7 +2240,7 @@ EXPORT_SYMBOL_GPL(dwc3_device_core_soft_reset);
 static int dwc3_gadget_run_stop(struct dwc3 *dwc, int is_on, int suspend)
 {
 	u32			reg, reg1;
-	u32			timeout = 1500;
+	u32			timeout = 2000;
 	int			ret;
 
 	dbg_event(0xFF, "run_stop", is_on);
@@ -2255,7 +2255,7 @@ static int dwc3_gadget_run_stop(struct dwc3 *dwc, int is_on, int suspend)
 			reg &= ~DWC3_DCTL_KEEP_CONNECT;
 
 		dev_err(dwc->dev,
-			"Build311 PRESTART: DCTL=%08x DSTS=%08x GCTL=%08x DCFG=%08x\n",
+			"Build312 PRESTART: DCTL=%08x DSTS=%08x GCTL=%08x DCFG=%08x\n",
 			dwc3_readl(dwc->regs, DWC3_DCTL),
 			dwc3_readl(dwc->regs, DWC3_DSTS),
 			dwc3_readl(dwc->regs, DWC3_GCTL),
@@ -2265,7 +2265,7 @@ static int dwc3_gadget_run_stop(struct dwc3 *dwc, int is_on, int suspend)
 		ret = __dwc3_gadget_start(dwc);
 		if (ret) {
 			dev_err(dwc->dev,
-				"Build311 STARTFAIL: ret=%d DCTL=%08x DSTS=%08x GCTL=%08x DCFG=%08x\n",
+				"Build312 STARTFAIL: ret=%d DCTL=%08x DSTS=%08x GCTL=%08x DCFG=%08x\n",
 				ret,
 				dwc3_readl(dwc->regs, DWC3_DCTL),
 				dwc3_readl(dwc->regs, DWC3_DSTS),
@@ -2334,14 +2334,27 @@ static int dwc3_gadget_run_stop(struct dwc3 *dwc, int is_on, int suspend)
 		dwc3_notify_event(dwc, DWC3_GSI_EVT_BUF_CLEAR, 0);
 	}
 
+	/*
+	 * Build 312: 1500 tight readl iterations finished in ~100-500us —
+	 * shorter than one HS frame (1ms). After RUN_STOP=0 the core only
+	 * halts at end of frame, so stop ALWAYS timed out (22/22 in B311),
+	 * left RS=0/HLT=0 and broke the next start. Busy-wait with udelay
+	 * (callers hold spinlock — no sleep), ~20ms worst case.
+	 */
 	do {
 		reg = dwc3_readl(dwc->regs, DWC3_DSTS);
 		reg &= DWC3_DSTS_DEVCTRLHLT;
-	} while (--timeout && !(!is_on ^ !reg));
+		if (is_on ? !reg : reg)
+			break;
+		udelay(10);
+	} while (--timeout);
 
 	if (!timeout) {
-		dev_err(dwc->dev, "failed to %s controller\n",
-				is_on ? "start" : "stop");
+		dev_err(dwc->dev, "failed to %s controller DSTS=%08x DCTL=%08x GCTL=%08x\n",
+				is_on ? "start" : "stop",
+				dwc3_readl(dwc->regs, DWC3_DSTS),
+				dwc3_readl(dwc->regs, DWC3_DCTL),
+				dwc3_readl(dwc->regs, DWC3_GCTL));
 		if (is_on)
 			dbg_event(0xFF, "STARTTOUT", reg);
 		else
