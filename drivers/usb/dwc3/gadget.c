@@ -628,14 +628,16 @@ static void dwc3_free_trb_pool(struct dwc3_ep *dep)
 }
 
 static int dwc3_gadget_set_xfer_resource(struct dwc3 *dwc, struct dwc3_ep *dep);
+static int dwc3_gadget_assign_xfer_resources(struct dwc3 *dwc);
 
 /**
  * dwc3_gadget_start_config - configure ep resources
  * @dwc: pointer to our controller context structure
  * @dep: endpoint that is being enabled
  *
- * Issue a %DWC3_DEPCMD_DEPSTARTCFG command to @dep. After the command's
- * completion, it will set Transfer Resource for all available endpoints.
+ * Issue a %DWC3_DEPCMD_DEPSTARTCFG command to @dep. Transfer resources for
+ * all endpoints are assigned later by dwc3_gadget_assign_xfer_resources(),
+ * after ep0 SETEPCFG (Build 309 reorder).
  *
  * The assignment of transfer resources cannot perfectly follow the data book
  * due to the fact that the controller driver does not have all knowledge of the
@@ -667,7 +669,6 @@ static int dwc3_gadget_start_config(struct dwc3 *dwc, struct dwc3_ep *dep)
 {
 	struct dwc3_gadget_ep_cmd_params params;
 	u32			cmd;
-	int			i;
 	int			ret;
 
 	if (dep->number)
@@ -679,6 +680,14 @@ static int dwc3_gadget_start_config(struct dwc3 *dwc, struct dwc3_ep *dep)
 	ret = dwc3_send_gadget_ep_cmd(dep, cmd, &params);
 	if (ret)
 		return ret;
+
+	return 0;
+}
+
+static int dwc3_gadget_assign_xfer_resources(struct dwc3 *dwc)
+{
+	int			i;
+	int			ret;
 
 	for (i = 0; i < DWC3_ENDPOINTS_NUM; i++) {
 		struct dwc3_ep *dep = dwc->eps[i];
@@ -783,11 +792,19 @@ static int dwc3_gadget_set_ep_config(struct dwc3 *dwc, struct dwc3_ep *dep,
 
 static int dwc3_gadget_set_xfer_resource(struct dwc3 *dwc, struct dwc3_ep *dep)
 {
+	const struct usb_endpoint_descriptor *desc = dep->endpoint.desc;
 	struct dwc3_gadget_ep_cmd_params params;
 
 	memset(&params, 0x00, sizeof(params));
 
 	params.param0 = DWC3_DEPXFERCFG_NUM_XFER_RES(1);
+
+	dev_err(dwc->dev,
+			"pre-DEPXFERCFG %s num=%u dir=%u flags=%x maxp=%u rsc=%u p0=%08x p1=%08x p2=%08x\n",
+			dep->name, dep->number, dep->direction, dep->flags,
+			desc ? usb_endpoint_maxp(desc) : 0,
+			dep->resource_index, params.param0, params.param1,
+			params.param2);
 
 	return dwc3_send_gadget_ep_cmd(dep, DWC3_DEPCMD_SETTRANSFRESOURCE,
 			&params);
@@ -824,15 +841,38 @@ static int __dwc3_gadget_ep_enable(struct dwc3_ep *dep,
 		}
 	}
 
+	dev_err(dwc->dev,
+			"before SETEPCFG %s DALE=%08x DCFG=%08x flags=%x modify=%d restore=%d\n",
+			dep->name,
+			dwc3_readl(dwc->regs, DWC3_DALEPENA),
+			dwc3_readl(dwc->regs, DWC3_DCFG),
+			dep->flags, modify, restore);
+
 	ret = dwc3_gadget_set_ep_config(dwc, dep, modify, restore);
 	if (ret) {
 		dev_err(dwc->dev, "set_ep_config() failed for %s\n", dep->name);
 		return ret;
 	}
 
+	dev_err(dwc->dev,
+			"after SETEPCFG %s DALE=%08x DCFG=%08x ret=%d\n",
+			dep->name,
+			dwc3_readl(dwc->regs, DWC3_DALEPENA),
+			dwc3_readl(dwc->regs, DWC3_DCFG), ret);
+
 	if (!(dep->flags & DWC3_EP_ENABLED)) {
 		struct dwc3_trb	*trb_st_hw;
 		struct dwc3_trb	*trb_link;
+
+		if (dep->number == 0) {
+			ret = dwc3_gadget_assign_xfer_resources(dwc);
+			if (ret) {
+				dev_err(dwc->dev,
+						"assign_xfer_resources() failed for %s\n",
+						dep->name);
+				return ret;
+			}
+		}
 
 		dep->type = usb_endpoint_type(desc);
 		dep->flags |= DWC3_EP_ENABLED;
