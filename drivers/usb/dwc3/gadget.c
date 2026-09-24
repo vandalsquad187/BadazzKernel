@@ -2255,7 +2255,7 @@ static int dwc3_gadget_run_stop(struct dwc3 *dwc, int is_on, int suspend)
 			reg &= ~DWC3_DCTL_KEEP_CONNECT;
 
 		dev_err(dwc->dev,
-			"Build312 PRESTART: DCTL=%08x DSTS=%08x GCTL=%08x DCFG=%08x\n",
+			"Build313 PRESTART: DCTL=%08x DSTS=%08x GCTL=%08x DCFG=%08x\n",
 			dwc3_readl(dwc->regs, DWC3_DCTL),
 			dwc3_readl(dwc->regs, DWC3_DSTS),
 			dwc3_readl(dwc->regs, DWC3_GCTL),
@@ -2265,7 +2265,7 @@ static int dwc3_gadget_run_stop(struct dwc3 *dwc, int is_on, int suspend)
 		ret = __dwc3_gadget_start(dwc);
 		if (ret) {
 			dev_err(dwc->dev,
-				"Build312 STARTFAIL: ret=%d DCTL=%08x DSTS=%08x GCTL=%08x DCFG=%08x\n",
+				"Build313 STARTFAIL: ret=%d DCTL=%08x DSTS=%08x GCTL=%08x DCFG=%08x\n",
 				ret,
 				dwc3_readl(dwc->regs, DWC3_DCTL),
 				dwc3_readl(dwc->regs, DWC3_DSTS),
@@ -3879,14 +3879,20 @@ static void dwc3_gadget_interrupt(struct dwc3 *dwc,
 {
 	switch (event->type) {
 	case DWC3_DEVICE_EVENT_DISCONNECT:
+		dev_err(dwc->dev, "Build313: DEVT DISCONNECT info=%x\n",
+			event->event_info);
 		dwc3_gadget_disconnect_interrupt(dwc);
 		dwc->dbg_gadget_events.disconnect++;
 		break;
 	case DWC3_DEVICE_EVENT_RESET:
+		dev_err(dwc->dev, "Build313: DEVT RESET info=%x\n",
+			event->event_info);
 		dwc3_gadget_reset_interrupt(dwc);
 		dwc->dbg_gadget_events.reset++;
 		break;
 	case DWC3_DEVICE_EVENT_CONNECT_DONE:
+		dev_err(dwc->dev, "Build313: DEVT CONNECT_DONE info=%x\n",
+			event->event_info);
 		dwc3_gadget_conndone_interrupt(dwc);
 		dwc->dbg_gadget_events.connect++;
 		break;
@@ -3902,6 +3908,8 @@ static void dwc3_gadget_interrupt(struct dwc3 *dwc,
 		dwc3_gadget_hibernation_interrupt(dwc, event->event_info);
 		break;
 	case DWC3_DEVICE_EVENT_LINK_STATUS_CHANGE:
+		dev_err(dwc->dev, "Build313: DEVT LINK_STATUS_CHANGE info=%x\n",
+			event->event_info);
 		dwc3_gadget_linksts_change_interrupt(dwc, event->event_info);
 		dwc->dbg_gadget_events.link_status_change++;
 		break;
@@ -3925,6 +3933,8 @@ static void dwc3_gadget_interrupt(struct dwc3 *dwc,
 		dwc->dbg_gadget_events.sof++;
 		break;
 	case DWC3_DEVICE_EVENT_ERRATIC_ERROR:
+		dev_err(dwc->dev, "Build313: DEVT ERRATIC_ERROR info=%x\n",
+			event->event_info);
 		dbg_event(0xFF, "ERROR", dwc->retries_on_error);
 		dwc->dbg_gadget_events.erratic_error++;
 		dwc->err_evt_seen = true;

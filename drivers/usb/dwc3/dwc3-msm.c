@@ -327,6 +327,8 @@ struct dwc3_msm {
 	struct pm_qos_request pm_qos_req_dma;
 	struct delayed_work perf_vote_work;
 	struct delayed_work sdp_check;
+	struct delayed_work link_dump_work;
+	int link_dump_shots;
 	bool usb_compliance_mode;
 	struct mutex suspend_resume_mutex;
 
@@ -3711,6 +3713,7 @@ static ssize_t mode_store(struct device *dev, struct device_attribute *attr,
 
 static DEVICE_ATTR_RW(mode);
 static void msm_dwc3_perf_vote_work(struct work_struct *w);
+static void dwc3_msm_link_dump_work(struct work_struct *w);
 
 /* This node only shows max speed supported dwc3 and it should be
  * same as what is reported in udc/core.c max_speed node. For current
@@ -3952,6 +3955,7 @@ static int dwc3_msm_probe(struct platform_device *pdev)
 	INIT_DELAYED_WORK(&mdwc->sm_work, dwc3_otg_sm_work);
 	INIT_DELAYED_WORK(&mdwc->perf_vote_work, msm_dwc3_perf_vote_work);
 	INIT_DELAYED_WORK(&mdwc->sdp_check, check_for_sdp_connection);
+	INIT_DELAYED_WORK(&mdwc->link_dump_work, dwc3_msm_link_dump_work);
 
 	mdwc->dwc3_wq = alloc_ordered_workqueue("dwc3_wq", 0);
 	if (!mdwc->dwc3_wq) {
@@ -4756,6 +4760,76 @@ static void dwc3_override_vbus_status(struct dwc3_msm *mdwc, bool vbus_present)
 }
 
 /**
+ * dwc3_msm_dump_link - Build313: read-only link/PHY state snapshot.
+ *
+ * Pure diagnostic dump: raw registers + decoded link/PHY bits + gadget
+ * software state + DEVT counters. No hardware state is modified.
+ */
+static void dwc3_msm_dump_link(struct dwc3_msm *mdwc, const char *tag)
+{
+	struct dwc3 *dwc = platform_get_drvdata(mdwc->dwc3);
+	struct dwc3_gadget_events *ev;
+	u32 gctl, dctl, dsts, dcfg, dale, u2, u3;
+
+	if (!dwc)
+		return;
+
+	ev = &dwc->dbg_gadget_events;
+	gctl = dwc3_readl(dwc->regs, DWC3_GCTL);
+	dctl = dwc3_readl(dwc->regs, DWC3_DCTL);
+	dsts = dwc3_readl(dwc->regs, DWC3_DSTS);
+	dcfg = dwc3_readl(dwc->regs, DWC3_DCFG);
+	dale = dwc3_readl(dwc->regs, DWC3_DALEPENA);
+	u2 = dwc3_readl(dwc->regs, DWC3_GUSB2PHYCFG(0));
+	u3 = dwc3_readl(dwc->regs, DWC3_GUSB3PIPECTL(0));
+
+	dev_err(mdwc->dev,
+		"Build313: LINK %s GCTL=%08x DCTL=%08x RS=%u DSTS=%08x HLT=%u LNKST=%u SPD=%u COREIDLE=%u RXEMPTY=%u DCFG=%08x DEVSPD=%u LPM=%u DALE=%08x U2PHY=%08x U2SUS=%u U2PSR=%u U2SLPM=%u U3PIPE=%08x U3SUS=%u U3PSR=%u HWP0=%08x hwmode=%u evbuf=%p GEVADR=%08x GEVSIZ=%08x gspd=%u gstate=%d lstate=%u vbus=%u inrst=%u indev=%u softconn=%u pullups=%u connected=%u\n",
+		tag, gctl, dctl, !!(dctl & DWC3_DCTL_RUN_STOP),
+		dsts, !!(dsts & DWC3_DSTS_DEVCTRLHLT),
+		DWC3_DSTS_USBLNKST(dsts),
+		dsts & DWC3_DSTS_CONNECTSPD,
+		!!(dsts & DWC3_DSTS_COREIDLE),
+		!!(dsts & DWC3_DSTS_RXFIFOEMPTY),
+		dcfg, dcfg & DWC3_DCFG_SPEED_MASK,
+		!!(dcfg & DWC3_DCFG_LPM_CAP), dale,
+		u2, !!(u2 & DWC3_GUSB2PHYCFG_SUSPHY),
+		!!(u2 & DWC3_GUSB2PHYCFG_PHYSOFTRST),
+		!!(u2 & DWC3_GUSB2PHYCFG_ENBLSLPM),
+		u3, !!(u3 & DWC3_GUSB3PIPECTL_SUSPHY),
+		!!(u3 & DWC3_GUSB3PIPECTL_PHYSOFTRST),
+		dwc->hwparams.hwparams0,
+		DWC3_GHWPARAMS0_MODE(dwc->hwparams.hwparams0),
+		dwc->ev_buf,
+		dwc3_readl(dwc->regs, DWC3_GEVNTADRHI(0)),
+		dwc3_readl(dwc->regs, DWC3_GEVNTSIZ(0)),
+		dwc->gadget.speed, dwc->gadget.state, dwc->link_state,
+		mdwc->vbus_active, mdwc->in_restart, mdwc->in_device_mode,
+		dwc->softconnect, dwc->pullups_connected, dwc->connected);
+
+	dev_err(mdwc->dev,
+		"Build313: EV %s rst=%u con=%u dis=%u lsc=%u sus=%u eopf=%u sof=%u err=%u ovf=%u cmd=%u wkp=%u unk=%u\n",
+		tag, ev->reset, ev->connect, ev->disconnect,
+		ev->link_status_change, ev->suspend, ev->eopf, ev->sof,
+		ev->erratic_error, ev->overflow, ev->cmdcmplt, ev->wakeup,
+		ev->unknown_event);
+}
+
+static void dwc3_msm_link_dump_work(struct work_struct *w)
+{
+	struct dwc3_msm *mdwc = container_of(w, struct dwc3_msm,
+					link_dump_work.work);
+
+	dwc3_msm_dump_link(mdwc, mdwc->link_dump_shots ? "T+3s" : "T+500ms");
+
+	if (!mdwc->link_dump_shots) {
+		mdwc->link_dump_shots = 1;
+		schedule_delayed_work(&mdwc->link_dump_work,
+				msecs_to_jiffies(2500));
+	}
+}
+
+/**
  * dwc3_otg_start_peripheral -  bind/unbind the peripheral controller.
  *
  * @mdwc: Pointer to the dwc3_msm structure.
@@ -4834,7 +4908,7 @@ static int dwc3_otg_start_peripheral(struct dwc3_msm *mdwc, int on)
 		}
 
 		/*
-		 * Build312 A: RS=0 && HLT=0 is an impossible intermediate
+		 * Build313 A: RS=0 && HLT=0 is an impossible intermediate
 		 * state for the DWC3 command engine — force a defined
 		 * stopped state (HLT=1) before pullup / ep0 enable.
 		 */
@@ -4845,13 +4919,13 @@ static int dwc3_otg_start_peripheral(struct dwc3_msm *mdwc, int on)
 			int sret;
 
 			dev_warn(mdwc->dev,
-				"Build312: RS=0 HLT=0 invalid state DCTL=%08x DSTS=%08x → core soft reset\n",
+				"Build313: RS=0 HLT=0 invalid state DCTL=%08x DSTS=%08x → core soft reset\n",
 				dctl, dsts);
 			sret = dwc3_device_core_soft_reset(dwc);
 			dctl = dwc3_readl(dwc->regs, DWC3_DCTL);
 			dsts = dwc3_readl(dwc->regs, DWC3_DSTS);
 			dev_err(mdwc->dev,
-				"Build312: post-softreset ret=%d DCTL=%08x DSTS=%08x RS=%u HLT=%u DCFG=%08x\n",
+				"Build313: post-softreset ret=%d DCTL=%08x DSTS=%08x RS=%u HLT=%u DCFG=%08x\n",
 				sret, dctl, dsts,
 				!!(dctl & DWC3_DCTL_RUN_STOP),
 				!!(dsts & DWC3_DSTS_DEVCTRLHLT),
@@ -4871,8 +4945,13 @@ static int dwc3_otg_start_peripheral(struct dwc3_msm *mdwc, int on)
 			dwc->err_evt_seen, dwc->softconnect,
 			dwc->pullups_connected, dwc->connected);
 
+		dwc3_msm_dump_link(mdwc, "T+0");
+		mdwc->link_dump_shots = 0;
+		schedule_delayed_work(&mdwc->link_dump_work,
+				msecs_to_jiffies(500));
+
 		if (dwc->err_evt_seen) {
-			dev_err(mdwc->dev, "Build312: clearing err_evt_seen\n");
+			dev_err(mdwc->dev, "Build313: clearing err_evt_seen\n");
 			dwc->err_evt_seen = false;
 		}
 
@@ -4881,7 +4960,7 @@ static int dwc3_otg_start_peripheral(struct dwc3_msm *mdwc, int on)
 			int rs;
 
 			dev_err(mdwc->dev,
-				"Build312: pre-force DCTL=%08x DSTS=%08x DCFG=%08x DALE=%08x U3PIPE=%08x err_evt=%u softconn=%u pullups=%u connected=%u\n",
+				"Build313: pre-force DCTL=%08x DSTS=%08x DCFG=%08x DALE=%08x U3PIPE=%08x err_evt=%u softconn=%u pullups=%u connected=%u\n",
 				dctl,
 				dwc3_readl(dwc->regs, DWC3_DSTS),
 				dwc3_readl(dwc->regs, DWC3_DCFG),
@@ -4891,11 +4970,11 @@ static int dwc3_otg_start_peripheral(struct dwc3_msm *mdwc, int on)
 				dwc->pullups_connected, dwc->connected);
 
 			dev_err(mdwc->dev,
-				"Build312: forcing gadget run_stop=1\n");
+				"Build313: forcing gadget run_stop=1\n");
 			rs = dwc3_force_gadget_run_stop(dwc);
 
 			dev_err(mdwc->dev,
-				"Build312: run_stop ret=%d DCTL=%08x DSTS=%08x\n",
+				"Build313: run_stop ret=%d DCTL=%08x DSTS=%08x\n",
 				rs,
 				dwc3_readl(dwc->regs, DWC3_DCTL),
 				dwc3_readl(dwc->regs, DWC3_DSTS));
@@ -4915,6 +4994,7 @@ static int dwc3_otg_start_peripheral(struct dwc3_msm *mdwc, int on)
 		dev_dbg(mdwc->dev, "%s: turn off gadget %s\n",
 					__func__, dwc->gadget.name);
 		cancel_delayed_work_sync(&mdwc->perf_vote_work);
+		cancel_delayed_work(&mdwc->link_dump_work);
 		msm_dwc3_perf_vote_update(mdwc, false);
 		pm_qos_remove_request(&mdwc->pm_qos_req_dma);
 
