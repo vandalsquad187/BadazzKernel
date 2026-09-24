@@ -4772,7 +4772,7 @@ static int dwc3_otg_start_peripheral(struct dwc3_msm *mdwc, int on)
 		atomic_read(&mdwc->dev->power.usage_count));
 
 	if (on) {
-		u32 gctl, dctl, dsts, dcfg, dale, usb2phy;
+		u32 gctl, dctl, dsts, dcfg, dale, usb2phy, usb3phy;
 		unsigned long r_core, r_iface, r_bus, r_noc, r_utmi, r_xo;
 
 		dev_err(mdwc->dev, "start_peripheral: turn on gadget %s\n",
@@ -4803,14 +4803,18 @@ static int dwc3_otg_start_peripheral(struct dwc3_msm *mdwc, int on)
 		dcfg = dwc3_readl(dwc->regs, DWC3_DCFG);
 		dale = dwc3_readl(dwc->regs, DWC3_DALEPENA);
 		usb2phy = dwc3_readl(dwc->regs, DWC3_GUSB2PHYCFG(0));
+		usb3phy = dwc3_readl(dwc->regs, DWC3_GUSB3PIPECTL(0));
 		dev_err(mdwc->dev,
-			"pre-connect GCTL=%08x PRTCAP=%u CSFTRST=%u DCTL=%08x DSTS=%08x HLT=%u DCFG=%08x DALE=%08x U2PHY=%08x rev=%08x GSNPS=%08x clk core=%lu iface=%lu bus=%lu noc=%lu utmi=%lu xo=%lu\n",
+			"pre-connect GCTL=%08x PRTCAP=%u CSFTRST=%u DCTL=%08x DSTS=%08x HLT=%u DCFG=%08x DALE=%08x U2PHY=%08x U3PIPE=%08x rev=%08x GSNPS=%08x clk core=%lu iface=%lu bus=%lu noc=%lu utmi=%lu xo=%lu RS=%u err_evt=%u softconn=%u pullups=%u connected=%u\n",
 			gctl, DWC3_GCTL_PRTCAP(gctl),
 			!!(gctl & DWC3_GCTL_CORESOFTRESET),
 			dctl, dsts, !!(dsts & DWC3_DSTS_DEVCTRLHLT),
-			dcfg, dale, usb2phy, dwc->revision,
+			dcfg, dale, usb2phy, usb3phy, dwc->revision,
 			dwc3_readl(dwc->regs, DWC3_GSNPSID),
-			r_core, r_iface, r_bus, r_noc, r_utmi, r_xo);
+			r_core, r_iface, r_bus, r_noc, r_utmi, r_xo,
+			!!(dctl & DWC3_DCTL_RUN_STOP),
+			dwc->err_evt_seen, dwc->softconnect,
+			dwc->pullups_connected, dwc->connected);
 
 		mdwc->in_device_mode = true;
 
@@ -4826,10 +4830,52 @@ static int dwc3_otg_start_peripheral(struct dwc3_msm *mdwc, int on)
 					GEN1_U3_EXIT_RSP_RX_CLK_MASK, 5);
 			dev_dbg(mdwc->dev, "LU3:%08x\n",
 				dwc3_msm_read_reg(mdwc->base,
-					DWC31_LINK_LU3LFPSRXTIM(0)));
+						DWC31_LINK_LU3LFPSRXTIM(0)));
 		}
 
 		usb_gadget_vbus_connect(&dwc->gadget);
+
+		dctl = dwc3_readl(dwc->regs, DWC3_DCTL);
+		dsts = dwc3_readl(dwc->regs, DWC3_DSTS);
+		usb3phy = dwc3_readl(dwc->regs, DWC3_GUSB3PIPECTL(0));
+		dev_err(mdwc->dev,
+			"post-connect DCTL=%08x RS=%u DSTS=%08x HLT=%u DCFG=%08x U3PIPE=%08x err_evt=%u softconn=%u pullups=%u connected=%u\n",
+			dctl, !!(dctl & DWC3_DCTL_RUN_STOP),
+			dsts, !!(dsts & DWC3_DSTS_DEVCTRLHLT),
+			dwc3_readl(dwc->regs, DWC3_DCFG), usb3phy,
+			dwc->err_evt_seen, dwc->softconnect,
+			dwc->pullups_connected, dwc->connected);
+
+		if (dwc->err_evt_seen) {
+			dev_err(mdwc->dev, "Build310: clearing err_evt_seen\n");
+			dwc->err_evt_seen = false;
+		}
+
+		dctl = dwc3_readl(dwc->regs, DWC3_DCTL);
+		if (!(dctl & DWC3_DCTL_RUN_STOP)) {
+			int rs;
+
+			dev_err(mdwc->dev,
+				"Build310: pre-force DCTL=%08x DSTS=%08x DCFG=%08x DALE=%08x U3PIPE=%08x err_evt=%u softconn=%u pullups=%u connected=%u\n",
+				dctl,
+				dwc3_readl(dwc->regs, DWC3_DSTS),
+				dwc3_readl(dwc->regs, DWC3_DCFG),
+				dwc3_readl(dwc->regs, DWC3_DALEPENA),
+				dwc3_readl(dwc->regs, DWC3_GUSB3PIPECTL(0)),
+				dwc->err_evt_seen, dwc->softconnect,
+				dwc->pullups_connected, dwc->connected);
+
+			dev_err(mdwc->dev,
+				"Build310: forcing gadget run_stop=1\n");
+			rs = dwc3_force_gadget_run_stop(dwc);
+
+			dev_err(mdwc->dev,
+				"Build310: run_stop ret=%d DCTL=%08x DSTS=%08x\n",
+				rs,
+				dwc3_readl(dwc->regs, DWC3_DCTL),
+				dwc3_readl(dwc->regs, DWC3_DSTS));
+		}
+
 #ifdef CONFIG_SMP
 		mdwc->pm_qos_req_dma.type = PM_QOS_REQ_AFFINE_IRQ;
 		mdwc->pm_qos_req_dma.irq = dwc->irq;

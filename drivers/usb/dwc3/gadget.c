@@ -2333,6 +2333,12 @@ static int dwc3_gadget_run_stop(struct dwc3 *dwc, int is_on, int suspend)
 	return 0;
 }
 
+int dwc3_force_gadget_run_stop(struct dwc3 *dwc)
+{
+	return dwc3_gadget_run_stop(dwc, 1, false);
+}
+EXPORT_SYMBOL_GPL(dwc3_force_gadget_run_stop);
+
 static int dwc3_gadget_vbus_draw(struct usb_gadget *g, unsigned int mA)
 {
 	struct dwc3		*dwc = gadget_to_dwc(g);
