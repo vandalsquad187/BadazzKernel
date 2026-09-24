@@ -2206,7 +2206,7 @@ static int dwc3_gadget_set_selfpowered(struct usb_gadget *g,
  * dwc3_device_core_soft_reset - Issues device core soft reset
  * @dwc: pointer to our context structure
  */
-static int dwc3_device_core_soft_reset(struct dwc3 *dwc)
+int dwc3_device_core_soft_reset(struct dwc3 *dwc)
 {
 	u32             reg;
 	int             retries = 10;
@@ -2233,6 +2233,7 @@ done:
 
 	return 0;
 }
+EXPORT_SYMBOL_GPL(dwc3_device_core_soft_reset);
 
 #define MIN_RUN_STOP_DELAY_MS 50
 
@@ -2240,6 +2241,7 @@ static int dwc3_gadget_run_stop(struct dwc3 *dwc, int is_on, int suspend)
 {
 	u32			reg, reg1;
 	u32			timeout = 1500;
+	int			ret;
 
 	dbg_event(0xFF, "run_stop", is_on);
 	reg = dwc3_readl(dwc->regs, DWC3_DCTL);
@@ -2252,8 +2254,25 @@ static int dwc3_gadget_run_stop(struct dwc3 *dwc, int is_on, int suspend)
 		if (dwc->revision >= DWC3_REVISION_194A)
 			reg &= ~DWC3_DCTL_KEEP_CONNECT;
 
+		dev_err(dwc->dev,
+			"Build311 PRESTART: DCTL=%08x DSTS=%08x GCTL=%08x DCFG=%08x\n",
+			dwc3_readl(dwc->regs, DWC3_DCTL),
+			dwc3_readl(dwc->regs, DWC3_DSTS),
+			dwc3_readl(dwc->regs, DWC3_GCTL),
+			dwc3_readl(dwc->regs, DWC3_DCFG));
+
 		dwc3_event_buffers_setup(dwc);
-		__dwc3_gadget_start(dwc);
+		ret = __dwc3_gadget_start(dwc);
+		if (ret) {
+			dev_err(dwc->dev,
+				"Build311 STARTFAIL: ret=%d DCTL=%08x DSTS=%08x GCTL=%08x DCFG=%08x\n",
+				ret,
+				dwc3_readl(dwc->regs, DWC3_DCTL),
+				dwc3_readl(dwc->regs, DWC3_DSTS),
+				dwc3_readl(dwc->regs, DWC3_GCTL),
+				dwc3_readl(dwc->regs, DWC3_DCFG));
+			return ret;
+		}
 
 		reg1 = dwc3_readl(dwc->regs, DWC3_DCFG);
 		reg1 &= ~(DWC3_DCFG_SPEED_MASK);
