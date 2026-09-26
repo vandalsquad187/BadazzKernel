@@ -492,7 +492,7 @@ int dwc3_send_gadget_ep_cmd(struct dwc3_ep *dep, unsigned cmd,
 
 	if (timeout == 0) {
 		u32 depcmd, par0, par1, par2, gctl, dctl, dsts, dcfg, dale,
-		    usb2phy, gsnps;
+		    usb2phy, gsnps, gevten, devten, evsiz, evcnt;
 		int act, st;
 
 		ret = -ETIMEDOUT;
@@ -518,14 +518,18 @@ int dwc3_send_gadget_ep_cmd(struct dwc3_ep *dep, unsigned cmd,
 		dale = dwc3_readl(dwc->regs, DWC3_DALEPENA);
 		usb2phy = dwc3_readl(dwc->regs, DWC3_GUSB2PHYCFG(0));
 		gsnps = dwc3_readl(dwc->regs, DWC3_GSNPSID);
+		gevten = dwc3_readl(dwc->regs, DWC3_GEVTEN);
+		devten = dwc3_readl(dwc->regs, DWC3_DEVTEN);
+		evsiz = dwc3_readl(dwc->regs, DWC3_GEVNTSIZ(0));
+		evcnt = dwc3_readl(dwc->regs, DWC3_GEVNTCOUNT(0));
 		act = !!(depcmd & DWC3_DEPCMD_CMDACT);
 		st = DWC3_DEPCMD_STATUS(depcmd);
 		dev_err(dwc->dev,
-			"ep cmd dump: dep=%s wcmd=%08x rcmd=%08x act=%d st=%d par0=%08x par1=%08x par2=%08x GCTL=%08x DCTL=%08x DSTS=%08x HLT=%u DCFG=%08x DALE=%08x U2PHY=%08x speed=%u rev=%08x GSNPS=%08x ep_off=%lx\n",
+			"ep cmd dump: dep=%s wcmd=%08x rcmd=%08x act=%d st=%d par0=%08x par1=%08x par2=%08x GCTL=%08x DCTL=%08x DSTS=%08x HLT=%u DCFG=%08x DALE=%08x U2PHY=%08x speed=%u rev=%08x GSNPS=%08x GEVTEN=%08x DEVTEN=%08x EVSIZ=%08x EVCNT=%08x ep_off=%lx\n",
 			dep->name, cmd, depcmd, act, st, par0, par1, par2,
 			gctl, dctl, dsts, !!(dsts & DWC3_DSTS_DEVCTRLHLT),
 			dcfg, dale, usb2phy, dwc->gadget.speed,
-			dwc->revision, gsnps,
+			dwc->revision, gsnps, gevten, devten, evsiz, evcnt,
 			(unsigned long)dep->regs);
 
 		if (DWC3_DEPCMD_CMD(cmd) != DWC3_DEPCMD_ENDTRANSFER) {

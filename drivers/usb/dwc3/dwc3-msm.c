@@ -4962,31 +4962,6 @@ static int dwc3_otg_start_peripheral(struct dwc3_msm *mdwc, int on)
 						DWC31_LINK_LU3LFPSRXTIM(0)));
 		}
 
-		/*
-		 * Build313 A: RS=0 && HLT=0 is an impossible intermediate
-		 * state for the DWC3 command engine — force a defined
-		 * stopped state (HLT=1) before pullup / ep0 enable.
-		 */
-		dctl = dwc3_readl(dwc->regs, DWC3_DCTL);
-		dsts = dwc3_readl(dwc->regs, DWC3_DSTS);
-		if (!(dctl & DWC3_DCTL_RUN_STOP) &&
-		    !(dsts & DWC3_DSTS_DEVCTRLHLT)) {
-			int sret;
-
-			dev_warn(mdwc->dev,
-				"Build313: RS=0 HLT=0 invalid state DCTL=%08x DSTS=%08x → core soft reset\n",
-				dctl, dsts);
-			sret = dwc3_device_core_soft_reset(dwc);
-			dctl = dwc3_readl(dwc->regs, DWC3_DCTL);
-			dsts = dwc3_readl(dwc->regs, DWC3_DSTS);
-			dev_err(mdwc->dev,
-				"Build313: post-softreset ret=%d DCTL=%08x DSTS=%08x RS=%u HLT=%u DCFG=%08x\n",
-				sret, dctl, dsts,
-				!!(dctl & DWC3_DCTL_RUN_STOP),
-				!!(dsts & DWC3_DSTS_DEVCTRLHLT),
-				dwc3_readl(dwc->regs, DWC3_DCFG));
-		}
-
 		usb_gadget_vbus_connect(&dwc->gadget);
 
 		dctl = dwc3_readl(dwc->regs, DWC3_DCTL);
