@@ -397,6 +397,7 @@ int dwc3_send_gadget_ep_cmd(struct dwc3_ep *dep, unsigned cmd,
 	u32			timeout = 5000;
 	u32			saved_config = 0;
 	u32			reg;
+	ktime_t			t0;
 
 	int			cmd_status = 0;
 	int			ret = -EINVAL;
@@ -452,6 +453,7 @@ int dwc3_send_gadget_ep_cmd(struct dwc3_ep *dep, unsigned cmd,
 	else
 		cmd |= DWC3_DEPCMD_CMDACT;
 
+	t0 = ktime_get();
 	dwc3_writel(dep->regs, DWC3_DEPCMD, cmd);
 	do {
 		reg = dwc3_readl(dep->regs, DWC3_DEPCMD);
@@ -485,6 +487,7 @@ int dwc3_send_gadget_ep_cmd(struct dwc3_ep *dep, unsigned cmd,
 
 			break;
 		}
+		udelay(10);
 	} while (--timeout);
 
 	if (timeout == 0) {
@@ -493,8 +496,10 @@ int dwc3_send_gadget_ep_cmd(struct dwc3_ep *dep, unsigned cmd,
 		int act, st;
 
 		ret = -ETIMEDOUT;
-		dev_err(dwc->dev, "%s command timeout for %s\n",
-			dwc3_gadget_ep_cmd_string(cmd), dep->name);
+		dev_err(dwc->dev,
+			"%s command timeout for %s (B315: waited %lld us, budget=5000x(read+10us))\n",
+			dwc3_gadget_ep_cmd_string(cmd), dep->name,
+			(long long)ktime_us_delta(ktime_get(), t0));
 
 		/* Build 307: dump command-interface state at timeout.
 		 * DEPCMD CMDACT stuck=1 → write landed but HW not completing
