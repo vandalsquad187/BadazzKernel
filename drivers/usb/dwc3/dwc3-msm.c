@@ -4598,7 +4598,10 @@ static int dwc3_otg_start_host(struct dwc3_msm *mdwc, int on)
 	}
 
 	if (on) {
-		dev_dbg(mdwc->dev, "%s: turn on host\n", __func__);
+		dev_err(mdwc->dev,
+			"B314 start_host: turn on host vbus=%d id=%d in_dev=%d pullups=%d\n",
+			mdwc->vbus_active, mdwc->id_state,
+			mdwc->in_device_mode, dwc->pullups_connected);
 
 		dwc3_msm_set_hsphy_flags(mdwc, PHY_HOST_MODE);
 		pm_runtime_get_sync(mdwc->dev);
@@ -4849,8 +4852,11 @@ static int dwc3_otg_start_peripheral(struct dwc3_msm *mdwc, int on)
 		u32 gctl, dctl, dsts, dcfg, dale, usb2phy, usb3phy;
 		unsigned long r_core, r_iface, r_bus, r_noc, r_utmi, r_xo;
 
-		dev_err(mdwc->dev, "start_peripheral: turn on gadget %s\n",
-					dwc->gadget.name);
+		dev_err(mdwc->dev,
+			"B314 start_peripheral: turn on gadget %s vbus=%d id=%d in_host=%d pullups=%d\n",
+					dwc->gadget.name, mdwc->vbus_active,
+					mdwc->id_state, mdwc->in_host_mode,
+					dwc->pullups_connected);
 
 		dwc3_override_vbus_status(mdwc, true);
 		usb_phy_notify_connect(mdwc->hs_phy, USB_SPEED_HIGH);
