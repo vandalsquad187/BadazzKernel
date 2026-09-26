@@ -333,6 +333,8 @@ struct dwc3_msm {
 	struct mutex suspend_resume_mutex;
 
 	enum usb_device_speed override_usb_speed;
+	/* Build317-D: last EXTCON_PROP_USB_SS value seen (-1 = unknown). */
+	int			extcon_ss_prop;
 	u32			*gsi_reg;
 	int			gsi_reg_offset_cnt;
 	bool			gsi_io_coherency_disabled;
@@ -3171,6 +3173,9 @@ static void dwc3_resume_work(struct work_struct *w)
 		ret = extcon_get_property(edev, extcon_id,
 				EXTCON_PROP_USB_SS, &val);
 
+		/* Build317-D: keep last SS capability for diagnostics. */
+		mdwc->extcon_ss_prop = ret ? -1 : val.intval;
+
 		if (!ret && val.intval == 0)
 			dwc->maximum_speed = USB_SPEED_HIGH;
 
@@ -3956,6 +3961,7 @@ static int dwc3_msm_probe(struct platform_device *pdev)
 
 	platform_set_drvdata(pdev, mdwc);
 	mdwc->dev = &pdev->dev;
+	mdwc->extcon_ss_prop = -1;
 
 	INIT_LIST_HEAD(&mdwc->req_complete_list);
 	INIT_WORK(&mdwc->resume_work, dwc3_resume_work);
@@ -4796,7 +4802,7 @@ static void dwc3_msm_dump_link(struct dwc3_msm *mdwc, const char *tag)
 	u3 = dwc3_readl(dwc->regs, DWC3_GUSB3PIPECTL(0));
 
 	dev_err(mdwc->dev,
-		"Build313: LINK %s GCTL=%08x DCTL=%08x RS=%u DSTS=%08x HLT=%u LNKST=%u SPD=%u COREIDLE=%u RXEMPTY=%u DCFG=%08x DEVSPD=%u LPM=%u DALE=%08x U2PHY=%08x U2SUS=%u U2PSR=%u U2SLPM=%u U3PIPE=%08x U3SUS=%u U3PSR=%u HWP0=%08x hwmode=%u evbuf=%p GEVADR=%08x GEVSIZ=%08x gspd=%u gstate=%d lstate=%u vbus=%u inrst=%u indev=%u softconn=%u pullups=%u connected=%u inlpm=%d lpmfl=0x%lx GEVLO=%08x GECNT=%08x\n",
+		"Build313: LINK %s GCTL=%08x DCTL=%08x RS=%u DSTS=%08x HLT=%u LNKST=%u SPD=%u COREIDLE=%u RXEMPTY=%u DCFG=%08x DEVSPD=%u LPM=%u DALE=%08x U2PHY=%08x U2SUS=%u U2PSR=%u U2SLPM=%u U3PIPE=%08x U3SUS=%u U3PSR=%u HWP0=%08x hwmode=%u evbuf=%px GEVADRHI=%08x GEVSIZ=%08x gspd=%u gstate=%d lstate=%u vbus=%u inrst=%u indev=%u softconn=%u pullups=%u connected=%u inlpm=%d lpmfl=0x%lx GEVLO=%08x GECNT=%08x DEVTEN=%08x GEVTEN=%08x mspd=%d hws=%u ovr=%d ssprop=%d evdma=%llx\n",
 		tag, gctl, dctl, !!(dctl & DWC3_DCTL_RUN_STOP),
 		dsts, !!(dsts & DWC3_DSTS_DEVCTRLHLT),
 		DWC3_DSTS_USBLNKST(dsts),
@@ -4812,7 +4818,7 @@ static void dwc3_msm_dump_link(struct dwc3_msm *mdwc, const char *tag)
 		!!(u3 & DWC3_GUSB3PIPECTL_PHYSOFTRST),
 		dwc->hwparams.hwparams0,
 		DWC3_GHWPARAMS0_MODE(dwc->hwparams.hwparams0),
-		dwc->ev_buf,
+		(void *)dwc->ev_buf,
 		dwc3_readl(dwc->regs, DWC3_GEVNTADRHI(0)),
 		dwc3_readl(dwc->regs, DWC3_GEVNTSIZ(0)),
 		dwc->gadget.speed, dwc->gadget.state, dwc->link_state,
@@ -4820,7 +4826,14 @@ static void dwc3_msm_dump_link(struct dwc3_msm *mdwc, const char *tag)
 		dwc->softconnect, dwc->pullups_connected, dwc->connected,
 		atomic_read(&dwc->in_lpm), mdwc->lpm_flags,
 		dwc3_readl(dwc->regs, DWC3_GEVNTADRLO(0)),
-		dwc3_readl(dwc->regs, DWC3_GEVNTCOUNT(0)));
+		dwc3_readl(dwc->regs, DWC3_GEVNTCOUNT(0)),
+		dwc3_readl(dwc->regs, DWC3_DEVTEN),
+		dwc3_readl(dwc->regs, DWC3_GEVTEN),
+		dwc->maximum_speed,
+		dwc->max_hw_supp_speed,
+		mdwc->override_usb_speed,
+		mdwc->extcon_ss_prop,
+		(unsigned long long)(dwc->ev_buf ? dwc->ev_buf->dma : 0));
 
 	dev_err(mdwc->dev,
 		"Build313: EV %s rst=%u con=%u dis=%u lsc=%u sus=%u eopf=%u sof=%u err=%u ovf=%u cmd=%u wkp=%u unk=%u\n",

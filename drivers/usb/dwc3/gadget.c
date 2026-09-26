@@ -2260,11 +2260,13 @@ static int dwc3_gadget_run_stop(struct dwc3 *dwc, int is_on, int suspend)
 			reg &= ~DWC3_DCTL_KEEP_CONNECT;
 
 		dev_err(dwc->dev,
-			"Build313 PRESTART: DCTL=%08x DSTS=%08x GCTL=%08x DCFG=%08x\n",
+			"Build313 PRESTART: DCTL=%08x DSTS=%08x GCTL=%08x DCFG=%08x mspd=%d hws=%u\n",
 			dwc3_readl(dwc->regs, DWC3_DCTL),
 			dwc3_readl(dwc->regs, DWC3_DSTS),
 			dwc3_readl(dwc->regs, DWC3_GCTL),
-			dwc3_readl(dwc->regs, DWC3_DCFG));
+			dwc3_readl(dwc->regs, DWC3_DCFG),
+			dwc->maximum_speed,
+			dwc->max_hw_supp_speed);
 
 		dwc3_event_buffers_setup(dwc);
 		ret = __dwc3_gadget_start(dwc);
@@ -2276,7 +2278,20 @@ static int dwc3_gadget_run_stop(struct dwc3 *dwc, int is_on, int suspend)
 				dwc3_readl(dwc->regs, DWC3_DSTS),
 				dwc3_readl(dwc->regs, DWC3_GCTL),
 				dwc3_readl(dwc->regs, DWC3_DCFG));
-			return ret;
+			/*
+			 * Build 317-A: do NOT bail out here.
+			 *
+			 * Aborting skipped the DCFG speed write, DCTL_RUN_STOP and
+			 * pullups_connected (old Build 311 path), so the core stayed
+			 * RS=0 / pullups=0 and usb_gadget_connect() became a no-op.
+			 * memeDo never checked this return value either.
+			 *
+			 * The failure itself stays visible: __dwc3_gadget_start()
+			 * still stops before dwc3_gadget_enable_irq(), so DEVTEN
+			 * remains 0 and the CMDACT timeout keeps being reported.
+			 * Return value of this function is decided by the DSTS
+			 * poll below.
+			 */
 		}
 
 		reg1 = dwc3_readl(dwc->regs, DWC3_DCFG);
