@@ -2669,6 +2669,9 @@ static int dwc3_msm_update_bus_bw(struct dwc3_msm *mdwc, enum bus_vote bv)
 		dev_err(mdwc->dev, "bus bw voting %d failed %d\n",
 				bv_index, ret);
 
+	dev_err(mdwc->dev, "B316: bus_bw vote=%u idx=%u ret=%d client=%u\n",
+		(unsigned int)bv, bv_index, ret, mdwc->bus_perf_client);
+
 	dbg_event(0xFF, "bus_vote_end", bv_index);
 
 	return ret;
@@ -2877,7 +2880,10 @@ static int dwc3_msm_suspend(struct dwc3_msm *mdwc, bool force_power_collapse,
 			!(mdwc->lpm_flags & MDWC3_SS_PHY_SUSPEND))
 		enable_irq(mdwc->wakeup_irq[PWR_EVNT_IRQ].irq);
 
-	dev_info(mdwc->dev, "DWC3 in low power mode\n");
+	dev_info(mdwc->dev,
+		"DWC3 in low power mode (B316 lpm_flags=0x%lx force_pc=%d host=%d dev=%d vbus=%d)\n",
+		mdwc->lpm_flags, force_power_collapse, mdwc->in_host_mode,
+		mdwc->in_device_mode, mdwc->vbus_active);
 	dbg_event(0xFF, "Ctl Sus", atomic_read(&dwc->in_lpm));
 
 	/* kick_sm if it is waiting for lpm sequence to finish */
@@ -2896,7 +2902,8 @@ static int dwc3_msm_resume(struct dwc3_msm *mdwc)
 	struct dwc3 *dwc = platform_get_drvdata(mdwc->dwc3);
 	struct usb_irq *uirq;
 
-	dev_dbg(mdwc->dev, "%s: exiting lpm\n", __func__);
+	dev_err(mdwc->dev, "B316: dwc3_msm_resume called in_lpm=%d lpm_flags=0x%lx host=%d\n",
+		atomic_read(&dwc->in_lpm), mdwc->lpm_flags, mdwc->in_host_mode);
 
 	/*
 	 * If h/w exited LPM without any events, ensure
@@ -2907,7 +2914,9 @@ static int dwc3_msm_resume(struct dwc3_msm *mdwc)
 
 	mutex_lock(&mdwc->suspend_resume_mutex);
 	if (!atomic_read(&dwc->in_lpm)) {
-		dev_dbg(mdwc->dev, "%s: Already resumed\n", __func__);
+		dev_err(mdwc->dev,
+			"B316: dwc3_msm_resume early-return (already resumed) lpm_flags=0x%lx\n",
+			mdwc->lpm_flags);
 		mutex_unlock(&mdwc->suspend_resume_mutex);
 		return 0;
 	}
@@ -4787,7 +4796,7 @@ static void dwc3_msm_dump_link(struct dwc3_msm *mdwc, const char *tag)
 	u3 = dwc3_readl(dwc->regs, DWC3_GUSB3PIPECTL(0));
 
 	dev_err(mdwc->dev,
-		"Build313: LINK %s GCTL=%08x DCTL=%08x RS=%u DSTS=%08x HLT=%u LNKST=%u SPD=%u COREIDLE=%u RXEMPTY=%u DCFG=%08x DEVSPD=%u LPM=%u DALE=%08x U2PHY=%08x U2SUS=%u U2PSR=%u U2SLPM=%u U3PIPE=%08x U3SUS=%u U3PSR=%u HWP0=%08x hwmode=%u evbuf=%p GEVADR=%08x GEVSIZ=%08x gspd=%u gstate=%d lstate=%u vbus=%u inrst=%u indev=%u softconn=%u pullups=%u connected=%u\n",
+		"Build313: LINK %s GCTL=%08x DCTL=%08x RS=%u DSTS=%08x HLT=%u LNKST=%u SPD=%u COREIDLE=%u RXEMPTY=%u DCFG=%08x DEVSPD=%u LPM=%u DALE=%08x U2PHY=%08x U2SUS=%u U2PSR=%u U2SLPM=%u U3PIPE=%08x U3SUS=%u U3PSR=%u HWP0=%08x hwmode=%u evbuf=%p GEVADR=%08x GEVSIZ=%08x gspd=%u gstate=%d lstate=%u vbus=%u inrst=%u indev=%u softconn=%u pullups=%u connected=%u inlpm=%d lpmfl=0x%lx GEVLO=%08x GECNT=%08x\n",
 		tag, gctl, dctl, !!(dctl & DWC3_DCTL_RUN_STOP),
 		dsts, !!(dsts & DWC3_DSTS_DEVCTRLHLT),
 		DWC3_DSTS_USBLNKST(dsts),
@@ -4808,7 +4817,10 @@ static void dwc3_msm_dump_link(struct dwc3_msm *mdwc, const char *tag)
 		dwc3_readl(dwc->regs, DWC3_GEVNTSIZ(0)),
 		dwc->gadget.speed, dwc->gadget.state, dwc->link_state,
 		mdwc->vbus_active, mdwc->in_restart, mdwc->in_device_mode,
-		dwc->softconnect, dwc->pullups_connected, dwc->connected);
+		dwc->softconnect, dwc->pullups_connected, dwc->connected,
+		atomic_read(&dwc->in_lpm), mdwc->lpm_flags,
+		dwc3_readl(dwc->regs, DWC3_GEVNTADRLO(0)),
+		dwc3_readl(dwc->regs, DWC3_GEVNTCOUNT(0)));
 
 	dev_err(mdwc->dev,
 		"Build313: EV %s rst=%u con=%u dis=%u lsc=%u sus=%u eopf=%u sof=%u err=%u ovf=%u cmd=%u wkp=%u unk=%u\n",
@@ -4843,20 +4855,44 @@ static void dwc3_msm_link_dump_work(struct work_struct *w)
 static int dwc3_otg_start_peripheral(struct dwc3_msm *mdwc, int on)
 {
 	struct dwc3 *dwc = platform_get_drvdata(mdwc->dwc3);
+	int pm_ret;
 
-	pm_runtime_get_sync(mdwc->dev);
+	pm_ret = pm_runtime_get_sync(mdwc->dev);
 	dbg_event(0xFF, "StrtGdgt gsync",
 		atomic_read(&mdwc->dev->power.usage_count));
 
 	if (on) {
 		u32 gctl, dctl, dsts, dcfg, dale, usb2phy, usb3phy;
 		unsigned long r_core, r_iface, r_bus, r_noc, r_utmi, r_xo;
+		int cr_bus = -EINVAL, cr_noc = -EINVAL;
 
 		dev_err(mdwc->dev,
 			"B314 start_peripheral: turn on gadget %s vbus=%d id=%d in_host=%d pullups=%d\n",
 					dwc->gadget.name, mdwc->vbus_active,
 					mdwc->id_state, mdwc->in_host_mode,
 					dwc->pullups_connected);
+
+		dev_err(mdwc->dev,
+			"B316: pm_runtime_get_sync ret=%d in_lpm=%d lpm_flags=0x%lx usage=%d\n",
+			pm_ret, atomic_read(&dwc->in_lpm), mdwc->lpm_flags,
+			atomic_read(&mdwc->dev->power.usage_count));
+
+		/*
+		 * Restore 79b3b4147 (present in known-good 096e0a0c9, dropped
+		 * by Build 308). bus_aggr/noc_aggr are only enabled in
+		 * dwc3_msm_resume(); dwc3_msm_suspend() disables them and votes
+		 * BUS_VOTE_NONE. If no resume ran since the last suspend, the
+		 * core cannot move event/TRB data over AXI while it is still
+		 * able to access its own cfg registers - exactly the
+		 * "EP0 TRB timeout" symptom 79b3b4147 was written for.
+		 */
+		if (mdwc->bus_aggr_clk)
+			cr_bus = clk_prepare_enable(mdwc->bus_aggr_clk);
+		if (mdwc->noc_aggr_clk)
+			cr_noc = clk_prepare_enable(mdwc->noc_aggr_clk);
+		dev_err(mdwc->dev,
+			"B316: clk enable bus_aggr=%p ret=%d noc_aggr=%p ret=%d\n",
+			mdwc->bus_aggr_clk, cr_bus, mdwc->noc_aggr_clk, cr_noc);
 
 		dwc3_override_vbus_status(mdwc, true);
 		usb_phy_notify_connect(mdwc->hs_phy, USB_SPEED_HIGH);
