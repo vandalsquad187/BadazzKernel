@@ -2,10 +2,88 @@
 
 ## Current State
 - **Repo**: `vandalsquad187/BadazzKernel` branch `main`
-- **Kernel**: `4.14.369` — `K6A_GOV v1.3.1` built-in
-- **Local**: Clean, GH `main` @ `c7d6fc70b` (Build 279: Build 273 base + USB DCTL fix)
-- **GitHub**: Up to date, CI builds on `main`
-- **KSU-Next Submodule**: `b100bd28` (dev-4.14-prctl-fix, UAPI v4, synchronous execve hook)
+- **Kernel**: `4.14.369` — `K6A_GOV v1.3.1` built-in, `LOCALVERSION=-BadazzKernel-sweet-v1.3.2`
+- **Local**: clean, `main` @ `3be72b736` (Build 320: quiescent-core recovery + RESTART_USB_SESSION storm breaker)
+- **GitHub**: CI builds on every push to `main` (release) and `miui/test` (artifacts only); latest release `v4.14.369-badazz-build320`
+- **KSU-Next Submodule**: `b100bd28` (`v3.3.0-95-gb100bd28`, dev-4.14-prctl-fix, UAPIv4, `KSU_VERSION=33300`)
+
+## Repo & Docs Layout
+
+| Path | What it is |
+|------|------------|
+| `README.md` | Public, English. Features, install, versions, fixed bugs, roadmap |
+| `AGENTS.md` | This file — agent/dev-facing state, build & debug recipes |
+| `CONTRIBUTING.md` | Upstream kernel contribution guide (not project-specific) |
+| `Documentation/` | **Stock Linux 4.14 kernel docs** (6090 files, `00-INDEX`, ABI/, devicetree/, …). No project content — do not put Badazz docs here |
+| `anykernel/` | AnyKernel3 flash template used by CI |
+| `.github/workflows/build-kernel.yml` | The CI that produces the flashable ZIP + release |
+
+## CI (`build-kernel.yml`)
+
+- Trigger: push to `main` (release) / `miui/test` (artifact only) / `workflow_dispatch`
+- Toolchain: distro `gcc-aarch64-linux-gnu` + `gcc-arm-linux-gnueabihf` (GCC, **not** clang), ccache
+- Steps: `make sweet_defconfig` → inject `CONFIG_LOCALVERSION=…-build${run_number}` → `olddefconfig`
+  → validate required configs (`KSU`, `KSU_SUSFS`, `KSU_TAMPER_SYSCALL_TABLE`, `K6A_GOV`,
+  `NFC_NQ_PN80T`, `PHY_QCOM_QUSB2`) → `make Image.gz dtb.img dtbo.img`
+  → verify `CONFIG_PHY_QCOM_QUSB2` survived + `phy-qcom-qusb2.o` was built
+  → copy into `anykernel/` + `build-info.txt` → zip `Badazz-kernel-sweet-v${VERSION}-build${run_number}.zip`
+  → release `v${VERSION}-badazz-build${run_number}`
+- Build time ~13–17 min; `gh run list` / `gh run watch <id>` to follow
+
+## USB Debugging (Build 300–320, open)
+
+Status: **device mode still fails intermittently (Fault 1), host mode broken, Build 320 pushed, awaiting on-device test.**
+
+Key files: `drivers/usb/dwc3/gadget.c`, `drivers/usb/dwc3/dwc3-msm.c`,
+`drivers/power/supply/qcom/smb5-lib.c`, `arch/arm64/boot/dts/qcom/sdmmagpie-*.dts(i)`.
+Known-good reference commits: `096e0a0c9`, `d8cf6ae19` (high-speed DTS), `79b3b4147` (bus_aggr).
+
+Empirical rule across **all** logs (Build 319):
+
+| Condition | Result |
+|---|---|
+| `DSTS.COREIDLE=1` && `USBLNKST!=3` | 9/9 ep-cmd OK |
+| `DSTS.COREIDLE=0` | 692/692 ep-cmd timeout |
+| `DSTS.COREIDLE=1` && `USBLNKST=3` (U3/Suspend) | 1/1 timeout (host never bus-reset) |
+
+**Fault 1 — ep-cmd timeout storm** (open, Build 320 is the current attempt)
+- Chain: `run_stop(0)` does not see end-of-frame → core left `COREIDLE=0/HLT=0`
+  → next `__dwc3_gadget_start()` programs EP0, `SETEPCFG` hangs 5 s → `RESTART_USB_SESSION`
+  → `dwc3_restart_usb_work` tears down + restarts → same failure every ~2 s until unplug
+- Build 307–319 added diagnostics (`ep cmd dump`, `Build313 PRESTART/STARTFAIL`, `Build319 prestart not quiescent`)
+- Build 320 adds `dwc3_gadget_ensure_quiescent()` (≤50 ms wait + one `DCTL.CSFTRST`, process context
+  in `dwc3_otg_start_peripheral`) and `start_fail_streak >= 3` give-up in `run_stop(is_on=1)`
+  so no ep-cmd is issued and the storm stops. Streak clears on successful start or a *real*
+  disconnect (`!mdwc->in_restart`).
+- Markers to grep: `Build320:`, `Build313 STARTFAIL`, `Build319: prestart not quiescent`, `STARTGIVEUP`
+
+**Fault 2 — host mode**: `usb1-port1: Cannot enable. Maybe the USB cable is bad?` ×4 + `attempt power cycle`
+then `unable to enumerate` (see `dm313otg.txt`). Not touched by Build 320.
+
+**Fault 3 — charger**: `APSD=OCP` rerun loop every 5 s. Expected to produce **no** `vbus_notifier` line —
+`smblib_handle_apsd_done()` only calls `smblib_notify_device_mode()` for SDP/CDP/FLOAT (smb5-lib.c:8021).
+
+**Ring buffer**: `CONFIG_LOG_BUF_SHIFT` was 17 (128 KB) and wrapped between t=4268 s and t=5942 s,
+losing the whole Fault 1 window. Build 320 bumps it to 20 (1 MB).
+
+## Local Build Notes (Termux)
+
+A full local kernel build is **not** possible here: `scripts/mod/modpost` fails to link against
+Termux/bionic `elf.h` (`ELF64_ST_TYPE` circular), there is no `bison`/`perl`, and no
+`aarch64-linux-gnu-gcc`. Builds go through CI instead. Use a targeted syntax check for edits:
+
+```bash
+cd BadazzKernel && make ARCH=arm64 sweet_defconfig   # regenerates .config
+CLANG_INC=$(clang -print-resource-dir)/include
+clang --target=aarch64-linux-gnu -nostdinc -isystem $CLANG_INC \
+  -I./arch/arm64/include -I./arch/arm64/include/generated -I./include \
+  -I./arch/arm64/include/uapi -I./arch/arm64/include/generated/uapi \
+  -I./include/uapi -I./include/generated/uapi -I./drivers/usb/dwc3 \
+  -Idrivers/usb/host -Idrivers/base/power \
+  -include ./include/linux/kconfig.h -D__KERNEL__ -DMODULE -mlittle-endian \
+  -std=gnu89 -Werror=implicit-function-declaration -Werror=format \
+  -fsyntax-only drivers/usb/dwc3/gadget.c
+```
 
 ## k6a_gov v1.3.1
 
@@ -31,33 +109,44 @@
 
 ### sweet_defconfig
 - `CONFIG_K6A_GOV=y`
-- `CONFIG_KSU=y` `33300` UAPIv2, `CONFIG_KSU_SUSFS=y` + all sub-options + `TAMPER_SYSCALL_TABLE`
+- `CONFIG_KSU=y` `33300` UAPIv4, `CONFIG_KSU_SUSFS=y` + all sub-options + `TAMPER_SYSCALL_TABLE`
 - `CONFIG_SCHED_TUNE=y` `CONFIG_KSM=y` `CONFIG_BOEFFLA_WL_BLOCKER=y`
 - `CONFIG_MSM_PERFORMANCE=y` `CONFIG_CPU_FREQ_TIMES=y` `CONFIG_PSI=y`
-- `LOCALVERSION="-BadazzKernel-sweet-v1.3.1"`
+- `CONFIG_LOG_BUF_SHIFT=20` (1 MB ring buffer, raised from 17 in Build 320)
+- `LOCALVERSION="-BadazzKernel-sweet-v1.3.2"`
 
 ### Build
 ```bash
-make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- sweet_defconfig
-make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- -j$(nproc)
+make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- CROSS_COMPILE_COMPAT=arm-linux-gnueabihf- sweet_defconfig
+make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- CROSS_COMPILE_COMPAT=arm-linux-gnueabihf- -j$(nproc) \
+     Image.gz dtb.img dtbo.img
 # single object:
 make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- drivers/thermal/k6a_gov/k6a_gov.o
-# ZIP:
-cp arch/arm64/boot/Image.gz anykernel/ && cp arch/arm64/boot/dtb.img anykernel/ && cp arch/arm64/boot/dtbo.img anykernel/
-cd anykernel && zip -r9 ../BadazzKernel-sweet-k6a-gov-v1.3.1.zip . -x "*.git*"
+# ZIP (CI does this — see .github/workflows/build-kernel.yml):
+cp arch/arm64/boot/Image.gz arch/arm64/boot/dtb.img arch/arm64/boot/dtbo.img anykernel/
+cd anykernel && zip -r9 ../BadazzKernel-sweet-k6a-gov-v1.3.2.zip . -x "*.git*"
 ```
+Local full builds are blocked in Termux — see **Local Build Notes (Termux)** above.
 
 ### Git History (main)
+Full log: `git log --oneline -40`. Current head is the USB debug series:
+
 ```
-81d69ae k6a_gov v1.3.1: version bump + ticks format fix
-d4835b6 fix: remove mutex from get_cd_max_freq to prevent deadlock
-53bb809 v1.3.1: Fix build + 5 hardening points
-967c134 v1.3.0: KB15 hash coupling, KB12 Phase 2 BW floors, profile 5
-dfcb96b v1.2.1: KB14 badazz_safe, KB8 multi-zone temp, clamp_freq fix
-602a281 KB11: CONFIG_K6A_GOV=y in sweet_defconfig
-33ec2a1 k6a_gov v1.2.0: GPU enforcement, history, bw monitor
-23aae0a k6a_gov v1.1.2: battery_guard, poll_ms, GPU levels RO
+3be72b736 Build 320: recover a non-quiescent device core before start + stop the RESTART_USB_SESSION storm
+71dc0630b Build 319: restore GUSB3PIPECTL.SUSPHY lost by stop_peripheral + wait for DSTS.COREIDLE
+1fd9bdade Build 318: drop Build-311 core-soft-reset heal + dump GEVTEN/DEVTEN/EVSIZ/EVCNT on ep-cmd timeout
+3ba2e4675 Build 317: run_stop no longer aborts on start failure + restore high-speed DTS
+194e605be Build 316: restore bus_aggr/noc_aggr clocks in start_peripheral + PM/clock/bus-vote diagnostics
+6c6a35c9b Build 315: ep-cmd wait budget = wall time (udelay 10us), not read count
+ed9e0ef1d Build 314: QUSB2 PHY power/DPDM/set_suspend diagnostics (no behavior change)
+bff0adc79 Build 313: link/PHY state + DEVT diagnostics (no behavior change)
+0c88aa2d4 Build 312: run_stop wait real frame time — 1500 tight reads < 1ms HS frame
+7bdc78a1d Build 307: drop Build 306 core reset, enable AHB/AXI clocks, dump EP-CMD state on timeout
+839d4d70a Build 303: restore working USB state (Sept 8 build 096e0a0c9)
 ```
+
+k6a_gov history: `81d69ae` v1.3.1 ticks fix, `d4835b6` deadlock, `53bb809` v1.3.1 hardening,
+`967c134` v1.3.0 BW floors + profile 5, `dfcb96b` v1.2.1, `602a281` `CONFIG_K6A_GOV=y`.
 
 ## k6a-ctl Companion
 - **Repo**: `vandalsquad187/k6a-ctl` branch `main` @ `b130d68`
@@ -69,7 +158,7 @@ dfcb96b v1.2.1: KB14 badazz_safe, KB8 multi-zone temp, clamp_freq fix
 ## KernelSU-Next SUSFS
 - SUSFS in `fs/susfs.c`, `include/linux/susfs.h`
 - Hooks in `fs/stat.c` (`CONFIG_KSU_SUSFS_SUS_KSTAT`) and `kernel/sys.c` (`CONFIG_KSU_SUSFS_SPOOF_UNAME`)
-- Submodule `KernelSU-Next` @ `a5ff54c` (v1.0.2-771)
+- Submodule `KernelSU-Next` @ `b100bd28` (`v3.3.0-95-gb100bd28`, `KSU_VERSION=33300`, UAPIv4)
 - `git submodule update --init --recursive` required for fresh clone
 
 ## Common Issues
@@ -78,6 +167,8 @@ dfcb96b v1.2.1: KB14 badazz_safe, KB8 multi-zone temp, clamp_freq fix
 3. **Deadlock on cat status**: fixed in d4835b6 — `get_cd_max_freq` must not take mutex
 4. **Hardcoded CPU6**: fixed — use `find_gold_cpu()` portable
 5. **Boot hang at crDroid logo** (Build 267-278): see Boot-Hang Root Cause below
+6. **Local Termux build fails** (`modpost` / `elf.h`, no `bison`/`perl`): use the syntax-check recipe in *Local Build Notes (Termux)*, let CI do real builds
+7. **USB `ep cmd timeout` / device not enumerating**: see *USB Debugging (Build 300-320, open)*
 
 ## Boot-Hang Root Cause (Build 267-278)
 - **Symptom**: Boot hängt bei crDroid Boot-Logo (95%), intermittierend

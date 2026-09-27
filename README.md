@@ -25,12 +25,12 @@ BadazzKernel is a performance and gaming tuned kernel for **Redmi Note 12 Pro 4G
 
 ```
 linux-4.14.369
-├── KernelSU-Next 33300 (UAPIv2) + SUSFS v2.2.0  # Root + Hide (k6a-sweet a5ff54c)
+├── KernelSU-Next 33300 (UAPIv4) + SUSFS v2.2.0  # Root + Hide (submodule b100bd28)
 ├── drivers/thermal/k6a_gov/k6a_gov.c v1.3.1     # In-kernel gaming governor
 ├── drivers/gpu/msm/kgsl_pwrctrl.c               # GPU pwrlevel export (k6a_gov)
 ├── drivers/devfreq/devfreq.c                    # BW floors (gpubw / llcc)
 ├── drivers/gpu/msm/ + drivers/thermal/          # Thermal + cooling floors
-├── drivers/usb/dwc3/ + phy/qcom                 # USB fix (SM6150 clocks, WAIT_FOR_LPM, bus_aggr)
+├── drivers/usb/dwc3/ + phy/qcom                 # USB: SM6150 clocks, WAIT_FOR_LPM, bus_aggr, ep-cmd recovery
 └── arch/arm64/boot/dts/qcom/                    # sweet / sdmmagpie DT (AOSP + MIUI overlay)
 ```
 
@@ -46,8 +46,8 @@ linux-4.14.369
 | **Profiles** | 6 profiles | `off/gaming/battery/badazz/custom/badazz_safe` — temps, Gold/GPU/BW floors |
 | **Safety** | Battery guard + hash | `battery_guard` @45°C → CD_L2, `poll_ms` 100..5000, `verify_build_hash` vs `k6a_features/git_hash` |
 | **Thermal** | Cooling device | `k6a_gov` as `thermal_cooling_device`, `cool_cur` locked, `K6A_CD_L4` clamp |
-| **Root** | KSU-Next + SUSFS | 33300 UAPIv2, SUSFS `a5ff54c` `v2.2.0` (sus_path/mount/kstat/map), `tamper_syscall_table` |
-| **USB** | DWC3 / QUSB2 fix | SM6150 clocks (`GCC/DISPCC/CAMCC`), `WAIT_FOR_LPM` clear, `bus_aggr`/`GCTL` 50ms, `is_a_peripheral` fix — no bootloop on PC |
+| **Root** | KSU-Next + SUSFS | 33300 **UAPIv4** (submodule `b100bd28`), SUSFS `v2.2.0` (sus_path/mount/kstat/map), `tamper_syscall_table` |
+| **USB** | DWC3 / QUSB2 | SM6150 clocks (`GCC/DISPCC/CAMCC`), `WAIT_FOR_LPM` clear, `bus_aggr`/`GCTL` 50ms, `is_a_peripheral` fix — PC bootloop gone since v1.3.2. *Current work (Build 307–320): `ep-cmd timeout` recovery + restart-storm breaker — see [USB status](#usb-status-open)* |
 | **Scheduler** | UCLAMP, SCHED_CASS | Latency/efficiency tuning |
 | **Memory** | KSM, LRU_GEN, ZRAM lz4 | Gaming stability |
 | **Net** | BBR | Low latency |
@@ -105,16 +105,18 @@ k6a-ctl v1.1.6 (delegated=1)
 ```bash
 git clone https://github.com/vandalsquad187/BadazzKernel && cd BadazzKernel
 git submodule update --init --recursive
-make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- sweet_defconfig
+export ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- CROSS_COMPILE_COMPAT=arm-linux-gnueabihf-
+make sweet_defconfig
 # MIUI variant:
 scripts/kconfig/merge_config.sh arch/arm64/configs/sweet_defconfig arch/arm64/configs/sweet_miui.config
-make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- -j$(nproc)
+make olddefconfig && make -j$(nproc) Image.gz dtb.img dtbo.img
 # ZIP:
-cp arch/arm64/boot/Image.gz anykernel/ && cp arch/arm64/boot/dtb.img anykernel/ && cp arch/arm64/boot/dtbo.img anykernel/
-cd anykernel && zip -r9 ../BadazzKernel-sweet-k6a-gov-v1.3.1.zip . -x "*.git*"
+cp arch/arm64/boot/Image.gz arch/arm64/boot/dtb.img arch/arm64/boot/dtbo.img anykernel/
+cd anykernel && zip -r9 ../BadazzKernel-sweet-k6a-gov-v1.3.2.zip . -x "*.git*"
 ```
 
 CI builds automatically on every push to `main` (release with build number) and to `miui/test` (artifacts only).
+Runtime ~13–17 min: `gh run list` / `gh run watch <id>`.
 
 ---
 
@@ -129,7 +131,36 @@ echo 0 > /sys/kernel/k6a_gov/enable  # kill switch
 
 k6a-ctl: `check_module.sh` validates delegated/profile, WebUI shows gov status live.
 
-USB: `dmesg | grep -E "dwc3|bus_aggr|GCTL"` — no `ep0out timeout` loop, `IRQ >0`, `mtp,adb` `f1/f2` ok.
+```bash
+# USB health
+dmesg | grep -E "Build31[3-9]|Build320|STARTFAIL|STARTTOUT"   # fault markers
+dmesg | grep -E "dwc3|bus_aggr|GCTL"                          # no ep0out timeout loop, IRQ >0
+```
+Healthy connect: `mtp,adb` with `f1/f2` endpoints and `dwc3_msm mtp,adb` bound.
+
+---
+
+## USB status (open)
+
+The v1.3.2 PC-bootloop fix landed. What is still open is an intermittent **device-mode ep-cmd
+timeout** plus two separate issues:
+
+| # | Issue | State |
+|---|-------|-------|
+| **Fault 1** | `SETEPCFG` ep0out timeout → `RESTART_USB_SESSION` → gadget torn down and restarted every ~2 s until unplug | **Open** — Build 307–319 added diagnostics, Build 320 adds quiescent-core recovery + a give-up counter so the storm stops. Awaiting on-device test |
+| **Fault 2** | OTG host mode: `usb1-port1: Cannot enable. Maybe the USB cable is bad?` ×4 → `unable to enumerate` | **Open**, not touched by Build 320 |
+| **Fault 3** | Charger: `APSD=OCP` re-runs every 5 s | **Open**, cosmetic — OCP/DCP deliberately never reach the dwc3 core |
+
+Empirical rule from all logs so far (Build 319):
+
+| `DSTS` condition | ep-cmd result |
+|---|---|
+| `COREIDLE=1`, `USBLNKST!=3` | 9/9 OK |
+| `COREIDLE=0` | 692/692 timeout |
+| `COREIDLE=1`, `USBLNKST=3` (U3/Suspend) | 1/1 timeout |
+
+Build 320 raised `CONFIG_LOG_BUF_SHIFT` 17 → 20 (128 KB → 1 MB) because the ring buffer wrapped
+in ~70 min and lost the failure window.
 
 ---
 
@@ -137,7 +168,7 @@ USB: `dmesg | grep -E "dwc3|bus_aggr|GCTL"` — no `ep0out timeout` loop, `IRQ >
 
 | Version | Highlights |
 |---------|------------|
-| **v1.3.2 (current)** | **USB fix**: SM6150 clocks, `WAIT_FOR_LPM` deadlock, `bus_aggr`/`GCTL` 50ms, `is_a_peripheral` — no PC bootloop; **MIUI**: `sweet_miui.config` overlay + DTS `xiaomi/sweet` + CI matrix `aosp`/`miui`; **CI**: build number in release/ZIP (`vX-buildXX`); **KSU**: stay on `a5ff54c` (33300) until `88feb68` 4.14 port on PC (manager `34142634591` for now) |
+| **v1.3.2 (current)** | **USB fix**: SM6150 clocks, `WAIT_FOR_LPM` deadlock, `bus_aggr`/`GCTL` 50ms, `is_a_peripheral` — no PC bootloop; **MIUI**: `sweet_miui.config` overlay + DTS `xiaomi/sweet` + CI matrix `aosp`/`miui`; **CI**: build number in release/ZIP (`vX-buildXX`); **KSU**: submodule at `b100bd28` (33300, UAPIv4) until `88feb68` 4.14 port on PC (manager `34142634591` for now) |
 | **v1.3.1** | Hardening: `find_gold_cpu`, notifier/mutex fixes, `cool_cur`/`status_show` locked, `ticks` fix |
 | v1.3.0 | BW floors write, hash coupling, `badazz_safe` profile 5 |
 | v1.2.1 | `badazz_safe`, multi-zone temp, `clamp_freq` fix |
@@ -154,7 +185,7 @@ Full Changelog: `git log --oneline`
 |-----|---------|------------|-----|
 | **USB PC Bootloop** | PC host → instant reboot/bootloop, 67W charger OK, `No data transfer` didn't help, `bq2597x` init cut at 0.73s, stock boot.img OK | DWC3 `WAIT_FOR_LPM` deadlock + EP0 `TRB timeout` (`bus_aggr`/`noc_aggr` clocks off, `GCTL RAMCLKSEL` on `rev 00000000` wrong, `is_a_peripheral=0`) → WDT bite | SM6150 clocks (`GCC/DISPCC/CAMCC/SCC`), `WAIT_FOR_LPM` clear on extcon, `bus_aggr` enable + IOMMU guard, `GCTL` 50ms delay, `is_a_peripheral` `pullup`/`vbus_connect` — verified S21 + PC `IRQ>0` `mtp,adb` |
 | **Identical Release Names** | All GitHub Releases/ZIPs named identically (`v4.14.369`) | `build-kernel.yml` `name: "Badazz-kernel v${VERSION}"` + ZIP `v${VERSION}.zip` without `run_number` | CI now `name: "v${VERSION}-badazz-build${run_number}"` + ZIP `v${VERSION}-build${run_number}[ -miui].zip` + artifact `…-buildXX-variant` |
-| **KSU Manager "update required"** | Manager CI `34252913097` (`88feb68` `e801e16` version matching) on kernel `a5ff54c` → red banner | `e801e16` new UAPI + `bundled_lkm` check, old kernel UAPI mismatch; `88feb68` needs `KPROBES` + 5.x APIs (`syscall_fn_t`, `pgtable.h`, `lsm_hook`) not 4.14 compatible | Fork `dev` → `88feb68` for PC, hotfix `CONFIG_KPROBES=y` + `syscall_fn_t`/`pgtable`/`ksys_close` guards, then **revert** to `a5ff54c` until proper 4.14 port on PC (manager stay on `34142634591` for now) |
+| **KSU Manager "update required"** | Manager CI `34252913097` (`88feb68` `e801e16` version matching) on kernel `a5ff54c` → red banner | `e801e16` new UAPI + `bundled_lkm` check, old kernel UAPI mismatch; `88feb68` needs `KPROBES` + 5.x APIs (`syscall_fn_t`, `pgtable.h`, `lsm_hook`) not 4.14 compatible | Fork `dev` → `88feb68` for PC, hotfix `CONFIG_KPROBES=y` + `syscall_fn_t`/`pgtable`/`ksys_close` guards, then **revert** to the current line (`b100bd28`, UAPIv4) until a proper 4.14 port exists (manager stays on `34142634591`) |
 | **MIUI/HOS not booting** | Stock HyperOS `V14.0.1.0` `4.14.190-perf` needs `ARCH_SM6150/CAMCC/GCC/PDC` + `xiaomi/sweet` DTS (`GTX9896_K6`, `FPC1540`) | `sweet_defconfig` flattened to `atoll/sm6150`, `QUSB2` only | `sweet_miui.config` overlay (7 lines) + `xiaomi/sweet` DTS shim + CI matrix `aosp`/`miui` (`miui/test` artifacts, `main` release `…-miui.zip`) |
 
 ---
@@ -163,12 +194,12 @@ Full Changelog: `git log --oneline`
 
 | Priority | Item | Status | Next Step |
 |----------|------|--------|-----------|
-| **P0** | **KSU 88feb68 4.14 Port on PC** | `badazzrebase.md` ready | `k6a-sweet` rebase `a5ff54c` → `88feb68` (Squash 49 files, `meld` for `Kconfig/Makefile/selinux.c` `susfs_is_current`), new branch `k6a-sweet-88feb68`, Badazz bump, CI green ~15 min |
-| **P0** | **SUSFS full restore** | Hotfix relaxed validation, `fs/susfs` `v2.2.0` intact but KSU side `k6a-sweet` patches pending | After rebase: `CONFIG_KSU_SUSFS` + `TAMPER_SYSCALL_TABLE` validation back, `nm vmlinux | grep susfs_is_current` green |
+| **P0** | **KSU 88feb68 4.14 Port on PC** | `badazzrebase.md` ready | `k6a-sweet` rebase `b100bd28` → `88feb68` (Squash 49 files, `meld` for `Kconfig/Makefile/selinux.c` `susfs_is_current`), new branch `k6a-sweet-88feb68`, Badazz bump, CI green ~15 min |
+| **P0** | **SUSFS full restore** | Hotfix relaxed validation, `fs/susfs` `v2.2.0` intact but KSU side `k6a-sweet` patches pending | After rebase: `CONFIG_KSU_SUSFS` + `TAMPER_SYSCALL_TABLE` validation back, `nm vmlinux \| grep susfs_is_current` green |
 | **P1** | **MIUI/HOS verification** | `sweet_miui.config` + DTS + `miui/test` CI `aosp+miui` artifacts | Flash `…-miui.zip` on HyperOS `V14.0.1.0` (or `2.0`), test `dmesg` `fpc/goodix/touchfeature/ds28e16`, 120Hz, NFC, `usb` `host/device` |
-| **P1** | **USB final verification** | `main` `3a17062` + `10d3d0bb9` already fixes PC/S21, `miui/test` pending | PC `fastboot boot` + `mtp,adb` `f1/f2`, `k6a-ctl` `control=auto` (workaround removed `v1.1.6`) |
-| **P2** | **Release hygiene** | `main` `v1.3.2` + `k6a-ctl` `v1.1.6` versioned ZIPs | Next `main` release `v4.14.369-badazz-buildXX` (+ `-miui` variant) with changelog |
-| **P2** | **Docs** | README now English `v1.3.2` | Keep `usbbug.md` + `badazzrebase.md` updated after PC rebase |
+| **P1** | **USB Fault 1/2/3** | PC bootloop fixed (v1.3.2); intermittent `ep-cmd timeout` storm, OTG host `Cannot enable`, charger `OCP` rerun still open | Flash `…-build320`, verify `dmesg \| grep Build320` — `quiescent=1` on start and `giving up after 3` never appearing; then attack Fault 2 (host mode) |
+| **P2** | **Release hygiene** | `main` `v1.3.2` + `k6a-ctl` `v1.1.6` versioned ZIPs | Releases are `v4.14.369-badazz-buildXX` automatically via CI; next `main` release gets a changelog |
+| **P2** | **Docs** | `README.md` + `AGENTS.md` refreshed at Build 320 | `Documentation/` is stock Linux 4.14 — leave it alone, keep project docs in the root `*.md` |
 
 ---
 
@@ -180,13 +211,17 @@ Full Changelog: `git log --oneline`
 | k6a-ctl (Companion) | [GitHub](https://github.com/vandalsquad187/k6a-ctl) |
 | Rebase Plan (PC) | `/sdcard/Download/badazzrebase.md` |
 
+**Repo docs**: `README.md` (public), `AGENTS.md` (dev/agent state + build & debug recipes),
+`CONTRIBUTING.md` (upstream kernel guide). `Documentation/` is the **stock Linux 4.14**
+kernel documentation (6090 files) — kernel-internal API docs, nothing project-specific.
+
 ---
 
 ## Credits
 
 - **BadazZ89** — Kernel, k6a_gov
 - **vandalsquad187** — Base, CI
-- **KernelSU-Next / SUSFS** — Root/Hide (`k6a-sweet` `a5ff54c`)
+- **KernelSU-Next / SUSFS** — Root/Hide (submodule `b100bd28`, UAPIv4, SUSFS `v2.2.0`)
 - **AnyKernel3** — Flash template
 - **MiDoNaSR545** — Reference for MIUI/HOS (`sweet_k6a-r-oss`)
 
