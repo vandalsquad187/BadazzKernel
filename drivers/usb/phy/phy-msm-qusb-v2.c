@@ -134,6 +134,7 @@ struct qusb_phy {
 
 	bool			cable_connected;
 	bool			suspended;
+	bool			clks_enabled;
 	bool			dpdm_enable;
 	bool			efuse_pll_bias;
 	bool			efuse_pll_bias_host;
@@ -174,6 +175,9 @@ static void qusb_phy_enable_clocks(struct qusb_phy *qphy, bool on)
 {
 	dev_dbg(qphy->phy.dev, "%s(): on:%d\n", __func__, on);
 
+	if (on == qphy->clks_enabled)
+		return;
+
 	if (on) {
 		clk_prepare_enable(qphy->ref_clk_src);
 		if (qphy->ref_clk)
@@ -191,6 +195,7 @@ static void qusb_phy_enable_clocks(struct qusb_phy *qphy, bool on)
 
 		clk_disable_unprepare(qphy->ref_clk_src);
 	}
+	qphy->clks_enabled = on;
 }
 
 static int qusb_phy_config_vdd(struct qusb_phy *qphy, int high)
@@ -959,8 +964,9 @@ static int qusb_phy_dpdm_regulator_enable(struct regulator_dev *rdev)
 		qphy->dpdm_enable = true;
 		qusb_phy_reset(qphy);
 		if (!qphy->suspended) {
+			qusb_phy_enable_clocks(qphy, true);
 			dev_err(qphy->phy.dev,
-				"Build323: dpdm_en: re-init PHY after reset (dwc3 awake, no LPM resume pending)\n");
+				"Build324: dpdm_en: clocks on, re-init PHY after reset (dwc3 awake, no LPM resume pending)\n");
 			qusb_phy_init(&qphy->phy);
 		}
 	}
