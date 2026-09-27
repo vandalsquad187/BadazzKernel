@@ -4919,6 +4919,28 @@ static int dwc3_otg_start_peripheral(struct dwc3_msm *mdwc, int on)
 		dwc3_set_prtcap(dwc, DWC3_GCTL_PRTCAP_DEVICE);
 		dwc3_dis_sleep_mode(dwc);
 
+		/*
+		 * Build 319: restore GUSB3PIPECTL.SUSPHY that our own
+		 * stop path tore down.
+		 *
+		 * The on=false branch of this very function clears the bit
+		 * through dwc3_usb3_phy_suspend(dwc, false), but the
+		 * on=true branch never set it back -- the only other setter
+		 * is dwc3_phy_setup(), which runs once from
+		 * dwc3_core_init() at probe. So after the first disconnect
+		 * the bit stayed 0 for every later start until reboot: the
+		 * first start of a boot reads U3PIPE=030e0002 (SUSPHY=1)
+		 * and its ep commands complete, every later start reads
+		 * U3PIPE=030c0002 (SUSPHY=0) and dwc3_send_gadget_ep_cmd()
+		 * times out. dwc3_otg_start_host() is already symmetric
+		 * (set at :4673, cleared at :4750); mirror that here.
+		 *
+		 * Must run after the clk_prepare_enable block above -- this
+		 * is a live register access.
+		 */
+		if (dwc->revision > DWC3_REVISION_194A)
+			dwc3_usb3_phy_suspend(dwc, true);
+
 		r_core = mdwc->core_clk ? clk_get_rate(mdwc->core_clk) : 0;
 		r_iface = mdwc->iface_clk ? clk_get_rate(mdwc->iface_clk) : 0;
 		r_bus = mdwc->bus_aggr_clk ? clk_get_rate(mdwc->bus_aggr_clk) : 0;

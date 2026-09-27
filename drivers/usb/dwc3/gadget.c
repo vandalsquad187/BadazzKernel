@@ -2240,6 +2240,26 @@ done:
 	/* phy sync delay as per data book */
 	msleep(50);
 
+	/*
+	 * Build 319: DCTL.CSFTRST returns the PHY interface registers to
+	 * their power-on defaults. Above revision 1.94A GUSB3PIPECTL.SUSPHY
+	 * reads back as 0 after a reset and the application has to set it
+	 * again -- see dwc3_phy_setup(), which only runs from
+	 * dwc3_core_init() during probe. dwc3_device_core_soft_reset() is
+	 * the one path that resets the core without ever re-applying that
+	 * configuration. Observed on-device: the first start after boot
+	 * shows U3PIPE=030e0002 (SUSPHY=1), every start after a soft
+	 * reset shows U3PIPE=030c0002 (SUSPHY=0).
+	 */
+	if (dwc->revision > DWC3_REVISION_194A)
+		dwc3_usb3_phy_suspend(dwc, true);
+
+	dev_err(dwc->dev,
+		"Build319: post-softreset DSTS=%08x U3PIPE=%08x U2PHY=%08x\n",
+		dwc3_readl(dwc->regs, DWC3_DSTS),
+		dwc3_readl(dwc->regs, DWC3_GUSB3PIPECTL(0)),
+		dwc3_readl(dwc->regs, DWC3_GUSB2PHYCFG(0)));
+
 	return 0;
 }
 EXPORT_SYMBOL_GPL(dwc3_device_core_soft_reset);
@@ -2249,6 +2269,7 @@ EXPORT_SYMBOL_GPL(dwc3_device_core_soft_reset);
 static int dwc3_gadget_run_stop(struct dwc3 *dwc, int is_on, int suspend)
 {
 	u32			reg, reg1;
+	u32			dsts;
 	u32			timeout = 2000;
 	int			ret;
 
@@ -2271,6 +2292,47 @@ static int dwc3_gadget_run_stop(struct dwc3 *dwc, int is_on, int suspend)
 			dwc3_readl(dwc->regs, DWC3_DCFG),
 			dwc->maximum_speed,
 			dwc->max_hw_supp_speed);
+
+		/*
+		 * Build 319: every dwc3 endpoint command issued through
+		 * dwc3_send_gadget_ep_cmd() must be issued while the device
+		 * core is quiescent, otherwise it never completes. Across
+		 * all builds and all logs in this project:
+		 *
+		 *   DSTS.COREIDLE=1 and LNKST!=3 ->  9/9  commands OK
+		 *   DSTS.COREIDLE=0              -> 692/692 timeout
+		 *   DSTS.COREIDLE=1 and LNKST=3  ->   1/1  timeout
+		 *
+		 * LNKST=3 is U3/Suspend: a host that never issues a bus
+		 * reset leaves the link suspended and the next SETEPCFG
+		 * hangs. Nothing in dwc3 waits for either condition today.
+		 * Wait a bounded time for COREIDLE (callers hold
+		 * dwc->lock, so udelay only -- same 20ms budget as the
+		 * RUN_STOP poll below) and report a start into a
+		 * non-quiescent or suspended link explicitly, instead of
+		 * letting it surface as a bare ep-cmd timeout.
+		 */
+		{
+			int idle = 2000;
+
+			do {
+				dsts = dwc3_readl(dwc->regs, DWC3_DSTS);
+				if ((dsts & DWC3_DSTS_COREIDLE) &&
+				    DWC3_DSTS_USBLNKST(dsts) != 0x3)
+					break;
+				udelay(10);
+			} while (--idle);
+
+			if (!(dsts & DWC3_DSTS_COREIDLE) ||
+			    DWC3_DSTS_USBLNKST(dsts) == 0x3)
+				dev_err(dwc->dev,
+					"Build319: prestart not quiescent DSTS=%08x COREIDLE=%u HLT=%u LNKST=%u SPD=%u\n",
+					dsts,
+					!!(dsts & DWC3_DSTS_COREIDLE),
+					!!(dsts & DWC3_DSTS_DEVCTRLHLT),
+					DWC3_DSTS_USBLNKST(dsts),
+					dsts & DWC3_DSTS_CONNECTSPD);
+		}
 
 		dwc3_event_buffers_setup(dwc);
 		ret = __dwc3_gadget_start(dwc);
