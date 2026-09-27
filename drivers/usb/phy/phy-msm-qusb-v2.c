@@ -958,6 +958,11 @@ static int qusb_phy_dpdm_regulator_enable(struct regulator_dev *rdev)
 		}
 		qphy->dpdm_enable = true;
 		qusb_phy_reset(qphy);
+		if (!qphy->suspended) {
+			dev_err(qphy->phy.dev,
+				"Build323: dpdm_en: re-init PHY after reset (dwc3 awake, no LPM resume pending)\n");
+			qusb_phy_init(&qphy->phy);
+		}
 	}
 
 	return ret;
