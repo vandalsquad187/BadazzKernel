@@ -253,15 +253,44 @@ out:
 void dwc3_ep0_stall_and_restart(struct dwc3 *dwc)
 {
 	struct dwc3_ep		*dep;
+	u32			dale;
+	u32			flags;
+
+	/*
+	 * Build 321: only claim the endpoints are enabled when the
+	 * hardware agrees. This runs from __dwc3_gadget_ep0_set_halt()
+	 * (f_fs __ffs_ep0_stall(), set_wedge) and from the EP0 error paths,
+	 * i.e. also while the gadget is stopped - DALEPENA=0,
+	 * softconnect=0 - where the unconditionally written
+	 * DWC3_EP_ENABLED used to poison dep->flags. The next
+	 * __dwc3_gadget_start() then skipped DEPSTARTCFG/DEPXFERCFG and the
+	 * DALEPENA write entirely, EP0 stayed disabled in hardware and the
+	 * first STARTTRANSFER came back as DEPEVT_TRANSFER_NO_RESOURCE
+	 * (WARN at dwc3_ep0_out_start, no EP0 SETUP TRB, host reset storm).
+	 *
+	 * Observed Build 320: both eps[0] and eps[1] read flags=1 with
+	 * DALEPENA=00000000 at the start at t=3578, which no other code
+	 * path can produce (the only other writer of both halves is
+	 * __dwc3_gadget_ep_enable(), and it sets DALEPENA in the same step).
+	 */
+	dale = dwc3_readl(dwc->regs, DWC3_DALEPENA);
+	flags = (dale & (DWC3_DALEPENA_EP(0) | DWC3_DALEPENA_EP(1))) ==
+		(DWC3_DALEPENA_EP(0) | DWC3_DALEPENA_EP(1)) ?
+		DWC3_EP_ENABLED : 0;
+
+	if (!flags)
+		dev_err(dwc->dev,
+			"Build321: stall_and_restart with EP0 disabled DALEPENA=%08x softconnect=%d connected=%d ep0state=%d\n",
+			dale, dwc->softconnect, dwc->connected, dwc->ep0state);
 
 	/* reinitialize physical ep1 */
 	dep = dwc->eps[1];
-	dep->flags = DWC3_EP_ENABLED;
+	dep->flags = flags;
 
 	/* stall is always issued on EP0 */
 	dep = dwc->eps[0];
 	__dwc3_gadget_ep_set_halt(dep, 1, false);
-	dep->flags = DWC3_EP_ENABLED;
+	dep->flags = flags;
 	dwc->delayed_status = false;
 
 	if (!list_empty(&dep->pending_list)) {
@@ -275,7 +304,10 @@ void dwc3_ep0_stall_and_restart(struct dwc3 *dwc)
 	}
 
 	dwc->ep0state = EP0_SETUP_PHASE;
-	dwc3_ep0_out_start(dwc);
+	if (flags)
+		dwc3_ep0_out_start(dwc);
+	else
+		complete(&dwc->ep0_in_setup);
 }
 
 int __dwc3_gadget_ep0_set_halt(struct usb_ep *ep, int value)

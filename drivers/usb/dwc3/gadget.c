@@ -841,6 +841,44 @@ static int __dwc3_gadget_ep_enable(struct dwc3_ep *dep,
 	u32			reg;
 	int			ret;
 
+	/*
+	 * Build 321: reconcile the software flag with the hardware.
+	 *
+	 * Everything below (DEPSTARTCFG, DEPXFERCFG, DALEPENA, TRB ring,
+	 * wait_end_transfer) is guarded on dep->flags & DWC3_EP_ENABLED.
+	 * Two paths leave that flag set while DALEPENA has the endpoint
+	 * disabled:
+	 *
+	 *  - a DCTL.CSFTRST resets DALEPENA but nobody clears dep->flags;
+	 *  - dwc3_ep0_stall_and_restart() writes dep->flags = DWC3_EP_ENABLED
+	 *    unconditionally, which runs after a stop (softconnect=0, so its
+	 *    own dwc3_ep0_out_start() silently returns and no WARN shows up).
+	 *
+	 * With a stale flag the enable below degenerates to a plain
+	 * SETEPCFG: DEPSTARTCFG/xfer resources are never (re)programmed and
+	 * the DALEPENA bit is never set, yet set_ep_config() still returns 0.
+	 * EP0 then fails its first STARTTRANSFER with
+	 * DEPEVT_TRANSFER_NO_RESOURCE, dwc3_ep0_out_start() WARNs and the
+	 * EP0 SETUP TRB is never armed - the host resets the bus forever
+	 * instead of enumerating.
+	 *
+	 * Observed Build 320, second start of a boot (t=3578.628):
+	 *   "before SETEPCFG ep0out DALE=00000000 DCFG=000c0804 flags=1"
+	 * while the first start of the same boot had flags=0 and
+	 * DALE 0->1->3 and enumerated fine.
+	 *
+	 * Trust the hardware: if DALEPENA does not have this endpoint,
+	 * forget the flag so the full (stock reconnect) path runs again.
+	 */
+	reg = dwc3_readl(dwc->regs, DWC3_DALEPENA);
+	if ((dep->flags & DWC3_EP_ENABLED) &&
+			!(reg & DWC3_DALEPENA_EP(dep->number))) {
+		dev_err(dwc->dev,
+			"Build321: %s flagged enabled but DALEPENA=%08x flags=%x -> full re-enable\n",
+			dep->name, reg, dep->flags);
+		dep->flags = 0;
+	}
+
 	if (!(dep->flags & DWC3_EP_ENABLED)) {
 		ret = dwc3_gadget_resize_tx_fifos(dwc, dep);
 		if (ret)
