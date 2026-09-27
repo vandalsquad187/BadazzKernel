@@ -352,6 +352,15 @@ static void smblib_notify_extcon_props(struct smb_charger *chg, int id)
 
 static void smblib_notify_device_mode(struct smb_charger *chg, bool enable)
 {
+	/*
+	 * Build 320: this is the only gate between APSD and
+	 * extcon_set_state_sync(EXTCON_USB) -> dwc3_msm_vbus_notifier().
+	 * smblib_handle_apsd_done() only calls it for SDP/CDP/FLOAT, so
+	 * DCP/OCP chargers never reach the dwc3 core - seeing no
+	 * vbus_notifier line next to an APSD line is expected, not a bug.
+	 */
+	pr_info("Build320: notify_device_mode extcon_usb=%d\n", enable);
+
 	if (enable)
 		smblib_notify_extcon_props(chg, EXTCON_USB);
 
@@ -8005,6 +8014,8 @@ static void smblib_handle_apsd_done(struct smb_charger *chg, bool rising)
 	case SDP_CHARGER_BIT:
 	case CDP_CHARGER_BIT:
 	case FLOAT_CHARGER_BIT:
+		pr_info("Build320: apsd=%s -> will notify dwc3 (SDP/CDP/FLOAT)\n",
+			apsd_result->name);
 		if (chg->use_extcon) {
 			if (!chg->dcin_uusb_over_gpio_en) {
 				smblib_notify_device_mode(chg, true);
@@ -8016,6 +8027,8 @@ static void smblib_handle_apsd_done(struct smb_charger *chg, bool rising)
 		break;
 	case OCP_CHARGER_BIT:
 	case DCP_CHARGER_BIT:
+		pr_info("Build320: apsd=%s -> no dwc3 notification (expected)\n",
+			apsd_result->name);
 		break;
 	default:
 		break;

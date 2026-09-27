@@ -1192,6 +1192,8 @@ struct dwc3 {
 	unsigned long		ep_cmd_timeout_cnt;
 	unsigned long		l1_remote_wakeup_cnt;
 
+	unsigned int		start_fail_streak;
+
 	wait_queue_head_t	wait_linkstate;
 
 	unsigned int		index;
@@ -1424,6 +1426,7 @@ int dwc3_gadget_get_link_state(struct dwc3 *dwc);
 int dwc3_gadget_set_link_state(struct dwc3 *dwc, enum dwc3_link_state state);
 int dwc3_force_gadget_run_stop(struct dwc3 *dwc);
 int dwc3_device_core_soft_reset(struct dwc3 *dwc);
+int dwc3_gadget_ensure_quiescent(struct dwc3 *dwc);
 int dwc3_send_gadget_ep_cmd(struct dwc3_ep *dep, unsigned cmd,
 		struct dwc3_gadget_ep_cmd_params *params);
 int dwc3_send_gadget_generic_command(struct dwc3 *dwc, unsigned cmd, u32 param);

@@ -543,6 +543,10 @@ int dwc3_send_gadget_ep_cmd(struct dwc3_ep *dep, unsigned cmd,
 	trace_dwc3_gadget_ep_cmd(dep, cmd, params, cmd_status);
 
 	if (ret == 0) {
+		/* Build 320: keep ep_cmd_timeout_cnt meaningful - it is a
+		 * consecutive-failure count, not a lifetime total. */
+		if (dwc->ep_cmd_timeout_cnt)
+			dwc->ep_cmd_timeout_cnt = 0;
 		switch (DWC3_DEPCMD_CMD(cmd)) {
 		case DWC3_DEPCMD_STARTTRANSFER:
 			dep->flags |= DWC3_EP_TRANSFER_STARTED;
@@ -2264,6 +2268,77 @@ done:
 }
 EXPORT_SYMBOL_GPL(dwc3_device_core_soft_reset);
 
+/*
+ * Build 320: wait for a quiescent device core before the gadget is started.
+ *
+ * Across every log in this project dwc3_send_gadget_ep_cmd() completes
+ * if and only if DSTS.COREIDLE=1 and DSTS.USBLNKST != 3 (U3/Suspend).
+ * A core that a previous run_stop(0) left with COREIDLE=0/DEVCTRLHLT=0
+ * - the stop side only waits 20ms for the halt and there is no host to
+ * deliver an end-of-frame - never recovers by itself: the next start
+ * programs EP0, every SETEPCFG times out, RESTART_USB_SESSION fires and
+ * the whole gadget is torn down and restarted every ~2s.
+ *
+ * This runs from dwc3_otg_start_peripheral() on sm_work: process
+ * context, dwc->lock not held, so unlike the udelay loop in
+ * dwc3_gadget_run_stop() it may sleep and may issue a soft reset.
+ *
+ * Returns 0 when the core is quiescent, -EAGAIN when it is not after
+ * one device-core soft reset attempt. Callers must not treat -EAGAIN as
+ * fatal: the start is still attempted so that a genuine, unrelated
+ * failure stays visible, but it is reported as a marker first.
+ */
+int dwc3_gadget_ensure_quiescent(struct dwc3 *dwc)
+{
+	u32			dsts;
+	int			tries, waited;
+	bool			quiescent = false;
+	int			ret = 0;
+
+	for (tries = 0; tries < 2 && !quiescent; tries++) {
+		for (waited = 0; waited < 50; waited++) {
+			dsts = dwc3_readl(dwc->regs, DWC3_DSTS);
+			if ((dsts & DWC3_DSTS_COREIDLE) &&
+			    DWC3_DSTS_USBLNKST(dsts) != 0x3) {
+				quiescent = true;
+				break;
+			}
+			usleep_range(1000, 1100);
+		}
+
+		if (quiescent)
+			break;
+
+		dsts = dwc3_readl(dwc->regs, DWC3_DSTS);
+		dev_err(dwc->dev,
+			"Build320: attempt %d not quiescent after ~%dms DSTS=%08x COREIDLE=%u HLT=%u LNKST=%u\n",
+			tries + 1, waited, dsts,
+			!!(dsts & DWC3_DSTS_COREIDLE),
+			!!(dsts & DWC3_DSTS_DEVCTRLHLT),
+			DWC3_DSTS_USBLNKST(dsts));
+
+		ret = dwc3_device_core_soft_reset(dwc);
+		if (ret) {
+			dev_err(dwc->dev,
+				"Build320: device core soft reset failed ret=%d\n",
+				ret);
+			break;
+		}
+	}
+
+	dsts = dwc3_readl(dwc->regs, DWC3_DSTS);
+	dev_err(dwc->dev,
+		"Build320: quiescent=%d reset_ret=%d DSTS=%08x COREIDLE=%u HLT=%u LNKST=%u U3PIPE=%08x\n",
+		quiescent, ret, dsts,
+		!!(dsts & DWC3_DSTS_COREIDLE),
+		!!(dsts & DWC3_DSTS_DEVCTRLHLT),
+		DWC3_DSTS_USBLNKST(dsts),
+		dwc3_readl(dwc->regs, DWC3_GUSB3PIPECTL(0)));
+
+	return quiescent ? 0 : -EAGAIN;
+}
+EXPORT_SYMBOL_GPL(dwc3_gadget_ensure_quiescent);
+
 #define MIN_RUN_STOP_DELAY_MS 50
 
 static int dwc3_gadget_run_stop(struct dwc3 *dwc, int is_on, int suspend)
@@ -2274,6 +2349,28 @@ static int dwc3_gadget_run_stop(struct dwc3 *dwc, int is_on, int suspend)
 	int			ret;
 
 	dbg_event(0xFF, "run_stop", is_on);
+
+	/*
+	 * Build 320: give up instead of hammering a wedged core.
+	 *
+	 * A start that fails in __dwc3_gadget_start() leaves DEVTEN=0 and
+	 * DALEPENA=0; the endpoint command that then times out raises
+	 * RESTART_USB_SESSION, sm_work tears the gadget down and starts it
+	 * again, and the same failure repeats every ~2s until the cable is
+	 * unplugged. After three consecutive failed starts in one connect
+	 * session the core is not coming back on its own - skip the start
+	 * entirely so no endpoint command is issued and the restart storm
+	 * stops. The streak is cleared by a successful start and by a real
+	 * (cable) disconnect, see dwc3_otg_start_peripheral().
+	 */
+	if (is_on && dwc->start_fail_streak >= 3) {
+		dev_err(dwc->dev,
+			"Build320: giving up after %u consecutive start failures - skipping start\n",
+			dwc->start_fail_streak);
+		dbg_event(0xFF, "STARTGIVEUP", dwc->start_fail_streak);
+		return -ETIMEDOUT;
+	}
+
 	reg = dwc3_readl(dwc->regs, DWC3_DCTL);
 	if (is_on) {
 		if (dwc->revision <= DWC3_REVISION_187A) {
@@ -2358,6 +2455,12 @@ static int dwc3_gadget_run_stop(struct dwc3 *dwc, int is_on, int suspend)
 			 * Return value of this function is decided by the DSTS
 			 * poll below.
 			 */
+			dwc->start_fail_streak++;
+			dev_err(dwc->dev,
+				"Build320: start_fail_streak=%u/3\n",
+				dwc->start_fail_streak);
+		} else {
+			dwc->start_fail_streak = 0;
 		}
 
 		reg1 = dwc3_readl(dwc->regs, DWC3_DCFG);
@@ -2577,6 +2680,8 @@ static void dwc3_gadget_enable_irq(struct dwc3 *dwc)
 		reg |= DWC3_DEVTEN_EOPFEN;
 
 	dwc3_writel(dwc->regs, DWC3_DEVTEN, reg);
+	dev_err(dwc->dev, "Build320: DEVTEN wrote=%08x read=%08x\n",
+		reg, dwc3_readl(dwc->regs, DWC3_DEVTEN));
 }
 
 void dwc3_gadget_disable_irq(struct dwc3 *dwc)

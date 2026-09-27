@@ -1821,11 +1821,16 @@ static void dwc3_restart_usb_work(struct work_struct *w)
 
 	/* guard against concurrent VBUS handling */
 	mdwc->in_restart = true;
+	dev_err(mdwc->dev,
+		"Build320: restart_usb_work ENTER in_restart=1 vbus_active=%d in_lpm=%d err_evt=%u streak=%u\n",
+		mdwc->vbus_active, atomic_read(&dwc->in_lpm),
+		dwc->err_evt_seen, dwc->start_fail_streak);
 
 	if (!mdwc->vbus_active) {
 		dev_dbg(mdwc->dev, "%s bailing out in disconnect\n", __func__);
 		dwc->err_evt_seen = false;
 		mdwc->in_restart = false;
+		dev_err(mdwc->dev, "Build320: restart_usb_work ABORT (no vbus)\n");
 		return;
 	}
 
@@ -1846,6 +1851,9 @@ static void dwc3_restart_usb_work(struct work_struct *w)
 	}
 
 	mdwc->in_restart = false;
+	dev_err(mdwc->dev,
+		"Build320: restart_usb_work LEAVE in_restart=0 vbus_active=%d\n",
+		mdwc->vbus_active);
 	/* Force reconnect only if cable is still connected */
 	if (mdwc->vbus_active)
 		dwc3_resume_work(&mdwc->resume_work);
@@ -4984,6 +4992,16 @@ static int dwc3_otg_start_peripheral(struct dwc3_msm *mdwc, int on)
 						DWC31_LINK_LU3LFPSRXTIM(0)));
 		}
 
+		/*
+		 * Build 320: make sure the device core is quiescent before
+		 * usb_gadget_vbus_connect() arms RUN_STOP and the first
+		 * endpoint commands. Process context here (sm_work), no
+		 * dwc->lock held, so this may sleep.
+		 */
+		if (dwc3_gadget_ensure_quiescent(dwc))
+			dev_err(mdwc->dev,
+				"Build320: starting gadget although the core never became quiescent\n");
+
 		usb_gadget_vbus_connect(&dwc->gadget);
 
 		dctl = dwc3_readl(dwc->regs, DWC3_DCTL);
@@ -5051,6 +5069,21 @@ static int dwc3_otg_start_peripheral(struct dwc3_msm *mdwc, int on)
 		pm_qos_remove_request(&mdwc->pm_qos_req_dma);
 
 		mdwc->in_device_mode = false;
+
+		/*
+		 * Build 320: clear the start-failure streak only on a real
+		 * disconnect. dwc3_restart_usb_work() also drives
+		 * start_peripheral(false) while mdwc->in_restart is set - that
+		 * is the RESTART_USB_SESSION retry loop the streak exists to
+		 * stop, and clearing it there would let the storm run forever.
+		 */
+		if (!mdwc->in_restart && dwc->start_fail_streak) {
+			dev_err(mdwc->dev,
+				"Build320: disconnect clears start_fail_streak (was %u)\n",
+				dwc->start_fail_streak);
+			dwc->start_fail_streak = 0;
+		}
+
 		usb_gadget_vbus_disconnect(&dwc->gadget);
 		usb_phy_notify_disconnect(mdwc->hs_phy, USB_SPEED_HIGH);
 		usb_phy_notify_disconnect(mdwc->ss_phy, USB_SPEED_SUPER);
