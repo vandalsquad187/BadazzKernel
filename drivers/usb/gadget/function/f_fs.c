@@ -3475,6 +3475,12 @@ static int ffs_func_set_alt(struct usb_function *f,
 	struct ffs_data *ffs = func->ffs;
 	int ret = 0, intf;
 
+	if (unlikely(!ffs)) {
+		pr_err("Build326: ffs_func_set_alt ffs=NULL f=%pK intf=%u alt=%u\n",
+		       f, interface, alt);
+		return -ENODEV;
+	}
+
 	ffs_log("enter: alt %d", (int)alt);
 
 	if (alt != (unsigned)-1) {
@@ -3522,6 +3528,11 @@ static void ffs_func_disable(struct usb_function *f)
 	struct ffs_function *func = ffs_func_from_usb(f);
 	struct ffs_data *ffs = func->ffs;
 
+	if (unlikely(!ffs)) {
+		pr_err("Build326: ffs_func_disable ffs=NULL f=%pK\n", f);
+		return;
+	}
+
 	ffs_log("enter");
 	ffs_func_set_alt(f, 0, (unsigned)-1);
 }
@@ -3533,6 +3544,12 @@ static int ffs_func_setup(struct usb_function *f,
 	struct ffs_data *ffs = func->ffs;
 	unsigned long flags;
 	int ret;
+
+	if (unlikely(!ffs)) {
+		pr_err("Build326: ffs_func_setup ffs=NULL f=%pK req=%02x\n",
+		       f, creq->bRequest);
+		return -ENODEV;
+	}
 
 	ENTER();
 
@@ -3598,6 +3615,11 @@ static bool ffs_func_req_match(struct usb_function *f,
 	struct ffs_function *func = ffs_func_from_usb(f);
 	struct ffs_data *ffs = func->ffs;
 
+	if (unlikely(!ffs)) {
+		pr_err("Build326: ffs_func_req_match ffs=NULL f=%pK\n", f);
+		return false;
+	}
+
 	if (!test_bit(FFS_FL_BOUND, &func->ffs->flags)) {
 		ffs_log("ffs function do not bind yet.\n");
 		return false;
@@ -3623,6 +3645,11 @@ static void ffs_func_suspend(struct usb_function *f)
 {
 	struct ffs_data *ffs = ffs_func_from_usb(f)->ffs;
 
+	if (unlikely(!ffs)) {
+		pr_err("Build326: ffs_func_suspend ffs=NULL f=%pK\n", f);
+		return;
+	}
+
 	ENTER();
 
 	ffs_log("enter");
@@ -3633,6 +3660,11 @@ static void ffs_func_suspend(struct usb_function *f)
 static void ffs_func_resume(struct usb_function *f)
 {
 	struct ffs_data *ffs = ffs_func_from_usb(f)->ffs;
+
+	if (unlikely(!ffs)) {
+		pr_err("Build326: ffs_func_resume ffs=NULL f=%pK\n", f);
+		return;
+	}
 
 	ENTER();
 
