@@ -709,7 +709,7 @@ CONFIG_RANDOMIZE_MODULE_REGION_FULL=y
 #
 # Boot options
 #
-CONFIG_CMDLINE="ramoops_memreserve=4M initcall_debug panic_print keep_bootcon earlycon=msm_geni_serial,0xa88000 console=ttyMSM0,115200n8"
+CONFIG_CMDLINE="ramoops_memreserve=4M"
 # CONFIG_CMDLINE_FROM_BOOTLOADER is not set
 CONFIG_CMDLINE_EXTEND=y
 # CONFIG_CMDLINE_FORCE is not set
@@ -2376,7 +2376,7 @@ CONFIG_SERIAL_CORE=y
 # CONFIG_SERIAL_JSM is not set
 # CONFIG_SERIAL_MSM is not set
 CONFIG_SERIAL_MSM_GENI=y
-CONFIG_SERIAL_MSM_GENI_CONSOLE=y
+# CONFIG_SERIAL_MSM_GENI_CONSOLE is not set
 # CONFIG_SERIAL_MSM_HS is not set
 # CONFIG_SERIAL_MSM_WITH_HALF_SAMPLING is not set
 # CONFIG_SERIAL_SCCNXP is not set
