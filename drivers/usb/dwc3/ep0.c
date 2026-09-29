@@ -102,6 +102,9 @@ static int dwc3_ep0_start_trans(struct dwc3_ep *dep)
 	dep->resource_index = dwc3_gadget_ep_get_transfer_index(dep);
 	dwc->ep0_next_event = DWC3_EP0_COMPLETE;
 
+	dev_err(dwc->dev, "Build328: ep0_start_trans ok flags=%x ridx=%u\n",
+		dep->flags, dep->resource_index);
+
 	return 0;
 }
 
@@ -1117,6 +1120,9 @@ static void dwc3_ep0_complete_status(struct dwc3 *dwc,
 	struct dwc3_trb		*trb;
 	u32			status;
 
+	dev_err(dwc->dev, "Build328: complete_status state=%u\n",
+		dwc->ep0state);
+
 	dep = dwc->eps[0];
 	trb = dwc->ep0_trb;
 
@@ -1287,6 +1293,7 @@ static void __dwc3_ep0_do_control_status(struct dwc3 *dwc, struct dwc3_ep *dep)
 	int ret;
 
 	ret = dwc3_ep0_start_control_status(dep);
+	dev_err(dwc->dev, "Build328: do_control_status ret=%d\n", ret);
 	if (WARN_ON_ONCE(ret))
 		dbg_event(dep->number, "ECTRLSTATUS", ret);
 }

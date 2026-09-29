@@ -1547,6 +1547,9 @@ static void composite_setup_complete(struct usb_ep *ep, struct usb_request *req)
 {
 	struct usb_composite_dev *cdev;
 
+	pr_err("Build328: setup_complete status=%d actual=%u len=%u\n",
+		req->status, req->actual, req->length);
+
 	if (req->status || req->actual != req->length)
 		DBG((struct usb_composite_dev *) ep->driver_data,
 				"setup complete --> %d, %d/%d\n",

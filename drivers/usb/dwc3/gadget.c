@@ -4204,9 +4204,14 @@ static void dwc3_process_event_entry(struct dwc3 *dwc,
 {
 	trace_dwc3_event(event->raw, dwc);
 
-	if (!event->type.is_devspec)
+	if (!event->type.is_devspec) {
+		if (event->depevt.endpoint_number <= 1)
+			dev_err(dwc->dev, "Build328: ev ep=%u ev=%u st=%u\n",
+				event->depevt.endpoint_number,
+				event->depevt.endpoint_event,
+				event->depevt.status);
 		dwc3_endpoint_interrupt(dwc, &event->depevt);
-	else if (event->type.type == DWC3_EVENT_TYPE_DEV)
+	} else if (event->type.type == DWC3_EVENT_TYPE_DEV)
 		dwc3_gadget_interrupt(dwc, &event->devt);
 	else
 		dev_err(dwc->dev, "UNKNOWN IRQ type %d\n", event->raw);
@@ -4258,6 +4263,9 @@ static irqreturn_t dwc3_process_event_buf(struct dwc3_event_buffer *evt)
 		left -= 4;
 	}
 
+	dev_err(dwc->dev, "Build328: evbuf loop done left=%d cnt=%u\n",
+		left, evt->count);
+
 	dwc->bh_handled_evt_cnt[dwc->irq_dbg_index] += (evt->count / 4);
 	evt->count = 0;
 	ret = IRQ_HANDLED;
@@ -4266,6 +4274,8 @@ static irqreturn_t dwc3_process_event_buf(struct dwc3_event_buffer *evt)
 	reg = dwc3_readl(dwc->regs, DWC3_GEVNTSIZ(0));
 	reg &= ~DWC3_GEVNTSIZ_INTMASK;
 	dwc3_writel(dwc->regs, DWC3_GEVNTSIZ(0), reg);
+
+	dev_err(dwc->dev, "Build328: evbuf unmask\n");
 
 	if (dwc->imod_interval) {
 		dwc3_writel(dwc->regs, DWC3_GEVNTCOUNT(0), DWC3_GEVNTCOUNT_EHB);
