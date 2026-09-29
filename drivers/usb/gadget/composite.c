@@ -1767,6 +1767,9 @@ composite_setup(struct usb_gadget *gadget, const struct usb_ctrlrequest *ctrl)
 	struct usb_function		*f = NULL;
 	u8				endp;
 
+	pr_err("Build327: composite_setup %02x %02x val=%04x idx=%04x len=%04x\n",
+		ctrl->bRequestType, ctrl->bRequest, w_value, w_index, w_length);
+
 	if (w_length > USB_COMP_EP0_BUFSIZ) {
 		if (ctrl->bRequestType == USB_DIR_OUT) {
 			goto done;

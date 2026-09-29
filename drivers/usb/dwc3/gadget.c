@@ -402,6 +402,10 @@ int dwc3_send_gadget_ep_cmd(struct dwc3_ep *dep, unsigned cmd,
 	int			cmd_status = 0;
 	int			ret = -EINVAL;
 
+	if (dep->number <= 1)
+		dev_err(dwc->dev, "Build327: ep_cmd enter cmd=%08x speed=%u state=%u\n",
+			cmd, dwc->gadget.speed, dwc->ep0state);
+
 	/*
 	 * When operating in USB 2.0 speeds (HS/FS), if GUSB2PHYCFG.ENBLSLPM or
 	 * GUSB2PHYCFG.SUSPHY is set, it must be cleared before issuing an
@@ -455,6 +459,11 @@ int dwc3_send_gadget_ep_cmd(struct dwc3_ep *dep, unsigned cmd,
 
 	t0 = ktime_get();
 	dwc3_writel(dep->regs, DWC3_DEPCMD, cmd);
+	if (dep->number <= 1)
+		dev_err(dwc->dev,
+			"Build327: ep_cmd wrote cmd=%08x u2phy=%08x saved=%08x\n",
+			cmd, dwc3_readl(dwc->regs, DWC3_GUSB2PHYCFG(0)),
+			saved_config);
 	do {
 		reg = dwc3_readl(dep->regs, DWC3_DEPCMD);
 		if (!(reg & DWC3_DEPCMD_CMDACT)) {
@@ -565,6 +574,10 @@ int dwc3_send_gadget_ep_cmd(struct dwc3_ep *dep, unsigned cmd,
 		reg |= saved_config;
 		dwc3_writel(dwc->regs, DWC3_GUSB2PHYCFG(0), reg);
 	}
+
+	if (dep->number <= 1)
+		dev_err(dwc->dev, "Build327: ep_cmd done cmd=%08x ret=%d st=%d\n",
+			cmd, ret, cmd_status);
 
 	return ret;
 }
@@ -3761,6 +3774,9 @@ static void dwc3_gadget_reset_interrupt(struct dwc3 *dwc)
 	reg &= ~(DWC3_DCFG_DEVADDR_MASK);
 	dwc3_writel(dwc->regs, DWC3_DCFG, reg);
 
+	dev_err(dwc->dev, "Build327: reset_done state=%u conn=%d softconn=%d\n",
+		dwc->ep0state, dwc->connected, dwc->softconnect);
+
 	dwc->gadget.speed = USB_SPEED_UNKNOWN;
 	dwc->link_state = DWC3_LINK_STATE_U0;
 	wake_up_interruptible(&dwc->wait_linkstate);
@@ -3895,6 +3911,9 @@ static void dwc3_gadget_conndone_interrupt(struct dwc3 *dwc)
 	}
 
 	dwc3_notify_event(dwc, DWC3_CONTROLLER_CONNDONE_EVENT, 0);
+
+	dev_err(dwc->dev, "Build327: conndone done speed=%u dsts=%08x\n",
+		dwc->gadget.speed, dwc3_readl(dwc->regs, DWC3_DSTS));
 
 	/*
 	 * Configure PHY via GUSB3PIPECTLn if required.
