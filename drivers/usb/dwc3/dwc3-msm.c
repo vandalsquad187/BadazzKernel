@@ -19,6 +19,7 @@
 #include <linux/dma-mapping.h>
 #include <linux/dmapool.h>
 #include <linux/pm_runtime.h>
+#include <linux/workqueue.h>
 #include <linux/ratelimit.h>
 #include <linux/interrupt.h>
 #include <asm/dma-iommu.h>
@@ -4865,6 +4866,24 @@ static void dwc3_msm_link_dump_work(struct work_struct *w)
 	}
 }
 
+static bool b331_armed;
+static unsigned int b331_ticks;
+static void b331_tick_fn(struct work_struct *work);
+
+static DECLARE_DELAYED_WORK(b331_tick, b331_tick_fn);
+
+static void b331_tick_fn(struct work_struct *work)
+{
+	if (!b331_armed)
+		return;
+	pr_info("Build331: tick n=%u jiffies=%lu\n", b331_ticks, jiffies);
+	b331_ticks++;
+	if (b331_ticks < 200)
+		schedule_delayed_work(&b331_tick, msecs_to_jiffies(20));
+	else
+		b331_armed = false;
+}
+
 /**
  * dwc3_otg_start_peripheral -  bind/unbind the peripheral controller.
  *
@@ -5002,6 +5021,16 @@ static int dwc3_otg_start_peripheral(struct dwc3_msm *mdwc, int on)
 			dev_err(mdwc->dev,
 				"Build320: starting gadget although the core never became quiescent\n");
 
+		b331_ticks = 0;
+		b331_armed = true;
+		schedule_delayed_work(&b331_tick, msecs_to_jiffies(20));
+
+		pm_runtime_forbid(dwc->dev);
+		dev_err(mdwc->dev,
+			"Build331: rt-hold on usage=%d act=%d\n",
+			atomic_read(&dwc->dev->power.usage_count),
+			pm_runtime_active(dwc->dev));
+
 		usb_gadget_vbus_connect(&dwc->gadget);
 
 		dctl = dwc3_readl(dwc->regs, DWC3_DCTL);
@@ -5085,6 +5114,12 @@ static int dwc3_otg_start_peripheral(struct dwc3_msm *mdwc, int on)
 		}
 
 		usb_gadget_vbus_disconnect(&dwc->gadget);
+		pm_runtime_allow(dwc->dev);
+		b331_armed = false;
+		dev_err(mdwc->dev,
+			"Build331: rt-hold released usage=%d act=%d\n",
+			atomic_read(&dwc->dev->power.usage_count),
+			pm_runtime_active(dwc->dev));
 		usb_phy_notify_disconnect(mdwc->hs_phy, USB_SPEED_HIGH);
 		usb_phy_notify_disconnect(mdwc->ss_phy, USB_SPEED_SUPER);
 		dwc3_override_vbus_status(mdwc, false);
@@ -5588,22 +5623,36 @@ static int dwc3_msm_runtime_suspend(struct device *dev)
 {
 	struct dwc3_msm *mdwc = dev_get_drvdata(dev);
 	struct dwc3 *dwc = platform_get_drvdata(mdwc->dwc3);
+	int ret;
+
+	pr_info("Build331: msm_rt_susp enter in_lpm=%d lpmfl=0x%lx host=%d dev=%d vbus=%d child=%d\n",
+		atomic_read(&dwc->in_lpm), mdwc->lpm_flags,
+		mdwc->in_host_mode, mdwc->in_device_mode, mdwc->vbus_active,
+		atomic_read(&dev->power.child_count));
 
 	dev_dbg(dev, "DWC3-msm runtime suspend\n");
 	dbg_event(0xFF, "RT Sus", 0);
 
-	return dwc3_msm_suspend(mdwc, false, true);
+	ret = dwc3_msm_suspend(mdwc, false, true);
+	pr_info("Build331: msm_rt_susp done ret=%d\n", ret);
+	return ret;
 }
 
 static int dwc3_msm_runtime_resume(struct device *dev)
 {
 	struct dwc3_msm *mdwc = dev_get_drvdata(dev);
 	struct dwc3 *dwc = platform_get_drvdata(mdwc->dwc3);
+	int ret;
+
+	pr_info("Build331: msm_rt_resm enter in_lpm=%d\n",
+		atomic_read(&dwc->in_lpm));
 
 	dev_dbg(dev, "DWC3-msm runtime resume\n");
 	dbg_event(0xFF, "RT Res", 0);
 
-	return dwc3_msm_resume(mdwc);
+	ret = dwc3_msm_resume(mdwc);
+	pr_info("Build331: msm_rt_resm done ret=%d\n", ret);
+	return ret;
 }
 #endif
 
