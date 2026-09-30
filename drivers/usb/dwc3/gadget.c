@@ -4276,14 +4276,22 @@ static irqreturn_t dwc3_process_event_buf(struct dwc3_event_buffer *evt)
 	dwc3_writel(dwc->regs, DWC3_GEVNTSIZ(0), reg);
 
 	dev_err(dwc->dev, "Build328: evbuf unmask\n");
+	dev_err(dwc->dev, "Build329: unmask post imod=%u siz=0x%08x act=%d\n",
+		dwc->imod_interval, dwc3_readl(dwc->regs, DWC3_GEVNTSIZ(0)),
+		pm_runtime_active(dwc->dev));
 
 	if (dwc->imod_interval) {
+		dev_err(dwc->dev, "Build329: imod pre cnt=0x%08x\n",
+			dwc3_readl(dwc->regs, DWC3_GEVNTCOUNT(0)));
 		dwc3_writel(dwc->regs, DWC3_GEVNTCOUNT(0), DWC3_GEVNTCOUNT_EHB);
 		dwc3_writel(dwc->regs, DWC3_DEV_IMOD(0), dwc->imod_interval);
+		dev_err(dwc->dev, "Build329: imod post siz=0x%08x\n",
+			dwc3_readl(dwc->regs, DWC3_GEVNTSIZ(0)));
 	}
 
 	/* Keep the clearing of DWC3_EVENT_PENDING at the end */
 	evt->flags &= ~DWC3_EVENT_PENDING;
+	dev_err(dwc->dev, "Build329: evbuf end ret=%d\n", ret);
 
 	return ret;
 }
@@ -4293,8 +4301,15 @@ void dwc3_bh_work(struct work_struct *w)
 	struct dwc3 *dwc = container_of(w, struct dwc3, bh_work);
 
 	pm_runtime_get_sync(dwc->dev);
+	dev_err(dwc->dev, "Build329: bh get act=%d usage=%d\n",
+		pm_runtime_active(dwc->dev),
+		atomic_read(&dwc->dev->power.usage_count));
 	dwc3_thread_interrupt(dwc->irq, dwc->ev_buf);
+	dev_err(dwc->dev, "Build329: bh thread done\n");
 	pm_runtime_put(dwc->dev);
+	dev_err(dwc->dev, "Build329: bh put act=%d usage=%d\n",
+		pm_runtime_active(dwc->dev),
+		atomic_read(&dwc->dev->power.usage_count));
 }
 
 static irqreturn_t dwc3_thread_interrupt(int irq, void *_evt)
@@ -4409,6 +4424,8 @@ irqreturn_t dwc3_interrupt(int irq, void *_dwc)
 
 	if (ret == IRQ_WAKE_THREAD)
 		queue_work(dwc->dwc_wq, &dwc->bh_work);
+
+	dev_err(dwc->dev, "Build329: irq ret=%d\n", ret);
 
 	return IRQ_HANDLED;
 }
