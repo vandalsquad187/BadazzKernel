@@ -887,6 +887,8 @@ static int aw8622x_haptic_play_mode(struct aw8622x *aw8622x,
 			   __func__, play_mode);
 		break;
 	}
+	aw_dev_err(aw8622x->dev, "Build330: %s exit mode=%d\n", __func__,
+		   play_mode);
 	return 0;
 }
 
@@ -903,6 +905,8 @@ static int aw8622x_haptic_play_go(struct aw8622x *aw8622x, bool flag)
 	}
 
 	aw8622x_i2c_read(aw8622x, AW8622X_REG_GLBRD5, &reg_val);
+	aw_dev_err(aw8622x->dev, "Build330: %s exit flag=%d glob=%d\n",
+		   __func__, flag, reg_val);
 	return 0;
 }
 
@@ -1858,6 +1862,8 @@ static int aw8622x_haptic_play_repeat_seq(struct aw8622x *aw8622x,
 		aw8622x_haptic_play_mode(aw8622x, AW8622X_HAPTIC_RAM_LOOP_MODE);
 		aw8622x_haptic_play_go(aw8622x, true);
 	}
+	aw_dev_err(aw8622x->dev, "Build330: %s exit flag=%d\n", __func__,
+		   flag);
 	return 0;
 }
 
@@ -3524,7 +3530,8 @@ static int aw8622x_haptic_play_effect_seq(struct aw8622x *aw8622x,
 			aw8622x_haptic_play_repeat_seq(aw8622x, true);
 		}
 	}
-	pr_debug("%s: exit\n", __func__);
+	pr_info("Build330: %s exit effect=%d\n", __func__,
+		aw8622x->effect_id);
 	return 0;
 }
 

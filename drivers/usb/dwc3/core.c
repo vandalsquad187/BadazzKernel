@@ -1612,6 +1612,8 @@ static int dwc3_runtime_checks(struct dwc3 *dwc)
 	case USB_DR_MODE_OTG:
 		if (dwc->connected)
 			return -EBUSY;
+		if (dwc->pullups_connected && dwc->vbus_active)
+			return -EBUSY;
 		break;
 	case USB_DR_MODE_HOST:
 	default:
@@ -1627,19 +1629,30 @@ static int dwc3_runtime_suspend(struct device *dev)
 	struct dwc3     *dwc = dev_get_drvdata(dev);
 	int		ret;
 
-	/* Check if platform glue driver handling PM, if not then handle here */
-	if (!dwc3_notify_event(dwc, DWC3_CORE_PM_SUSPEND_EVENT, 0))
-		return 0;
+	pr_info("Build330: rt_susp enter conn=%d pull=%d vbus=%d soft=%d gspd=%d\n",
+		dwc->connected, dwc->pullups_connected, dwc->vbus_active,
+		dwc->softconnect, dwc->gadget.speed);
 
-	if (dwc3_runtime_checks(dwc))
+	/* Check if platform glue driver handling PM, if not then handle here */
+	if (!dwc3_notify_event(dwc, DWC3_CORE_PM_SUSPEND_EVENT, 0)) {
+		pr_info("Build330: rt_susp glue-owned\n");
+		return 0;
+	}
+
+	if (dwc3_runtime_checks(dwc)) {
+		pr_info("Build330: rt_susp blocked\n");
 		return -EBUSY;
+	}
 
 	ret = dwc3_suspend_common(dwc);
-	if (ret)
+	if (ret) {
+		pr_info("Build330: rt_susp common fail=%d\n", ret);
 		return ret;
+	}
 
 	device_init_wakeup(dev, false);
 
+	pr_info("Build330: rt_susp done\n");
 	return 0;
 }
 
@@ -1648,15 +1661,22 @@ static int dwc3_runtime_resume(struct device *dev)
 	struct dwc3     *dwc = dev_get_drvdata(dev);
 	int		ret;
 
+	pr_info("Build330: rt_resm enter conn=%d pull=%d vbus=%d\n",
+		dwc->connected, dwc->pullups_connected, dwc->vbus_active);
+
 	/* Check if platform glue driver handling PM, if not then handle here */
-	if (!dwc3_notify_event(dwc, DWC3_CORE_PM_RESUME_EVENT, 0))
+	if (!dwc3_notify_event(dwc, DWC3_CORE_PM_RESUME_EVENT, 0)) {
+		pr_info("Build330: rt_resm glue-owned\n");
 		return 0;
+	}
 
 	device_init_wakeup(dev, false);
 
 	ret = dwc3_resume_common(dwc);
-	if (ret)
+	if (ret) {
+		pr_info("Build330: rt_resm common fail=%d\n", ret);
 		return ret;
+	}
 
 	switch (dwc->dr_mode) {
 	case USB_DR_MODE_PERIPHERAL:
@@ -1672,6 +1692,7 @@ static int dwc3_runtime_resume(struct device *dev)
 	pm_runtime_mark_last_busy(dev);
 	pm_runtime_put(dev);
 
+	pr_info("Build330: rt_resm done\n");
 	return 0;
 }
 
