@@ -3535,6 +3535,8 @@ static int dwc3_msm_vbus_notifier(struct notifier_block *nb,
 	struct extcon_nb *enb = container_of(nb, struct extcon_nb, vbus_nb);
 	struct dwc3_msm *mdwc = enb->mdwc;
 
+	pr_info("Build332: vbus_nb enter event=%lu\n", event);
+
 	if (!edev || !mdwc)
 		return NOTIFY_DONE;
 
@@ -3545,8 +3547,11 @@ static int dwc3_msm_vbus_notifier(struct notifier_block *nb,
 	dev_err(mdwc->dev, "vbus_notifier: event=%ld vbus_active=%d dr_mode=%d\n",
 		event, mdwc->vbus_active, dwc ? dwc->dr_mode : -1);
 
-	if (mdwc->vbus_active == event)
+	if (mdwc->vbus_active == event) {
+		pr_info("Build332: vbus_nb unchanged event=%lu active=%d\n",
+			event, mdwc->vbus_active);
 		return NOTIFY_DONE;
+	}
 
 	mdwc->ext_idx = enb->idx;
 

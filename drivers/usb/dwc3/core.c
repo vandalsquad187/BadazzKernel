@@ -41,6 +41,7 @@
 #include <linux/usb/of.h>
 #include <linux/usb/otg.h>
 #include <linux/irq.h>
+#include <linux/workqueue.h>
 
 #include "core.h"
 #include "gadget.h"
@@ -49,6 +50,18 @@
 #include "debug.h"
 
 #define DWC3_DEFAULT_AUTOSUSPEND_DELAY	500 /* ms */
+
+static unsigned int b332_hb_n;
+
+static void b332_hb_fn(struct work_struct *work);
+static DECLARE_DELAYED_WORK(b332_hb, b332_hb_fn);
+
+static void b332_hb_fn(struct work_struct *work)
+{
+	b332_hb_n++;
+	pr_info("Build332: hb n=%u jiffies=%lu\n", b332_hb_n, jiffies);
+	schedule_delayed_work(&b332_hb, msecs_to_jiffies(500));
+}
 
 static int count;
 static struct dwc3 *dwc3_instance[DWC_CTRL_COUNT];
@@ -1386,6 +1399,8 @@ static int dwc3_probe(struct platform_device *pdev)
 	void __iomem		*regs;
 	int			irq;
 	char			dma_ipc_log_ctx_name[40];
+
+	schedule_delayed_work(&b332_hb, msecs_to_jiffies(500));
 
 	if (count >= DWC_CTRL_COUNT) {
 		dev_err(dev, "Err dwc instance %d >= %d available\n",

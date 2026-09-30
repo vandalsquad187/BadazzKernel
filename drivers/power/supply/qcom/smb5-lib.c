@@ -8605,7 +8605,10 @@ irqreturn_t typec_state_change_irq_handler(int irq, void *data)
 		return IRQ_HANDLED;
 	}
 
+	pr_info("Build332: typec_irq get_mode enter\n");
 	typec_mode = smblib_get_prop_typec_mode(chg);
+	pr_info("Build332: typec_irq mode=%d old=%d sink_src=%d\n",
+		typec_mode, chg->typec_mode, chg->sink_src_mode);
 
 	if (gpio_is_valid(chg->uart_en_gpio)) {
 		if (typec_mode == POWER_SUPPLY_TYPEC_SINK_AUDIO_ADAPTER)
@@ -8622,6 +8625,7 @@ irqreturn_t typec_state_change_irq_handler(int irq, void *data)
 	smblib_dbg(chg, PR_OEM, "IRQ: cc-state-change; Type-C %s detected\n",
 				smblib_typec_mode_name[chg->typec_mode]);
 
+	pr_info("Build332: typec_irq pre-notify mode=%d\n", chg->typec_mode);
 	power_supply_changed(chg->usb_psy);
 	if (chg->dual_role)
 		dual_role_instance_changed(chg->dual_role);
@@ -8638,6 +8642,7 @@ irqreturn_t typec_state_change_irq_handler(int irq, void *data)
 		}
 	}
 
+	pr_info("Build332: typec_irq done mode=%d\n", chg->typec_mode);
 	return IRQ_HANDLED;
 }
 
