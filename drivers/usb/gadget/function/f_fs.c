@@ -2121,8 +2121,14 @@ static int ffs_func_eps_enable(struct ffs_function *func)
 	unsigned long flags;
 	int ret = 0;
 
+	ffs = func->ffs;
+
 	ffs_log("enter: state %d setup_state %d flag %lu", func->ffs->state,
 		func->ffs->setup_state, func->ffs->flags);
+
+	pr_info("Build336: eps_enable ffs=%px ipc_log=%px func->ffs=%px eps=%px epfiles=%px gadget=%px count=%u\n",
+		ffs, ffs->ipc_log, func->ffs, func->eps, ffs->epfiles,
+		func->gadget, (int)ffs->eps_count);
 
 	pr_info("Build335: eps_enable enter func=%px ffs=%px eps=%px epfiles=%px gadget=%px conf=%px count=%u state=%d\n",
 		func, func->ffs, func->eps, func->ffs->epfiles,
@@ -2137,7 +2143,6 @@ static int ffs_func_eps_enable(struct ffs_function *func)
 	}
 
 	spin_lock_irqsave(&func->ffs->eps_lock, flags);
-	ffs = func->ffs;
 	ep = func->eps;
 	epfile = ffs->epfiles;
 	count = ffs->eps_count;
