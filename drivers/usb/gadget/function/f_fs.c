@@ -2082,6 +2082,16 @@ static void ffs_func_eps_disable(struct ffs_function *func)
 	unsigned short count;
 	unsigned long flags;
 
+	pr_info("Build335: eps_disable enter func=%px ffs=%px eps=%px epfiles=%px count=%u\n",
+		func, func->ffs, func->eps, func->ffs->epfiles,
+		(int)func->ffs->eps_count);
+
+	if (unlikely(!func->eps)) {
+		pr_err("Build335: eps_disable eps NULL ffs=%px count=%u\n",
+		       func->ffs, (int)func->ffs->eps_count);
+		return;
+	}
+
 	spin_lock_irqsave(&func->ffs->eps_lock, flags);
 	count = func->ffs->eps_count;
 	epfile = func->ffs->epfiles;
@@ -2114,12 +2124,30 @@ static int ffs_func_eps_enable(struct ffs_function *func)
 	ffs_log("enter: state %d setup_state %d flag %lu", func->ffs->state,
 		func->ffs->setup_state, func->ffs->flags);
 
+	pr_info("Build335: eps_enable enter func=%px ffs=%px eps=%px epfiles=%px gadget=%px conf=%px count=%u state=%d\n",
+		func, func->ffs, func->eps, func->ffs->epfiles,
+		func->gadget, func->conf, (int)func->ffs->eps_count,
+		(int)func->ffs->state);
+
+	if (unlikely(!func->eps || !func->ffs->epfiles || !func->gadget)) {
+		pr_err("Build335: eps_enable NULL eps=%px epfiles=%px gadget=%px count=%u\n",
+		       func->eps, func->ffs->epfiles, func->gadget,
+		       (int)func->ffs->eps_count);
+		return -EINVAL;
+	}
+
 	spin_lock_irqsave(&func->ffs->eps_lock, flags);
 	ffs = func->ffs;
 	ep = func->eps;
 	epfile = ffs->epfiles;
 	count = ffs->eps_count;
 	while(count--) {
+		if (unlikely(!ep->ep || !epfile)) {
+			pr_err("Build335: eps_enable slot NULL left=%u eps=%px ep=%px epfile=%px\n",
+			       (int)count, func->eps, ep->ep, epfile);
+			ret = -EINVAL;
+			break;
+		}
 		ep->ep->driver_data = ep;
 
 		ret = config_ep_by_speed(func->gadget, &func->function, ep->ep);
@@ -3481,20 +3509,47 @@ static int ffs_func_set_alt(struct usb_function *f,
 		return -ENODEV;
 	}
 
+	pr_info("Build335: set_alt enter intf=%u alt=%d func=%px conf=%px gadget=%px ffs=%px eps=%px ifn=%px\n",
+		interface, (int)alt, func, func->conf, func->gadget, ffs,
+		func->eps, func->interfaces_nums);
+	pr_info("Build335: set_alt ffs: gadget=%px func=%px epfiles=%px state=%d setup=%d eps=%u ifaces=%u evfd=%px iocq=%px\n",
+		ffs->gadget, ffs->func, ffs->epfiles, (int)ffs->state,
+		(int)ffs->setup_state, (int)ffs->eps_count,
+		(int)ffs->interfaces_count, ffs->ffs_eventfd,
+		ffs->io_completion_wq);
+
+	if (unlikely(!func->conf || !func->gadget || !func->eps ||
+		     !func->interfaces_nums)) {
+		pr_err("Build335: set_alt func-incomplete conf=%px gadget=%px eps=%px ifn=%px intf=%u alt=%d\n",
+		       func->conf, func->gadget, func->eps,
+		       func->interfaces_nums, interface, (int)alt);
+		return -ENODEV;
+	}
+
 	ffs_log("enter: alt %d", (int)alt);
 
 	if (alt != (unsigned)-1) {
 		intf = ffs_func_revmap_intf(func, interface);
-		if (unlikely(intf < 0))
+		if (unlikely(intf < 0)) {
+			pr_err("Build335: set_alt revmap=%d intf=%u ifaces=%u\n",
+			       intf, interface, (int)ffs->interfaces_count);
 			return intf;
+		}
+		pr_info("Build335: set_alt revmap intf=%d\n", intf);
 	}
 
 	if (ffs->func) {
+		pr_info("Build335: set_alt oldfunc=%px oldfunc.ffs=%px oldfunc.eps=%px\n",
+			ffs->func, ffs->func->ffs, ffs->func->eps);
 		ffs_func_eps_disable(ffs->func);
 		ffs->func = NULL;
 		/* matching put to allow LPM on disconnect */
 		usb_gadget_autopm_put_async(ffs->gadget);
 	}
+
+	pr_info("Build335: set_alt state=%d alt=%d gadget=%px parent=%px\n",
+		(int)ffs->state, (int)alt, ffs->gadget,
+		ffs->gadget ? ffs->gadget->dev.parent : NULL);
 
 	if (ffs->state == FFS_DEACTIVATED) {
 		ffs->state = FFS_CLOSING;
@@ -3514,10 +3569,12 @@ static int ffs_func_set_alt(struct usb_function *f,
 
 	ffs->func = func;
 	ret = ffs_func_eps_enable(func);
+	pr_info("Build335: set_alt eps_enable ret=%d\n", ret);
 	if (likely(ret >= 0)) {
 		ffs_event_add(ffs, FUNCTIONFS_ENABLE);
 		/* Disable USB LPM later on bus_suspend */
 		usb_gadget_autopm_get_async(ffs->gadget);
+		pr_info("Build335: set_alt done ok\n");
 	}
 
 	return ret;
@@ -3686,6 +3743,12 @@ static int ffs_func_revmap_intf(struct ffs_function *func, u8 intf)
 {
 	short *nums = func->interfaces_nums;
 	unsigned count = func->ffs->interfaces_count;
+
+	if (unlikely(!nums)) {
+		pr_err("Build335: revmap_intf ifn=NULL ffs=%px count=%u intf=%u\n",
+		       func->ffs, count, intf);
+		return -EDOM;
+	}
 
 	for (; count; --count, ++nums) {
 		if (*nums >= 0 && *nums == intf)
