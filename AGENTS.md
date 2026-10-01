@@ -3,9 +3,15 @@
 ## Current State
 - **Repo**: `vandalsquad187/BadazzKernel` branch `main`
 - **Kernel**: `4.14.369` — `K6A_GOV v1.3.1` built-in, `LOCALVERSION=-BadazzKernel-sweet-v1.3.2`
-- **Local**: clean, `main` @ `3be72b736` (Build 320: quiescent-core recovery + RESTART_USB_SESSION storm breaker)
-- **GitHub**: CI builds on every push to `main` (release) and `miui/test` (artifacts only); latest release `v4.14.369-badazz-build320`
-- **KSU-Next Submodule**: `b100bd28` (`v3.3.0-95-gb100bd28`, dev-4.14-prctl-fix, UAPIv4, `KSU_VERSION=33300`)
+- **Local**: clean, `main` @ `4dcd00df3` (Build 333: every SMB5 IRQ now logs its name + markers on the
+  previously blind Type-C handlers)
+- **GitHub**: CI builds on every push to `main` (release) and `miui/test` (artifacts only);
+  latest release `v4.14.369-badazz-build333` (CI run `36892664057`, success)
+- **KSU-Next Submodule**: `b100bd28` (`v3.3.0-95-gb100bd28`, dev-4.14-prctl-fix, UAPIv4, `KSU_VERSION=33300`
+  in `KernelSU-Next/kernel/Makefile`)
+- **Open blocker**: Fault 4 — instant whole-SoC reset on USB-C attach, **zero software trace**
+  (see *USB Debugging* below)
+- **User speaks German**; device reports go out in German
 
 ## Repo & Docs Layout
 
@@ -30,13 +36,76 @@
   → release `v${VERSION}-badazz-build${run_number}`
 - Build time ~13–17 min; `gh run list` / `gh run watch <id>` to follow
 
-## USB Debugging (Build 300–320, open)
+## USB Debugging (Build 300–333, open)
 
-Status: **device mode still fails intermittently (Fault 1), host mode broken, Build 320 pushed, awaiting on-device test.**
+Status: **Faults 1–3 addressed in Builds 320/331/325. The blocker is Fault 4 — an instant
+whole-SoC reset on USB-C attach with no kernel trace at all. Build 333 is the current attempt.**
 
-Key files: `drivers/usb/dwc3/gadget.c`, `drivers/usb/dwc3/dwc3-msm.c`,
-`drivers/power/supply/qcom/smb5-lib.c`, `arch/arm64/boot/dts/qcom/sdmmagpie-*.dts(i)`.
+Key files: `drivers/usb/dwc3/gadget.c`, `drivers/usb/dwc3/dwc3-msm.c`, `drivers/usb/dwc3/core.c`,
+`drivers/power/supply/qcom/smb5-lib.c`, `drivers/power/supply/qcom/qpnp-smb5.c`,
+`arch/arm64/boot/dts/qcom/sdmmagpie-*.dts(i)`.
 Known-good reference commits: `096e0a0c9`, `d8cf6ae19` (high-speed DTS), `79b3b4147` (bus_aggr).
+
+### Fault 4 — instant reset on USB-C attach (BLOCKER, open)
+
+Repro (user): *S21 mit Bildschirm aus an sweet stecken → sofort 5 s Vibration + Reboot.*
+
+Build 332 evidence, captured with the direct `/dev/kmsg` reader (see *On-device Capture*) and
+**seq gaps = 0**, i.e. the log is provably loss-free:
+
+| | run 1 (`control=auto`) | run 2 (`control=on`) |
+|---|---|---|
+| death | 17:26:50.84 | 18:20:25.9 |
+| last heartbeat | `hb n=4403` `dj=504` | `hb n=2453` `dj=504` |
+| lines after `capture_start` | 368 | 159 |
+| `typec_irq`/`vbus_nb`/`usbin-plugin`/`notify_device_mode` | 0/0/0/0 | 0/0/0/0 |
+| runtime PM | `suspended` ×499 polls | `active` the whole time |
+| `usb/online` at 14 Hz | — | stayed `0`, only 1 `CHANGE` (initial line) |
+| last Type-C IRQ of the boot | 17:22:20 (4½ min early) | none in window |
+
+What this proves:
+- **Suspend/runtime-PM is not the cause.** With `control=on` and `runtime_status=active` the device
+  still dies, so Build 330/331 were not it.
+- The attach reaches **no software observer whatsoever** — no charger IRQ, no VBUS notifier, no
+  `usb/online` flip, no USB intent, no Android vibrator call (last `vendor.qti.vibratorOL` = 17:21:45).
+- Reset signature is identical every time:
+  `PMIC@SID0 Power-off: Triggered from PS_HOLD (PS_HOLD/MSM Controlled Shutdown)` +
+  `PMIC@SID0 Power-on: Hard Reset and 'cold' boot` + `PMIC@SID4 Power-off: SOFT (Software)`
+  → SoC-initiated reset, not UVLO/SMPL/overcurrent.
+- The 5 s vibration is **not** Android — the haptic rail latches during the reset. Duration matches
+  `panic=5`.
+- **No lockup detectors are compiled**: `CONFIG_SOFTLOCKUP_DETECTOR=n`, `CONFIG_DETECT_HUNG_TASK=n`,
+  `CONFIG_HARDLOCKUP_DETECTOR=n`, `CONFIG_WQ_WATCHDOG=n` → a freeze produces nothing but the
+  heartbeat/poller going silent. `CONFIG_PREEMPT=y`, `CONFIG_PANIC_ON_OOPS=y`, `CONFIG_DEBUG_BUGVERBOSE=y`.
+
+**pstore/ramoops cannot record this fault**: `CONFIG_PSTORE=y`, `console [pstore-1] enabled`,
+`ramoops attached 0x400000@0xb0000000`, yet after *every* crash `/sys/fs/pstore` holds 0 files and
+`/proc/last_kmsg` is 0 bytes (no `SYSTEM_LAST_KMSG` either). The PMIC reports a `'cold'` boot, which
+wipes the reserved region. Real-time capture is the only channel that exists.
+
+Two separate failures caused the blind spot:
+1. Handlers logged only via `smblib_dbg`, which is compiled out (Build 332's marker sat *after* the
+   micro-USB early return).
+2. Each SMB5 IRQ registered its own handler directly, so there was no single place that could prove
+   an IRQ fired.
+
+**Build 333** closes both: `b333_irq()` in `qpnp-smb5.c` is registered for *every* SMB5 IRQ, prints
+`Build333: irq <name>` first, then forwards to the original handler (`smb5_irqs[i].irq_data` is now
+assigned *before* `devm_request_threaded_irq`, cleared again on failure). `smb5-lib.c` gained entry
+markers in `typec_state_change_irq_handler` (before the micro-USB return),
+`typec_attach_detach_irq_handler`, `typec_or_rid_detection_change_irq_handler` and
+`usb_plugin_irq_handler`.
+
+### Fault 1 — ep-cmd timeout storm (storm stopped in Build 320)
+
+- Chain: `run_stop(0)` does not see end-of-frame → core left `COREIDLE=0/HLT=0`
+  → next `__dwc3_gadget_start()` programs EP0, `SETEPCFG` hangs 5 s → `RESTART_USB_SESSION`
+  → `dwc3_restart_usb_work` tears down + restarts → same failure every ~2 s until unplug
+- Build 320 adds `dwc3_gadget_ensure_quiescent()` (≤50 ms wait + one `DCTL.CSFTRST`, process context
+  in `dwc3_otg_start_peripheral`) and `start_fail_streak >= 3` give-up in `run_stop(is_on=1)`
+  so no ep-cmd is issued and the storm stops. Streak clears on successful start or a *real*
+  disconnect (`!mdwc->in_restart`).
+- Markers: `Build320:`, `Build313 STARTFAIL`, `Build319: prestart not quiescent`, `STARTGIVEUP`
 
 Empirical rule across **all** logs (Build 319):
 
@@ -46,25 +115,62 @@ Empirical rule across **all** logs (Build 319):
 | `DSTS.COREIDLE=0` | 692/692 ep-cmd timeout |
 | `DSTS.COREIDLE=1` && `USBLNKST=3` (U3/Suspend) | 1/1 timeout (host never bus-reset) |
 
-**Fault 1 — ep-cmd timeout storm** (open, Build 320 is the current attempt)
-- Chain: `run_stop(0)` does not see end-of-frame → core left `COREIDLE=0/HLT=0`
-  → next `__dwc3_gadget_start()` programs EP0, `SETEPCFG` hangs 5 s → `RESTART_USB_SESSION`
-  → `dwc3_restart_usb_work` tears down + restarts → same failure every ~2 s until unplug
-- Build 307–319 added diagnostics (`ep cmd dump`, `Build313 PRESTART/STARTFAIL`, `Build319 prestart not quiescent`)
-- Build 320 adds `dwc3_gadget_ensure_quiescent()` (≤50 ms wait + one `DCTL.CSFTRST`, process context
-  in `dwc3_otg_start_peripheral`) and `start_fail_streak >= 3` give-up in `run_stop(is_on=1)`
-  so no ep-cmd is issued and the storm stops. Streak clears on successful start or a *real*
-  disconnect (`!mdwc->in_restart`).
-- Markers to grep: `Build320:`, `Build313 STARTFAIL`, `Build319: prestart not quiescent`, `STARTGIVEUP`
+### Fault 2 — host mode
+`usb1-port1: Cannot enable. Maybe the USB cable is bad?` ×4 + `attempt power cycle` then
+`unable to enumerate` (see `dm313otg.txt`). Not touched since Build 320.
 
-**Fault 2 — host mode**: `usb1-port1: Cannot enable. Maybe the USB cable is bad?` ×4 + `attempt power cycle`
-then `unable to enumerate` (see `dm313otg.txt`). Not touched by Build 320.
+### Fault 3 — charger
+`APSD=OCP` rerun loop every 5 s. Expected **no** `vbus_notifier` line —
+`smblib_handle_apsd_done()` only calls `smblib_notify_device_mode()` for SDP/CDP/FLOAT
+(smb5-lib.c:8021).
 
-**Fault 3 — charger**: `APSD=OCP` rerun loop every 5 s. Expected to produce **no** `vbus_notifier` line —
-`smblib_handle_apsd_done()` only calls `smblib_notify_device_mode()` for SDP/CDP/FLOAT (smb5-lib.c:8021).
+### Ring buffer
+`CONFIG_LOG_BUF_SHIFT=20` (1 MB, raised from 17 in Build 320) **and** `log_buf_len=2M loglevel=6`
+on the kernel command line. Even so the buffer empties in seconds because of haptic + fuel-gauge
+log spam — it does **not** hold the fault window. Use the capture recipe below.
 
-**Ring buffer**: `CONFIG_LOG_BUF_SHIFT` was 17 (128 KB) and wrapped between t=4268 s and t=5942 s,
-losing the whole Fault 1 window. Build 320 bumps it to 20 (1 MB).
+
+## On-device Capture (Termux) — logcat is useless for kernel faults
+
+Scripts live in `~/tmp/`. Do **not** use `/tmp` (not writable in Termux) and do not try to write
+`/data/local/tmp` from Termux (only root can).
+
+| Script | What |
+|---|---|
+| `~/tmp/cap332.sh` | `start\|stop\|pstore\|scan` — the working driver |
+| `~/tmp/cap_scan.sh` | `kill\|count` — matches `readlink /proc/<pid>/fd/1` against `*/tmp/live/*` |
+| `~/tmp/pm_poll.sh` | root poller ~14 Hz: `runtime_status\|online\|real_type\|type\|status\|capacity`, prints `CHANGE` only on a real state change |
+
+`cap332.sh start` spawns under `setsid` + root:
+
+1. **`dd if=/dev/kmsg bs=65536`** → `~/tmp/live/kmsg332.log`. This is the only proven loss-free
+   channel — gaps = 0 over the last 159 and 368 lines of two separate crashes. `dd` writes one
+   block per read, so it is unbuffered. **`cat /dev/kmsg` fails with `EINVAL`** (buffer too small).
+2. logcat `main`/`system`/`events` with `stdbuf -oL`.
+3. `pm_poll.sh`, then a `BuildNNN: capture_start` banner marker (printk, `T0`, banner, heartbeat,
+   control/runtime state, battery, `usb/online` + `real_type`).
+
+`/dev/kmsg` line format is `seq,ts_us_since_boot,-;msg`. Seq deltas give the gap check;
+`ts_us_since_boot` + `T0` from the banner converts to wall clock.
+
+Gotchas learned the hard way:
+- Capture files end **NUL-padded** → `tr -d '\0'` before grepping.
+- **Orphan hazard**: any worker whose stdout is still the tool's pipe hangs the tool forever.
+  Always redirect worker stdout to a file.
+- Kill via `cap_scan.sh kill` (fd-target matching). **Never** `pkill -f` — the pattern matches the
+  scanning shell's own cmdline. **Never** `ps | grep` — `hidepid` hides root procs from Termux.
+- Full root path is **`/system/bin/su`** (KSU `sucompat.c` intercepts `execve` on `su`), and use
+  full paths inside `su -c` (`/system/bin/dumpsys`, `tr`, …). SELinux is Enforcing.
+- SUSFS spoofs `uname` → `6.12.0-android16-6.12-perf-g1d01cd293`; the real banner is
+  `Linux version 4.14.369-openela-rc1-BadazzKernel-sweet-v1.3.2-buildNNN`. It leaves the ring
+  within ~1 h, so prove the build with `BuildNNN: hb` lines, not the banner.
+
+```bash
+bash ~/tmp/cap332.sh start      # then reproduce the fault
+bash ~/tmp/cap332.sh pstore     # IMMEDIATELY after the reboot: /sys/fs/pstore + PMIC/LMK/tombstone dump
+bash ~/tmp/cap332.sh stop
+tr -d '\0' < ~/tmp/live/kmsg332.log | grep -E "Build333|Build332"
+```
 
 ## Local Build Notes (Termux)
 
@@ -80,10 +186,22 @@ clang --target=aarch64-linux-gnu -nostdinc -isystem $CLANG_INC \
   -I./arch/arm64/include/uapi -I./arch/arm64/include/generated/uapi \
   -I./include/uapi -I./include/generated/uapi -I./drivers/usb/dwc3 \
   -Idrivers/usb/host -Idrivers/base/power \
+  -Idrivers/power/supply -Idrivers/power/supply/qcom \
   -include ./include/linux/kconfig.h -D__KERNEL__ -DMODULE -mlittle-endian \
   -std=gnu89 -Werror=implicit-function-declaration -Werror=format \
-  -fsyntax-only drivers/usb/dwc3/gadget.c
+  -fsyntax-only drivers/power/supply/qcom/qpnp-smb5.c
 ```
+
+**Accepting a non-zero RC**: the CI toolchain is **GCC**, so clang `-Werror=format` hits pre-existing
+bugs that never break the release. Always compare against the pristine file:
+
+```bash
+git show HEAD:drivers/power/supply/qcom/smb5-lib.c > ~/tmp/smb5_pristine.c
+# same command on both files — accept only if the error set is identical
+```
+
+`smb5-lib.c` currently reports 4 such errors (`1364`, `7798`, `8247`, `9904` pristine / `1364`,
+`7799`, `8248`, `9908` after the Build 333 markers shifted the lines).
 
 ## k6a_gov v1.3.1
 
@@ -132,6 +250,19 @@ Local full builds are blocked in Termux — see **Local Build Notes (Termux)** a
 Full log: `git log --oneline -40`. Current head is the USB debug series:
 
 ```
+4dcd00df3 Build 333: cover every SMB5 IRQ + markers on the blind Type-C handlers
+c576e8ab5 Build 332: global kernel heartbeat + Type-C/VBUS path markers
+524ca3253 Build 331: hold the dwc3 core PM reference across a connection
+4279f358b Build 330: block dwc3 runtime-suspend while the gadget is attached
+039dbbf34 Build 329: bracket the post-unmask window in dwc3_process_event_buf
+88df6a2a8 Build 328: breadcrumb the blind window after the EP0 STATUS-phase STARTTRANSFER
+a74daf999 Build 327: breadcrumb the EP0 setup path to pin the enumeration freeze
+8c24c0d63 Build 326: stall instead of oopsing when an ffs function has no ffs_data
+efbc602fb Build 325: drop the debug serial console that was stalling the system
+32a3e8e6b Build 324: clock the QUSB2 PHY before the Build-323 re-init + make clock enable idempotent
+66002baa6 Build 323: re-init the QUSB2 PHY after the DPDM reset when dwc3 is awake
+5613540bf Build 321: trust DALEPENA over a stale EP_ENABLED flag so EP0 actually gets enabled
+2879f0389 docs: refresh README.md + AGENTS.md at Build 320, document repo layout
 3be72b736 Build 320: recover a non-quiescent device core before start + stop the RESTART_USB_SESSION storm
 71dc0630b Build 319: restore GUSB3PIPECTL.SUSPHY lost by stop_peripheral + wait for DSTS.COREIDLE
 1fd9bdade Build 318: drop Build-311 core-soft-reset heal + dump GEVTEN/DEVTEN/EVSIZ/EVCNT on ep-cmd timeout
@@ -144,6 +275,8 @@ bff0adc79 Build 313: link/PHY state + DEVT diagnostics (no behavior change)
 7bdc78a1d Build 307: drop Build 306 core reset, enable AHB/AXI clocks, dump EP-CMD state on timeout
 839d4d70a Build 303: restore working USB state (Sept 8 build 096e0a0c9)
 ```
+
+Note: **Build 331 (`524ca3253`) was released but never flashed** — testing jumped from 330 to 332.
 
 k6a_gov history: `81d69ae` v1.3.1 ticks fix, `d4835b6` deadlock, `53bb809` v1.3.1 hardening,
 `967c134` v1.3.0 BW floors + profile 5, `dfcb96b` v1.2.1, `602a281` `CONFIG_K6A_GOV=y`.
@@ -161,6 +294,19 @@ k6a_gov history: `81d69ae` v1.3.1 ticks fix, `d4835b6` deadlock, `53bb809` v1.3.
 - Submodule `KernelSU-Next` @ `b100bd28` (`v3.3.0-95-gb100bd28`, `KSU_VERSION=33300`, UAPIv4)
 - `git submodule update --init --recursive` required for fresh clone
 
+## Working Agreements
+
+- **No code comments** — rationale lives in the commit body and in `pr_info` markers.
+- **Marker style**: `pr_info("BuildNNN: …\n", …)`; grep target must be unique per build.
+- **Commits**: title + evidence body, **no `Co-Authored-By`**. The Write tool is broken on this box
+  (emits NULs) → always commit with a heredoc:
+  `git commit -q -F - <<'EOF' … EOF`
+- **CI**: push to `main` → release `v4.14.369-badazz-buildNNN`, ~13–17 min. Poll with
+  `gh run view <id> --repo vandalsquad187/BadazzKernel --json status,conclusion` in `sleep 55`
+  loops, **timeout ≥ 1700000 ms**. Releases: `gh release list --repo vandalsquad187/BadazzKernel --limit 3`.
+- **Syntax-check before push** (see *Local Build Notes*), always pristine-compared.
+- User-facing reports are written in **German**.
+
 ## Common Issues
 1. **Fresh clone build fails**: need `CONFIG_KSU_SUSFS=y` + sub-options, submodule init
 2. **SUSFS implicit declaration**: guard calls with `#ifdef CONFIG_KSU_SUSFS_*`
@@ -168,7 +314,11 @@ k6a_gov history: `81d69ae` v1.3.1 ticks fix, `d4835b6` deadlock, `53bb809` v1.3.
 4. **Hardcoded CPU6**: fixed — use `find_gold_cpu()` portable
 5. **Boot hang at crDroid logo** (Build 267-278): see Boot-Hang Root Cause below
 6. **Local Termux build fails** (`modpost` / `elf.h`, no `bison`/`perl`): use the syntax-check recipe in *Local Build Notes (Termux)*, let CI do real builds
-7. **USB `ep cmd timeout` / device not enumerating**: see *USB Debugging (Build 300-320, open)*
+7. **USB `ep cmd timeout` / device not enumerating**: see *USB Debugging (Build 300-333, open)*
+8. **Whole SoC resets on USB-C plug, log empty**: that is Fault 4 — do not trust logcat or
+   `/proc/last_kmsg`, capture with `~/tmp/cap332.sh` (see *On-device Capture*)
+9. **A tool call hangs forever**: an orphaned worker is still holding the pipe — run
+   `$SU -c "sh $HOME/tmp/cap_scan.sh kill"`
 
 ## Boot-Hang Root Cause (Build 267-278)
 - **Symptom**: Boot hängt bei crDroid Boot-Logo (95%), intermittierend

@@ -47,7 +47,7 @@ linux-4.14.369
 | **Safety** | Battery guard + hash | `battery_guard` @45°C → CD_L2, `poll_ms` 100..5000, `verify_build_hash` vs `k6a_features/git_hash` |
 | **Thermal** | Cooling device | `k6a_gov` as `thermal_cooling_device`, `cool_cur` locked, `K6A_CD_L4` clamp |
 | **Root** | KSU-Next + SUSFS | 33300 **UAPIv4** (submodule `b100bd28`), SUSFS `v2.2.0` (sus_path/mount/kstat/map), `tamper_syscall_table` |
-| **USB** | DWC3 / QUSB2 | SM6150 clocks (`GCC/DISPCC/CAMCC`), `WAIT_FOR_LPM` clear, `bus_aggr`/`GCTL` 50ms, `is_a_peripheral` fix — PC bootloop gone since v1.3.2. *Current work (Build 307–320): `ep-cmd timeout` recovery + restart-storm breaker — see [USB status](#usb-status-open)* |
+| **USB** | DWC3 / QUSB2 | SM6150 clocks (`GCC/DISPCC/CAMCC`), `WAIT_FOR_LPM` clear, `bus_aggr`/`GCTL` 50ms, `is_a_peripheral` fix — PC bootloop gone since v1.3.2. *Current work (Build 307–333): restart-storm breaker, EP0 enable, runtime-PM hold, SMB5 IRQ coverage — see [USB status](#usb-status-open)* |
 | **Scheduler** | UCLAMP, SCHED_CASS | Latency/efficiency tuning |
 | **Memory** | KSM, LRU_GEN, ZRAM lz4 | Gaming stability |
 | **Net** | BBR | Low latency |
@@ -142,14 +142,38 @@ Healthy connect: `mtp,adb` with `f1/f2` endpoints and `dwc3_msm mtp,adb` bound.
 
 ## USB status (open)
 
-The v1.3.2 PC-bootloop fix landed. What is still open is an intermittent **device-mode ep-cmd
-timeout** plus two separate issues:
+The v1.3.2 PC-bootloop fix landed. Builds 307–333 then worked through a chain of deeper faults.
+One blocker remains.
 
 | # | Issue | State |
 |---|-------|-------|
-| **Fault 1** | `SETEPCFG` ep0out timeout → `RESTART_USB_SESSION` → gadget torn down and restarted every ~2 s until unplug | **Open** — Build 307–319 added diagnostics, Build 320 adds quiescent-core recovery + a give-up counter so the storm stops. Awaiting on-device test |
-| **Fault 2** | OTG host mode: `usb1-port1: Cannot enable. Maybe the USB cable is bad?` ×4 → `unable to enumerate` | **Open**, not touched by Build 320 |
+| **Fault 1** | `SETEPCFG` ep0out timeout → `RESTART_USB_SESSION` → gadget torn down and restarted every ~2 s until unplug | **Storm stopped** — Build 320 adds quiescent-core recovery + a give-up counter, Build 331 holds the dwc3 core PM reference across a connection |
+| **Fault 2** | OTG host mode: `usb1-port1: Cannot enable. Maybe the USB cable is bad?` ×4 → `unable to enumerate` | **Open**, not touched since Build 320 |
 | **Fault 3** | Charger: `APSD=OCP` re-runs every 5 s | **Open**, cosmetic — OCP/DCP deliberately never reach the dwc3 core |
+| **Fault 4** | **Instant whole-SoC reset the moment a USB-C cable is plugged in** (5 s of vibration, then reboot) | **Open — blocker.** See below |
+
+### Fault 4 — instant reset on attach
+
+Plugging sweet into a Galaxy S21 resets the phone immediately. The kernel has been observed with a
+loss-free `/dev/kmsg` stream (zero sequence gaps) right up to the last millisecond, and it shows
+**nothing**: no Type-C IRQ, no VBUS notifier, no `usb/online` flip, no USB intent, no Android
+vibrator call. The PMIC consistently reports
+
+```
+Power-off: Triggered from PS_HOLD (PS_HOLD/MSM Controlled Shutdown)
+Power-on : Hard Reset and 'cold' boot
+```
+
+and afterwards `/proc/last_kmsg` and `/sys/fs/pstore` are empty — the cold boot wipes the ramoops
+region, so there is no post-mortem record. Runtime suspend was ruled out twice (with the root port
+forced `control=on` and `runtime_status=active` the phone still dies).
+
+**Build 332** added a 500 ms kernel heartbeat plus Type-C/VBUS markers and proved the SoC healthy
+to the last millisecond. **Build 333** closes the blind spot: every SMB5 charger/Type-C IRQ now
+prints its name through a single dispatcher, and the four Type-C handlers that previously logged
+only through the compiled-out `smblib_dbg` gained entry markers.
+
+Faults 1–3 detail and the full evidence tables live in `AGENTS.md`.
 
 Empirical rule from all logs so far (Build 319):
 
@@ -159,8 +183,8 @@ Empirical rule from all logs so far (Build 319):
 | `COREIDLE=0` | 692/692 timeout |
 | `COREIDLE=1`, `USBLNKST=3` (U3/Suspend) | 1/1 timeout |
 
-Build 320 raised `CONFIG_LOG_BUF_SHIFT` 17 → 20 (128 KB → 1 MB) because the ring buffer wrapped
-in ~70 min and lost the failure window.
+Build 320 raised `CONFIG_LOG_BUF_SHIFT` 17 → 20 (128 KB → 1 MB), and the kernel boots with
+`log_buf_len=2M loglevel=6`.
 
 ---
 
@@ -197,9 +221,10 @@ Full Changelog: `git log --oneline`
 | **P0** | **KSU 88feb68 4.14 Port on PC** | `badazzrebase.md` ready | `k6a-sweet` rebase `b100bd28` → `88feb68` (Squash 49 files, `meld` for `Kconfig/Makefile/selinux.c` `susfs_is_current`), new branch `k6a-sweet-88feb68`, Badazz bump, CI green ~15 min |
 | **P0** | **SUSFS full restore** | Hotfix relaxed validation, `fs/susfs` `v2.2.0` intact but KSU side `k6a-sweet` patches pending | After rebase: `CONFIG_KSU_SUSFS` + `TAMPER_SYSCALL_TABLE` validation back, `nm vmlinux \| grep susfs_is_current` green |
 | **P1** | **MIUI/HOS verification** | `sweet_miui.config` + DTS + `miui/test` CI `aosp+miui` artifacts | Flash `…-miui.zip` on HyperOS `V14.0.1.0` (or `2.0`), test `dmesg` `fpc/goodix/touchfeature/ds28e16`, 120Hz, NFC, `usb` `host/device` |
-| **P1** | **USB Fault 1/2/3** | PC bootloop fixed (v1.3.2); intermittent `ep-cmd timeout` storm, OTG host `Cannot enable`, charger `OCP` rerun still open | Flash `…-build320`, verify `dmesg \| grep Build320` — `quiescent=1` on start and `giving up after 3` never appearing; then attack Fault 2 (host mode) |
+| **P1** | **USB Fault 4 (blocker)** | Instant whole-SoC reset on USB-C attach, zero software trace, ruled out twice as a suspend bug | Flash `…-build333`, capture with the direct `/dev/kmsg` reader, then grep `Build333: irq` — a line present means the attach IRQ fired, absent means the reset happens below the driver |
+| **P1** | **USB Fault 1/2/3** | PC bootloop fixed (v1.3.2); ep-cmd storm stopped (Build 320/331), OTG host `Cannot enable` and charger `OCP` rerun still open | After Fault 4: attack Fault 2 (host mode) |
 | **P2** | **Release hygiene** | `main` `v1.3.2` + `k6a-ctl` `v1.1.6` versioned ZIPs | Releases are `v4.14.369-badazz-buildXX` automatically via CI; next `main` release gets a changelog |
-| **P2** | **Docs** | `README.md` + `AGENTS.md` refreshed at Build 320 | `Documentation/` is stock Linux 4.14 — leave it alone, keep project docs in the root `*.md` |
+| **P2** | **Docs** | `README.md` + `AGENTS.md` refreshed at Build 333 | `Documentation/` is stock Linux 4.14 — leave it alone, keep project docs in the root `*.md` |
 
 ---
 
