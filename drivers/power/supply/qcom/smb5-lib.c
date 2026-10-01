@@ -7338,6 +7338,7 @@ irqreturn_t usb_plugin_irq_handler(int irq, void *data)
 	struct smb_irq_data *irq_data = data;
 	struct smb_charger *chg = irq_data->parent_data;
 
+	pr_info("Build333: usbplug_irq enter\n");
 	if (chg->pd_hard_reset)
 		smblib_usb_plugin_hard_reset_locked(chg);
 	else
@@ -8553,6 +8554,7 @@ irqreturn_t typec_or_rid_detection_change_irq_handler(int irq, void *data)
 	struct smb_irq_data *irq_data = data;
 	struct smb_charger *chg = irq_data->parent_data;
 
+	pr_info("Build333: rid_irq enter conn=%d\n", chg->connector_type);
 	smblib_dbg(chg, PR_INTERRUPT, "IRQ: %s\n", irq_data->name);
 
 	if (chg->connector_type == POWER_SUPPLY_CONNECTOR_MICRO_USB) {
@@ -8599,6 +8601,7 @@ irqreturn_t typec_state_change_irq_handler(int irq, void *data)
 	int typec_mode;
 	static bool rara = false;
 
+	pr_info("Build333: typec_irq enter conn=%d\n", chg->connector_type);
 	if (chg->connector_type == POWER_SUPPLY_CONNECTOR_MICRO_USB) {
 		smblib_dbg(chg, PR_INTERRUPT,
 				"Ignoring for micro USB\n");
@@ -8685,6 +8688,7 @@ irqreturn_t typec_attach_detach_irq_handler(int irq, void *data)
 	bool attached = false;
 	int rc;
 
+	pr_info("Build333: attach_irq enter\n");
 	smblib_dbg(chg, PR_INTERRUPT, "IRQ: %s\n", irq_data->name);
 
 	rc = smblib_read(chg, TYPE_C_STATE_MACHINE_STATUS_REG, &stat);

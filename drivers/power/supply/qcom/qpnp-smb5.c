@@ -4106,6 +4106,21 @@ static struct smb_irq_info smb5_irqs[] = {
 	},
 };
 
+static irqreturn_t b333_irq(int irq, void *data)
+{
+	struct smb_irq_data *irq_data = data;
+	int i;
+
+	pr_info("Build333: irq %s\n",
+		irq_data && irq_data->name ? irq_data->name : "?");
+
+	for (i = 0; i < ARRAY_SIZE(smb5_irqs); i++)
+		if (smb5_irqs[i].irq_data == irq_data && smb5_irqs[i].handler)
+			return smb5_irqs[i].handler(irq, data);
+
+	return IRQ_HANDLED;
+}
+
 static int smb5_get_irq_index_byname(const char *irq_name)
 {
 	int i;
@@ -4150,16 +4165,17 @@ static int smb5_request_interrupt(struct smb5 *chip,
 	mutex_init(&irq_data->storm_data.storm_lock);
 
 	smb5_irqs[irq_index].enabled = true;
+	smb5_irqs[irq_index].irq_data = irq_data;
 	rc = devm_request_threaded_irq(chg->dev, irq, NULL,
-					smb5_irqs[irq_index].handler,
+					b333_irq,
 					IRQF_ONESHOT, irq_name, irq_data);
 	if (rc < 0) {
 		pr_err("Couldn't request irq %d\n", irq);
+		smb5_irqs[irq_index].irq_data = NULL;
 		return rc;
 	}
 
 	smb5_irqs[irq_index].irq = irq;
-	smb5_irqs[irq_index].irq_data = irq_data;
 	if (smb5_irqs[irq_index].wake)
 		enable_irq_wake(irq);
 
