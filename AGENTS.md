@@ -4,14 +4,15 @@
 - **Repo**: `vandalsquad187/BadazzKernel` branch `main`
 - **Kernel**: `4.14.369` — `K6A_GOV v1.5.0` **as a loadable module** (`CONFIG_K6A_GOV=m`),
   `LOCALVERSION=-BadazzKernel-sweet-v1.3.2`
-- **Local**: `main` @ `c42a67d07` — Build 341 (module conversion + `hash_state`). Before that
-  `e0e8d0d9f` (k6a-ctl v1.2.0 record) and
-  `341f6f5b0` (k6a_gov v1.4.0 / BW-floor release). Working tree clean.
+- **Local**: `main` @ `11c2ae479` — the Build-341 scope plus its `LINUX_VERSION_CODE` revert.
+  Before that `786aae15a` (docs), `c42a67d07` (the scope itself). Working tree clean.
 - **GitHub**: CI builds on every push to `main` (release) and `miui/test` (artifacts only);
-  latest release `v4.14.369-badazz-build340` (2026-10-02). **337/338/339 are docs-only** —
-  their binary equals Build 336. The user is **running build340** (flashed 2026-10-02) together
-  with **k6a-ctl v1.2.0** — see *Phase-4 acceptance*, passed. **Build 341** (`c42a67d07`)
-  was pushed 2026-10-02 and is waiting to be flashed; k6a-ctl **v1.3.0** ships with it.
+  latest release `v4.14.369-badazz-build344` (2026-10-02). Release names come from
+  `github.run_number`, so **the Build-341 scope shipped as `build344`**: `build341` and
+  `build342` are older **docs-only** builds that do *not* contain the module conversion, and run
+  343 is the one that failed. The user is **running build344** (flashed 2026-10-02) together
+  with **k6a-ctl v1.3.1** — post-flash verification **passed**, see *After the flash* below.
+  **337/338/339 are also docs-only** (their binary equals Build 336).
 - **KSU-Next Submodule**: `b100bd28` (`v3.3.0-95-gb100bd28`, dev-4.14-prctl-fix, UAPIv4)
   - `KernelSU-Next/kernel/Makefile:10` has `-DKSU_VERSION=33300`, **but that is only the
     non-git fallback**. The real value comes from `kernel/Kbuild:112` →
@@ -37,10 +38,11 @@
   vold mount work). Fault 3 (charger `APSD=OCP` rerun loop) **closed 2026-10-02** by a 500 s
   capture on Build 338 — 0× `APSD=OCP` (see *USB Debugging*). Fault 1's storm stopped in
   Build 320/331. **Build 340 governor fixes landed, flashed and accepted 2026-10-02**;
-  **k6a-ctl v1.2.0 flashed the same day**. **Build 341 is implemented and pushed** —
-  `CONFIG_K6A_GOV=m` + the version lock + finding 1 of *Build 341 scope*, with k6a-ctl
-  **v1.3.0**. Finding 2 (`LINUX_VERSION_CODE`) was measured, **tried, and reverted** — it broke
-  CI, see its section. Remaining: **the flash** plus the post-flash verification.
+  **k6a-ctl v1.2.0 flashed the same day**. **Build-341 scope flashed as `build344` and accepted
+  2026-10-03** — `CONFIG_K6A_GOV=m` + the version lock + finding 1 of *Build 341 scope*, with
+  k6a-ctl **v1.3.1**. Finding 2 (`LINUX_VERSION_CODE`) was measured, **tried, and reverted** —
+  it broke CI, see its section. Finding 3 (sysfs denied to the governor thread) was surfaced by
+  that very flash and fixed by a `sepolicy.rule`, verified after a reboot. Nothing outstanding.
 - **User speaks German**; device reports go out in German
 
 ## Repo & Docs Layout
@@ -611,8 +613,10 @@ insmod: failed to load .../hybridmount-android12-5.10.ko: Exec format error
                                  should be '4.14.369-openela-rc1-BadazzKernel-sweet-v1.3.2-build340 SMP preempt mod_unload aarch64'
 ```
 
-**No `sepolicy.rule` is needed.** The same output gives the second lock for free: vermagic
-ties a `.ko` to exactly one build, so build341's `k6a_gov.ko` refuses to load anywhere else.
+**No `sepolicy.rule` is needed for *loading*** — `module_load` is granted by KSU's own policy.
+The same output gives the second lock for free: vermagic ties a `.ko` to exactly one build, so
+build344's `k6a_gov.ko` refuses to load anywhere else. A `sepolicy.rule` *is* required for
+something else entirely, the build-hash read; see finding 3 below.
 
 Hook chain, for reference (`kernel/module.c` + `security/selinux/hooks.c`):
 `init_module()` → `may_init_module()` (`capable(CAP_SYS_MODULE)`, returns `-EPERM`) →
@@ -626,9 +630,11 @@ If the load ever *is* denied in future builds, the fix is a one-line
 `sepolicy.rule` — three installed modules already ship one).
 
 ### Git History (main)
-Full log: `git log --oneline -40`. Head is Build 341, on top of the USB debug series:
+Full log: `git log --oneline -40`. Head is the Build-341 revert, on top of the scope itself:
 
 ```
+11c2ae479 Build 341: revert the LINUX_VERSION_CODE change that broke CI
+786aae15a docs: record Build 341 and the measured insmod path
 c42a67d07 Build 341: turn k6a_gov into a module and close the version-lock findings
 341f6f5b0 Build 340: release the k6a_gov CPU cap and BW floors again, escalate, validate sysfs
 75e8d0bee docs: the KSU version is 38309 at runtime, and userspace is now v3.4.0-19
@@ -665,33 +671,37 @@ bff0adc79 Build 313: link/PHY state + DEVT diagnostics (no behavior change)
 
 Note: **Build 331 (`524ca3253`) was released but never flashed** — testing jumped from 330 to 332.
 
-k6a_gov history: `c42a67d07` v1.5.0 module + hash_state, `341f6f5b0`
+k6a_gov history: `11c2ae479` LINUX_VERSION_CODE revert, `c42a67d07` v1.5.0 module + hash_state, `341f6f5b0`
 v1.4.0 cap/BW release + escalation + validation, `81d69ae` v1.3.1 ticks
 fix, `d4835b6` deadlock, `53bb809` v1.3.1 hardening, `967c134` v1.3.0 BW floors + profile 5,
 `dfcb96b` v1.2.1, `602a281` `CONFIG_K6A_GOV=y`.
 
 ## k6a-ctl Companion
-- **Repo**: `vandalsquad187/k6a-ctl` branch `main` @ **`1513fd8` (v1.3.0, versionCode 130)**,
-  release `v1.3.0` → asset `k6a-ctl-v1.3.0.zip`, local clone `~/k6a-ctl`.
-  Previous: `426b516` v1.2.0 (versionCode 120) → `k6a-ctl-v1.2.0.zip` (20 543 B).
-  Recent commits: `1513fd8` v1.3.0 (Build 341: insmod + version lock), `426b516` v1.2.0
-  (Phase 5), `a049fac` v1.1.6 version format,
+- **Repo**: `vandalsquad187/k6a-ctl` branch `main` @ **`eec3d96` (v1.3.1, versionCode 131)**,
+  release `v1.3.1` → asset `k6a-ctl-v1.3.1.zip` (22 171 B), local clone `~/k6a-ctl`.
+  Previous: `6317a27` (drop the stale `LINUX_VERSION_CODE` hint), `1513fd8` v1.3.0 (130),
+  `426b516` v1.2.0 (120) → `k6a-ctl-v1.2.0.zip` (20 543 B).
+  Recent commits: `eec3d96` v1.3.1 (sepolicy.rule + gate `[5c]`), `6317a27` (warning text),
+  `1513fd8` v1.3.0 (Build 341: insmod + version lock), `426b516` v1.2.0 (Phase 5),
+  `a049fac` v1.1.6 version format,
   `a9170b6` v1.1.5 **removed the USB autosuspend workaround** (so userspace no longer masks a
   kernel bug), `de3c037` v1.1.4 dwc3 autosuspend off, `18cf392` v1.1.3 log rotation +
   `battery_guard_temp`, `a639e7c` v1.1.2 robustheit, `e43ccf6` v1.1.1 whitelisted handler.
-- **v1.3.0 released (`1513fd8`) but not yet on the device** — flash it together with
-  Build 341. The device still runs **v1.2.0 / versionCode 120** (read 2026-10-02):
-  `/data/adb/modules/k6a-ctl/disable` **removed**, both daemons alive
-  (pids in `run/*.pid`) and `webui-server.sh` listening on `127.0.0.1:8767`.
-  `data.txt` carries the new keys: `gov_policy_max=2304000`, `gov_state_age`, `gov_temp_src=1`,
-  `gov_temp_valid=1`, `gov_batt_guard=1`, `gov_game_pid=0`, `gov_version=1.4.0`.
-  `gov_batt_guard=1` is the new sync working — the node read **0** the day before.
-  Controller log shows the auto profile flip `gaming ↔ badazz_safe` at `auto_badazz_temp=85`.
+- **v1.3.1 is on the device** (read 2026-10-03): `module.prop` `version=1.3.1` /
+  `versionCode=131`, `sepolicy.rule` root-owned 94 B, controller logged
+  `k6a-ctl v1.3.1 start`, `/ping` → `OK`.
+  **ksud's `module install` is unusable here** — `su -c` runs with `CapBnd=0`, so it fails with
+  `Error: Permission denied (os error 13)`; upgrades are done by unpacking to `/data/local/tmp`
+  and **`mv`-ing each file over** (root-owned, so `chmod` works), which also leaves the running
+  scripts' inodes intact. Backup of v1.2.0: `/data/local/tmp/k6a-ctl-v1.2.0.bak`.
+  `data.txt` carries `gov_policy_max`, `gov_state_age`, `gov_temp_src=1`, `gov_temp_valid=1`,
+  `gov_batt_guard=1`, `gov_game_pid=0`, `gov_version=1.5.0`, `gov_hash_state=1`.
 - **`check_module.sh` is a build gate, not a shipped tool** — `build.sh:17` deliberately excludes
   it (with `build.sh` itself) from the ZIP. Earlier notes framed its absence on the device as a
   defect; that was wrong. Running it by hand is repo-side only:
-  `sh <repo>/bin/check_module.sh <repo>`. Gate result 2026-10-02 (v1.3.0): **green, 0 warns**
-  including the new `[5b] Version-Lock k6a_gov` check.
+  `sh <repo>/bin/check_module.sh <repo>`. Gate result 2026-10-03 (v1.3.1): **green, 0 warns**
+  including `[5b] Version-Lock k6a_gov` and the new `[5c] sepolicy.rule` check (file present,
+  `allow kernel sysfs file {read open getattr}` present, no `:` anywhere in it).
 - **Phase 5 shipped (`426b516`, v1.2.0)**:
   - **BW-floor payload order bug found + fixed.** `applyBwFloors()` built the string interlaced
     `[gpubw_L2, llcc_L2, gpubw_L3, llcc_L3, gpubw_L4, llcc_L4]` while `bw_floors_store()` parses
@@ -736,7 +746,7 @@ fix, `d4835b6` deadlock, `53bb809` v1.3.1 hardening, `967c134` v1.3.0 BW floors 
   in the kernel — with `check_module.sh` gate `[5b]` keeping the two shells in sync, plus
   vermagic as the kernel-side lock.
 
-## Build 341 scope (finding 1 FIXED in `c42a67d07`; finding 2 investigated and dropped)
+## Build 341 scope (finding 1 FIXED in `c42a67d07`; finding 2 investigated and dropped; finding 3 fixed in k6a-ctl v1.3.1)
 
 Two findings from the Build 340 acceptance run, both in the version-lock area, both **pre-existing**
 (not introduced by Build 340) and both invisible until today:
@@ -874,27 +884,80 @@ Regenerate with `make ARCH=arm64 include/generated/uapi/linux/version.h` (confir
 5. Finding 2 **attempted and reverted in a follow-up commit**: `+ 0$(SUBLEVEL)` broke CI on
    `qca-wifi-host-cmn` (see the finding-2 section). `Makefile` is back to `+ 255` and the
    `build/run version delta` check is gone from `k6a_gov.c` instead.
+6. Finding 3 fixed in k6a-ctl `eec3d96` (v1.3.1): `sepolicy.rule` grants the governor thread
+   read access to sysfs — without it `hash_state` stays `3` forever (see below).
 
-#### After the flash — what to verify
+### 3. The hash check never had sysfs access (found on the build344 flash, fixed in k6a-ctl v1.3.1)
 
-```sh
-dmesg | grep -E 'Build341|k6a_gov'      # Build341: k6a_gov v1.5.0 loaded
-                                        # Build341: build hash verified (full-synergy) retries=0
-                                        # (kein "version delta" — Check entfernt; vermagic ist der Lock)
-grep -E 'version|hash_state|hash_verified' /sys/kernel/k6a_gov/status
-                                        # version=1.5.0  hash_verified=1  hash_state=1
-grep k6a_gov /data/adb/modules/k6a-ctl/config/service.log
-                                        # k6a_gov 1.5.0 aus /data/adb/k6a_gov.ko geladen
-ls -l /data/adb/k6a_gov.ko              # kam das .ko beim Flashen an?
-cat /proc/modules | grep k6a_gov         # k6a_gov 16384 0 0 Live 0x0
+build344 booted with everything green — `Build341: k6a_gov v1.5.0 loaded`, `.ko` present,
+`version=1.5.0` — except:
+
+```
+[10.940687] Build341: k6a_features/git_hash not readable yet, retrying
+[26.040150] Build341: hash verify gave up after 60 tries
+status: hash_verified=0 hash_state=3
+```
+
+`k6a_features` was fine all along: `cat /sys/kernel/k6a_features/git_hash` → `full-synergy`,
+and the node existed since `[0.772956]`. The governor's own `filp_open()` did not run as a
+normal user though — `verify_build_hash()` executes inside `gov_thread`, the kthread at
+`/proc/<pid>/comm == [k6a_gov]`, whose SELinux domain is **`u:r:kernel:s0`**.
+
+Measured with the world-writable selinuxfs oracle (write both SIDs and the class index, read
+the `allowed` mask back from the *same* fd — `exec 3<>/sys/fs/selinux/access`):
+
+| query | before | after the rule |
+|---|---|---|
+| `kernel → sysfs:file` (class 6) | **`0`** | **`40012`** (read+open+getattr) |
+| `kernel → sysfs:dir` (class 8) | `10000010` (search+getattr) | `10040012` (+read +open) |
+| `ksu → sysfs:file` (control) | `ffffffff` | — |
+
+Permission bit index is **1-based** (`perms/<name>`), so the AV bit is `1 << (n-1)`:
+`file.read`=2 → bit 1, `file.getattr`=5 → bit 4, `file.open`=19 → bit 18 → `0x40012`.
+
+**Why nobody ever saw this in `dmesg`:** `auditdeny` for `kernel/sysfs/file` has bit 2 (`read`)
+clear, i.e. the denial is `dontaudit`ed while still being enforced. The fix lives in
+k6a-ctl's `sepolicy.rule` (colon-less syntax — ksud rejects `allow x y:z …` with
+`Failed to parse policy statement` and `ksud sepolicy apply` then silently skips it):
+
+```
+allow kernel sysfs dir {search read open getattr}
+allow kernel sysfs file {read open getattr}
+```
+
+ksud applies `/data/adb/modules/*/sepolicy.rule` at boot; proven on this device by the two
+modules that already shipped one — rezygisk's `allow zygote ksu dir search` reads back as
+`zygote → ksu:dir = 10000000`, brene's as `netd → adb_data_file = 10000000`. k6a-ctl gate
+`[5c]` now fails the build if `sepolicy.rule` is missing, lacks the grant, or contains a colon.
+
+#### After the flash — measured on build344 (passed 2026-10-03, after one reboot)
+
+```
+$ /system/bin/su -c 'cat /sys/kernel/k6a_gov/status'
+version=1.5.0 state=cd_l3 legacy_mode=1 hash_verified=1 hash_state=1
+
+$ dmesg | grep -E 'Build341|hash'
+[10.961695] Build341: k6a_gov v1.5.0 loaded (legacy=1 profile=1 freq_init=deferred)
+[10.961816] Build341: build hash verified (full-synergy) retries=0
+
+/proc/modules            → k6a_gov 32768 0 - Live
+/data/adb/k6a_gov.ko     → 44560 B, delivered by anykernel.sh
+k6a_features version     → 265983        (revert confirmed: no "version delta" warning)
+sepolicy AV kernel→sysfs:file → 40012    (rule applied by ksud at boot)
+k6a-ctl                  → version=1.3.1 versionCode=131
 ```
 
 Failure modes and what they mean: no `k6a_gov.ko` file → the flash copy failed (check the
 `ui_print` lines); `insmod ... rc=1` with `Exec format error` → vermagic/`.ko` is from another
-build; `insmod ... Permission denied` → SELinux (add the `sepolicy.rule` above); nothing at
-all in `service.log` → k6a-ctl v1.3.0 is not installed. In every one of those cases k6a-ctl
-falls back to its own CD_L2/L3/L4 state machine, so thermal protection stays active — it is a
-degradation, never a brick.
+build; `insmod ... Permission denied` → SELinux for `module_load` (add
+`allow ksu self:system module_load`); nothing at all in `service.log` → k6a-ctl is not
+installed; `hash_state=3` → the `sepolicy.rule` of finding 3 is missing. In every one of those
+cases k6a-ctl falls back to its own CD_L2/L3/L4 state machine, so thermal protection stays
+active — it is a degradation, never a brick.
+
+> **`su` in Termux**: the `su` on the PATH is Termux's stub ("No su program found").
+> Always use the absolute path **`/system/bin/su -c '…'`**, and absolute paths inside the
+> command — the root shell's PATH is broken (only the `echo` builtin is usable bare).
 
 ## KernelSU-Next SUSFS
 - SUSFS in `fs/susfs.c`, `include/linux/susfs.h`
