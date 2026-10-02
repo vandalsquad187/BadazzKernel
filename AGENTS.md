@@ -6,9 +6,27 @@
 - **Local**: clean, `main` @ `708e94da9` (Build 336: Fault 4 fixed — `ffs_func_eps_enable` now
   assigns `ffs` before `ffs_log`)
 - **GitHub**: CI builds on every push to `main` (release) and `miui/test` (artifacts only);
-  latest release `v4.14.369-badazz-build336` (CI run `36939069596`, success)
-- **KSU-Next Submodule**: `b100bd28` (`v3.3.0-95-gb100bd28`, dev-4.14-prctl-fix, UAPIv4, `KSU_VERSION=33300`
-  in `KernelSU-Next/kernel/Makefile`)
+  latest release `v4.14.369-badazz-build338` (CI run `36971228512`, success). **337/338 are
+  docs-only** — the kernel binary is identical to Build 336.
+- **KSU-Next Submodule**: `b100bd28` (`v3.3.0-95-gb100bd28`, dev-4.14-prctl-fix, UAPIv4)
+  - `KernelSU-Next/kernel/Makefile:10` has `-DKSU_VERSION=33300`, **but that is only the
+    non-git fallback**. The real value comes from `kernel/Kbuild:112` →
+    `KSU_VERSION = 35000 + KSU_GIT_VERSION`, so the **running kernel reports `38309`** and
+    `uapi=4`. Do not "fix" this — see below.
+  - Why base 35000: submodule commit `045e4fb6` changed 30000 → 35000 because the **spoofed
+    Manager sets `MINIMAL_SUPPORTED_KERNEL = 34634`**. With the old base the kernel would report
+    `30000 + 3309 = 33309`, which is below 34634 and makes the manager show "update required".
+    Verified on device 2026-10-02: `KernelSU: ksu GET_INFO: version=38309 uapi=4 flags=0x0` —
+    clears the floor, and `uapi=4` matches ksud's `uapi: 4`.
+- **Installed KSU userspace (2026-10-02)** — **not** the pin older notes mention:
+  - ksud `/data/adb/ksud` → `ksud 3.4.0-19-g2b31f718 (uapi: 4)`, from
+    KernelSU-Next CI run [`36750739326`](https://github.com/KernelSU-Next/KernelSU-Next/actions/runs/36750739326)
+    (head `2b31f718`, *manager: Check secure screen lock when enabling App lock*, success).
+  - Manager: `versionName=v3.4.0-19-g2b31f718-spoofed`, installed 2026-10-02 08:11.
+    **The spoofed build has a randomised applicationId — currently `gojcms.hgelex.jabkht`.**
+    `pm list packages | grep ksu` therefore finds **nothing**; look it up by `versionName` via
+    `dumpsys package <pkg> | grep versionName`, or hunt the newest entry in `ls -1td /data/app/*/*`.
+  - `kernel/Makefile:10`'s `33300` and any doc quoting it as "the version" are stale.
 - **Open blockers**: none. Fault 4 (whole-SoC reset on USB-C attach) **closed in Build 336 and
   verified on device** — `USB_STATE=CONFIGURED`, no oops (see *USB Debugging*). Fault 2 (OTG host)
   **no longer reproduces on Build 336** (stick enumerates, `usb-storage` + vold mount work). Only
@@ -329,7 +347,9 @@ git show HEAD:drivers/power/supply/qcom/smb5-lib.c > ~/tmp/smb5_pristine.c
 
 ### sweet_defconfig
 - `CONFIG_K6A_GOV=y`
-- `CONFIG_KSU=y` `33300` UAPIv4, `CONFIG_KSU_SUSFS=y` + all sub-options + `TAMPER_SYSCALL_TABLE`
+- `CONFIG_KSU=y` **runtime `38309`** (`35000 + git`, `Kbuild:112`) UAPIv4, `CONFIG_KSU_SUSFS=y` +
+  all sub-options + `TAMPER_SYSCALL_TABLE`. `Makefile`'s `-DKSU_VERSION=33300` is the fallback
+  for non-git builds and never wins when the submodule is a git checkout.
 - `CONFIG_SCHED_TUNE=y` `CONFIG_KSM=y` `CONFIG_BOEFFLA_WL_BLOCKER=y`
 - `CONFIG_MSM_PERFORMANCE=y` `CONFIG_CPU_FREQ_TIMES=y` `CONFIG_PSI=y`
 - `CONFIG_LOG_BUF_SHIFT=20` (1 MB ring buffer, raised from 17 in Build 320)
@@ -396,7 +416,7 @@ k6a_gov history: `81d69ae` v1.3.1 ticks fix, `d4835b6` deadlock, `53bb809` v1.3.
 ## KernelSU-Next SUSFS
 - SUSFS in `fs/susfs.c`, `include/linux/susfs.h`
 - Hooks in `fs/stat.c` (`CONFIG_KSU_SUSFS_SUS_KSTAT`) and `kernel/sys.c` (`CONFIG_KSU_SUSFS_SPOOF_UNAME`)
-- Submodule `KernelSU-Next` @ `b100bd28` (`v3.3.0-95-gb100bd28`, `KSU_VERSION=33300`, UAPIv4)
+- Submodule `KernelSU-Next` @ `b100bd28` (`v3.3.0-95-gb100bd28`, runtime `KSU_VERSION=38309`, UAPIv4)
 - `git submodule update --init --recursive` required for fresh clone
 
 ## Working Agreements

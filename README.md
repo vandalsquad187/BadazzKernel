@@ -5,7 +5,7 @@
   <p>
     <img src="https://img.shields.io/badge/Kernel-4.14.369-blue?style=flat-square">
     <img src="https://img.shields.io/badge/k6a__gov-1.3.1-orange?style=flat-square">
-    <img src="https://img.shields.io/badge/KernelSU--Next-33300-green?style=flat-square">
+    <img src="https://img.shields.io/badge/KernelSU--Next-38309-green?style=flat-square">
     <img src="https://img.shields.io/badge/SUSFS-yes-success?style=flat-square">
     <img src="https://img.shields.io/badge/Android-13%20%7C%2014-lightgrey?style=flat-square">
   </p>
@@ -25,7 +25,7 @@ BadazzKernel is a performance and gaming tuned kernel for **Redmi Note 12 Pro 4G
 
 ```
 linux-4.14.369
-├── KernelSU-Next 33300 (UAPIv4) + SUSFS v2.2.0  # Root + Hide (submodule b100bd28)
+├── KernelSU-Next 38309 (UAPIv4) + SUSFS v2.2.0  # Root + Hide (submodule b100bd28)
 ├── drivers/thermal/k6a_gov/k6a_gov.c v1.3.1     # In-kernel gaming governor
 ├── drivers/gpu/msm/kgsl_pwrctrl.c               # GPU pwrlevel export (k6a_gov)
 ├── drivers/devfreq/devfreq.c                    # BW floors (gpubw / llcc)
@@ -46,7 +46,7 @@ linux-4.14.369
 | **Profiles** | 6 profiles | `off/gaming/battery/badazz/custom/badazz_safe` — temps, Gold/GPU/BW floors |
 | **Safety** | Battery guard + hash | `battery_guard` @45°C → CD_L2, `poll_ms` 100..5000, `verify_build_hash` vs `k6a_features/git_hash` |
 | **Thermal** | Cooling device | `k6a_gov` as `thermal_cooling_device`, `cool_cur` locked, `K6A_CD_L4` clamp |
-| **Root** | KSU-Next + SUSFS | 33300 **UAPIv4** (submodule `b100bd28`), SUSFS `v2.2.0` (sus_path/mount/kstat/map), `tamper_syscall_table` |
+| **Root** | KSU-Next + SUSFS | 38309 **UAPIv4** (submodule `b100bd28`), SUSFS `v2.2.0` (sus_path/mount/kstat/map), `tamper_syscall_table` |
 | **USB** | DWC3 / QUSB2 | SM6150 clocks (`GCC/DISPCC/CAMCC`), `WAIT_FOR_LPM` clear, `bus_aggr`/`GCTL` 50ms, `is_a_peripheral` fix — PC bootloop gone since v1.3.2. Full device-mode enumeration works since Build 336 (Faults 1/4 fixed) — see [USB status](#usb-status) |
 | **Scheduler** | UCLAMP, SCHED_CASS | Latency/efficiency tuning |
 | **Memory** | KSM, LRU_GEN, ZRAM lz4 | Gaming stability |
@@ -97,7 +97,7 @@ k6a-ctl v1.1.6 (delegated=1)
 
 1. Download **Release** from [GitHub Releases](https://github.com/vandalsquad187/BadazzKernel/releases) (`Badazz-kernel-sweet-v4.14.369-buildXX.zip` or `-miui.zip` for HyperOS)
 2. Flash ZIP via **OrangeFox / TWRP** (AnyKernel3)
-3. Install **KernelSU-Next Manager** APK (use CI `34142634591` for now, `34252913097` requires pending `88feb68` 4.14 port)
+3. Install **KernelSU-Next Manager** APK — current: CI run [`36750739326`](https://github.com/KernelSU-Next/KernelSU-Next/actions/runs/36750739326) (`2b31f718` → `v3.4.0-19-g2b31f718-spoofed`), **uapi 4** like our kernel. The spoofed build ships a **randomised applicationId** (it has been `gojcms.hgelex.jabkht`), so `pm list packages | grep ksu` finds nothing — identify it by `versionName` instead. CI `34252913097` still needs the pending `88feb68` 4.14 port
 4. (Recommended) Install **[k6a-ctl](https://github.com/vandalsquad187/k6a-ctl)** module — `delegated=1`
 
 ### Build (Dev)
@@ -219,7 +219,7 @@ Build 320 raised `CONFIG_LOG_BUF_SHIFT` 17 → 20 (128 KB → 1 MB), and the ker
 
 | Version | Highlights |
 |---------|------------|
-| **v1.3.2 (current)** | **USB fix**: SM6150 clocks, `WAIT_FOR_LPM` deadlock, `bus_aggr`/`GCTL` 50ms, `is_a_peripheral` — no PC bootloop; **MIUI**: `sweet_miui.config` overlay + DTS `xiaomi/sweet` + CI matrix `aosp`/`miui`; **CI**: build number in release/ZIP (`vX-buildXX`); **KSU**: submodule at `b100bd28` (33300, UAPIv4) until `88feb68` 4.14 port on PC (manager `34142634591` for now) |
+| **v1.3.2 (current)** | **USB fix**: SM6150 clocks, `WAIT_FOR_LPM` deadlock, `bus_aggr`/`GCTL` 50ms, `is_a_peripheral` — no PC bootloop; **MIUI**: `sweet_miui.config` overlay + DTS `xiaomi/sweet` + CI matrix `aosp`/`miui`; **CI**: build number in release/ZIP (`vX-buildXX`); **KSU**: submodule at `b100bd28` (runtime `38309` = `35000 + git`, UAPIv4) until `88feb68` 4.14 port on PC; userspace ksud + manager `v3.4.0-19-g2b31f718` (CI `36750739326`), spoofed APK with random applicationId |
 | **v1.3.1** | Hardening: `find_gold_cpu`, notifier/mutex fixes, `cool_cur`/`status_show` locked, `ticks` fix |
 | v1.3.0 | BW floors write, hash coupling, `badazz_safe` profile 5 |
 | v1.2.1 | `badazz_safe`, multi-zone temp, `clamp_freq` fix |
@@ -237,7 +237,7 @@ Full Changelog: `git log --oneline`
 | **USB PC Bootloop** | PC host → instant reboot/bootloop, 67W charger OK, `No data transfer` didn't help, `bq2597x` init cut at 0.73s, stock boot.img OK | DWC3 `WAIT_FOR_LPM` deadlock + EP0 `TRB timeout` (`bus_aggr`/`noc_aggr` clocks off, `GCTL RAMCLKSEL` on `rev 00000000` wrong, `is_a_peripheral=0`) → WDT bite | SM6150 clocks (`GCC/DISPCC/CAMCC/SCC`), `WAIT_FOR_LPM` clear on extcon, `bus_aggr` enable + IOMMU guard, `GCTL` 50ms delay, `is_a_peripheral` `pullup`/`vbus_connect` — verified S21 + PC `IRQ>0` `mtp,adb` |
 | **USB attach → whole-SoC reset** (Fault 4) | USB-C into a Galaxy S21 → 5 s vibration + reboot, log empty, `/sys/fs/pstore` empty every time | `ffs_func_eps_enable()` used the local `struct ffs_data *ffs` in an `ffs_log()` **before** `ffs = func->ffs;` → `ipc_log_string(ffs->ipc_log, …)` dereferences an uninitialised pointer (`+0x1a8`, x0=0) → oops kills `dwc_wq` → `panic=5` → PS_HOLD `'cold' boot` wipes ramoops | **Build 336**: assign `ffs` before the `ffs_log`; **Build 335** breadcrumbs proved it. Verified: `USB_STATE=CONFIGURED`, UDC `configured`, zero oops |
 | **Identical Release Names** | All GitHub Releases/ZIPs named identically (`v4.14.369`) | `build-kernel.yml` `name: "Badazz-kernel v${VERSION}"` + ZIP `v${VERSION}.zip` without `run_number` | CI now `name: "v${VERSION}-badazz-build${run_number}"` + ZIP `v${VERSION}-build${run_number}[ -miui].zip` + artifact `…-buildXX-variant` |
-| **KSU Manager "update required"** | Manager CI `34252913097` (`88feb68` `e801e16` version matching) on kernel `a5ff54c` → red banner | `e801e16` new UAPI + `bundled_lkm` check, old kernel UAPI mismatch; `88feb68` needs `KPROBES` + 5.x APIs (`syscall_fn_t`, `pgtable.h`, `lsm_hook`) not 4.14 compatible | Fork `dev` → `88feb68` for PC, hotfix `CONFIG_KPROBES=y` + `syscall_fn_t`/`pgtable`/`ksys_close` guards, then **revert** to the current line (`b100bd28`, UAPIv4) until a proper 4.14 port exists (manager stays on `34142634591`) |
+| **KSU Manager "update required"** | Manager CI `34252913097` (`88feb68` `e801e16` version matching) on kernel `a5ff54c` → red banner | `e801e16` new UAPI + `bundled_lkm` check, old kernel UAPI mismatch; `88feb68` needs `KPROBES` + 5.x APIs (`syscall_fn_t`, `pgtable.h`, `lsm_hook`) not 4.14 compatible | Fork `dev` → `88feb68` for PC, hotfix `CONFIG_KPROBES=y` + `syscall_fn_t`/`pgtable`/`ksys_close` guards, then **revert** to the current line (`b100bd28`, UAPIv4) until a proper 4.14 port exists. **Resolved 2026-10-02**: manager + ksud `v3.4.0-19-g2b31f718` (CI `36750739326`, uapi 4) run against our kernel `GET_INFO version=38309 ≥ 34634` with no red banner — the old `34142634591` pin is obsolete |
 | **MIUI/HOS not booting** | Stock HyperOS `V14.0.1.0` `4.14.190-perf` needs `ARCH_SM6150/CAMCC/GCC/PDC` + `xiaomi/sweet` DTS (`GTX9896_K6`, `FPC1540`) | `sweet_defconfig` flattened to `atoll/sm6150`, `QUSB2` only | `sweet_miui.config` overlay (7 lines) + `xiaomi/sweet` DTS shim + CI matrix `aosp`/`miui` (`miui/test` artifacts, `main` release `…-miui.zip`) |
 
 ---
