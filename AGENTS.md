@@ -3,12 +3,12 @@
 ## Current State
 - **Repo**: `vandalsquad187/BadazzKernel` branch `main`
 - **Kernel**: `4.14.369` — `K6A_GOV v1.4.0` built-in, `LOCALVERSION=-BadazzKernel-sweet-v1.3.2`
-- **Local**: `main` @ `75e8d0bee` + `341f6f5b0` (k6a_gov v1.4.0 / BW-floor release) and a dirty
-  `README.md` — next push is **Build 340** (the run number is 340: last runs are 337/338/339).
+- **Local**: `main` @ `e0e8d0d9f` — `341f6f5b0` (k6a_gov v1.4.0 / BW-floor release) + two docs
+  commits (`27d7c7299` Fault 3 / k6a_gov docs, `e0e8d0d9f` k6a-ctl v1.2.0 record). Working tree clean.
 - **GitHub**: CI builds on every push to `main` (release) and `miui/test` (artifacts only);
-  latest release `v4.14.369-badazz-build339` (2026-10-02 06:53, Latest). **337/338/339 are
-  docs-only** — the kernel binary is identical to Build 336 until Build 340 lands. The user is
-  running **build338**.
+  latest release `v4.14.369-badazz-build340` (2026-10-02). **337/338/339 are docs-only** —
+  their binary equals Build 336. The user is **running build340** (flashed 2026-10-02) together
+  with **k6a-ctl v1.2.0** — see *Phase-4 acceptance*, passed.
 - **KSU-Next Submodule**: `b100bd28` (`v3.3.0-95-gb100bd28`, dev-4.14-prctl-fix, UAPIv4)
   - `KernelSU-Next/kernel/Makefile:10` has `-DKSU_VERSION=33300`, **but that is only the
     non-git fallback**. The real value comes from `kernel/Kbuild:112` →
@@ -33,8 +33,9 @@
   Fault 2 (OTG host) **no longer reproduces on Build 336** (stick enumerates, `usb-storage` +
   vold mount work). Fault 3 (charger `APSD=OCP` rerun loop) **closed 2026-10-02** by a 500 s
   capture on Build 338 — 0× `APSD=OCP` (see *USB Debugging*). Fault 1's storm stopped in
-  Build 320/331. Remaining plan: Build 340 governor fixes → Build 341 `CONFIG_K6A_GOV=m` →
-  k6a-ctl bump.
+  Build 320/331. **Build 340 governor fixes landed, flashed and accepted 2026-10-02**;
+  **k6a-ctl v1.2.0 flashed the same day**. Remaining: **Build 341** —
+  `CONFIG_K6A_GOV=m` + the version lock, plus the two findings in *Build 341 scope*.
 - **User speaks German**; device reports go out in German
 
 ## Repo & Docs Layout
@@ -462,17 +463,32 @@ still `1708800` is exactly the raw `policy->max` poke that `cpufreq_update_polic
 Devfreq nodes live under `/sys/class/devfreq/soc:qcom,gpubw` (colon in the name, so always
 `/system/bin/cat` with an absolute path — the root PATH is broken inside `su -c`).
 
-**Phase-4 acceptance for Build 340** — all of this must hold while `state=gaming`:
+**Phase-4 acceptance for Build 340 — PASSED on device 2026-10-02** (all seven while `state=gaming`):
 
-| Check | Expected |
-|---|---|
-| `cat …/cpu6/cpufreq/scaling_max_freq` | `2304000` (= `cpuinfo_max_freq`) |
-| `cat /sys/class/devfreq/soc:qcom,gpubw/min_freq` | `0` |
-| `cat /sys/class/devfreq/soc:qcom,cpu-llcc-ddr-bw/min_freq` | `0` |
-| `grep version /sys/kernel/k6a_gov/status` | `version=1.4.0` |
-| `grep -E 'policy_max\|temp_src\|temp_valid\|state_age_ms' …/status` | all four present, `temp_valid=1`, `policy_max` tracking `scaling_max_freq` |
-| `dmesg \| grep Build340` | `k6a_gov v1.4.0 loaded`, `gold cap … Hz state=…` on entry and `0 Hz` on recovery |
-| heat / `grep Build340: escalate` | `hist=` shows `gaming>cd_l3` without a `gaming>cd_l2` step, `throttle_events` increments |
+| Check | Expected | Read |
+|---|---|---|
+| `cat …/cpu6/cpufreq/scaling_max_freq` | `2304000` (= `cpuinfo_max_freq`) | **2304000** (cpu7 too) ✅ |
+| `cat /sys/class/devfreq/soc:qcom,gpubw/min_freq` | `0` | **0** ✅ |
+| `cat /sys/class/devfreq/soc:qcom,cpu-llcc-ddr-bw/min_freq` | `0` | **0** ✅ |
+| `grep version /sys/kernel/k6a_gov/status` | `version=1.4.0` | **1.4.0** ✅ |
+| `grep -E 'policy_max\|temp_src\|temp_valid\|state_age_ms' …/status` | all four present, `temp_valid=1`, `policy_max` tracking `scaling_max_freq` | `policy_max=2304000`, `state_age_ms`, `temp_src=1`, `temp_valid=1` ✅ |
+| `dmesg \| grep Build340` | `k6a_gov v1.4.0 loaded`, `gold cap … Hz state=…` on entry and `0 Hz` on recovery | `loaded` + `1555200/1708800/1209600/1094400 Hz` + **`gold cap 0 Hz state=1`** ✅ |
+| heat / `hist=` | `gaming>cd_l3` reachable without a `gaming>cd_l2` step, `throttle_events` increments | 4× direct `gaming>cd_l3`, plus `cd_l3>cd_l2` and `cd_l2>gaming` ✅ |
+
+**Release proof over one heat cycle** (18 samples / 3 s — this is the bug ① + ⑨ evidence, not a
+single snapshot): at `cd_l2` → `cpu6_max=1708800`, `gpubw_min=4000`; back to `gaming` →
+**2304000 / 0 / 0**. At `cd_l3` → `1094400 / 1500 / 4000`; back to `gaming` → **2304000 / 0 / 0**.
+`throttle_events` 6 → 13 across the run, 0× `Unable to handle`/`Oops`/`Kernel panic`/`APSD=OCP`.
+
+Note: `uname`/`/proc/version` report `6.12.0-android16-6.12-perf-g1d01cd293` — that is the
+SUSFS spoof (it patches `init_uts_ns`, which `/proc/version` also reads). The real banner proof
+is the `Build340:` markers, and `k6a_features: … version=265983` shows the genuine
+`LINUX_VERSION_CODE` (see *Build 341 scope*).
+
+`Build340: escalate …` correctly printed **zero** times: every observed transition was either
+direct `gaming>cd_l3` (the GAMING branch has no marker by design) or a de-escalation
+(`cd_l3>cd_l2`, `cd_l2>gaming`), and neither escalates. The markers fire only on L2→L3,
+L2→L4, L3→L4.
 
 Reproduce a CD transition with a CPU load (e.g. `sha256sum` on 8 cores) and watch `state` and
 `policy_max` move together; after the load stops, `scaling_max_freq` must return to `2304000`.
@@ -590,10 +606,13 @@ fix, `d4835b6` deadlock, `53bb809` v1.3.1 hardening, `967c134` v1.3.0 BW floors 
   `a9170b6` v1.1.5 **removed the USB autosuspend workaround** (so userspace no longer masks a
   kernel bug), `de3c037` v1.1.4 dwc3 autosuspend off, `18cf392` v1.1.3 log rotation +
   `battery_guard_temp`, `a639e7c` v1.1.2 robustheit, `e43ccf6` v1.1.1 whitelisted handler.
-- **Device is 7 versions stale** (read 2026-10-02): `/data/adb/modules/k6a-ctl/module.prop` =
-  **v1.0.0 / versionCode 1**; `bin/` holds only `k6a-controller k6a-lib.sh webui-handler.sh
-  webui-server.sh`; `webroot/` has `app.js index.html style.css`; the module is **disabled**
-  (`/data/adb/modules/k6a-ctl/disable`, 2026-09-27 18:25).
+- **Device is up to date and enabled** (read 2026-10-02): `module.prop` = **v1.2.0 /
+  versionCode 120**, `/data/adb/modules/k6a-ctl/disable` **removed**, both daemons alive
+  (pids in `run/*.pid`) and `webui-server.sh` listening on `127.0.0.1:8767`.
+  `data.txt` carries the new keys: `gov_policy_max=2304000`, `gov_state_age`, `gov_temp_src=1`,
+  `gov_temp_valid=1`, `gov_batt_guard=1`, `gov_game_pid=0`, `gov_version=1.4.0`.
+  `gov_batt_guard=1` is the new sync working — the node read **0** the day before.
+  Controller log shows the auto profile flip `gaming ↔ badazz_safe` at `auto_badazz_temp=85`.
 - **`check_module.sh` is a build gate, not a shipped tool** — `build.sh:17` deliberately excludes
   it (with `build.sh` itself) from the ZIP. Earlier notes framed its absence on the device as a
   defect; that was wrong. Running it by hand is repo-side only:
@@ -624,12 +643,107 @@ fix, `d4835b6` deadlock, `53bb809` v1.3.1 hardening, `967c134` v1.3.0 BW floors 
   sched tuning + auto `badazz_safe` @85°C
 - **WebUI**: Gov-Status (+ policy_max/state_age/temp_src/temp_valid), BW-Floors, GPU-Caps,
   History timeline, Akku-Guard toggle
-- **Do not re-enable before Build 340**: on v1.3.1 the Gold cap and the BW floors are never
-  released (see *Pre-fix evidence*), so a userspace cooldown would fight the kernel. Drop
-  `/data/adb/modules/k6a-ctl/disable` only after the Build 340 acceptance run.
-- **Still open**: drop the `disable` file (after Build 340), and `synergie2.txt` TEIL 3 —
-  governor version string burned into both sides with a mismatch refusing to load — which is
-  Build 341's `k6a_gov.ko`.
+- **Do not re-enable before Build 340** *(historical — done)*: on v1.3.1 the Gold cap and the
+  BW floors were never released (see *Pre-fix evidence*), so a userspace cooldown would have
+  fought the kernel. The `disable` file was dropped after the Build 340 acceptance run.
+- **Still open**: `synergie2.txt` TEIL 3 — governor version string burned into both sides with
+  a mismatch refusing to load — which is Build 341's `k6a_gov.ko`.
+
+## Build 341 scope
+
+Two findings from the Build 340 acceptance run, both in the version-lock area, both **pre-existing**
+(not introduced by Build 340) and both invisible until today:
+
+### 1. `hash_verified=1` is reported even though the check never ran
+
+`k6a_gov_init` starts `gov_thread`, whose first iteration calls `verify_build_hash()` and then
+latches `hash_verified = true` **unconditionally** (`k6a_gov.c:565-568`):
+
+```c
+if (!hash_verified) {
+    if (verify_build_hash() != 0)
+        gov->legacy_mode = 0;
+    hash_verified = true;          /* <- also set when the check was skipped */
+}
+```
+
+On device the check **fails and is skipped**, at `[0.777182]`, i.e. 0.19 ms after
+`k6a_features: initialized (… version=265983)` at `[0.776989]` had already created the node:
+
+```
+[0.776989] k6a_features: initialized (cpu_floor=1, gpu_floor=1, msm_perf=1, thermal_writable=1, susfs=1, version=265983)
+[0.777182] k6a_gov: k6a_features/git_hash not found, skipping hash verify
+```
+
+The node exists (`/sys/kernel/k6a_features/git_hash` = `full-synergy` and is readable from
+userspace) — so the failure is that **`filp_open("/sys/…")` runs from an initcall context, before
+userspace `init` has mounted `/sys`**. kobject/kernfs creation does not need the mount, path
+lookup does. Since it is attempted exactly once and then latched, the verify never happens.
+
+Two consequences:
+- `status` reports `hash_verified=1` = "checked", the WebUI renders **✓ verified** — a lie.
+- `verify_build_hash()` distinguishes three outcomes but returns `0` for both *match* and
+  *skipped*, so skip and match are indistinguishable, and a genuine mismatch would silently set
+  `legacy_mode = 0` (hand control to userspace) while a skip leaves it at 1 (keep enforcing).
+  Today the outcome happens to be correct, because `K6A_BUILD_HASH "full-synergy"` equals the
+  runtime `git_hash` — but only by coincidence of the values, not by the check succeeding.
+
+**Fix for Build 341**: do not latch on failure. Retry (bounded, e.g. every tick until it
+succeeds or N attempts), and report a third state instead of a bool — `0 = mismatch/skipped,
+1 = verified` must not be one bit. This is the same code path TEIL 3 wants for the version lock,
+so fix it there rather than separately.
+
+### 2. `LINUX_VERSION_CODE` is pinned to 4.14.255
+
+`Makefile:1392-1396` does **not** use `$(SUBLEVEL)`:
+
+```make
+define filechk_version.h
+	(echo \#define LINUX_VERSION_CODE $(shell                         \
+	expr $(VERSION) \* 65536 + 0$(PATCHLEVEL) \* 256 + 255); \
+	echo '#define KERNEL_VERSION(a,b,c) (((a) << 16) + ((b) << 8) + (c))';)
+endef
+```
+
+so `include/generated/uapi/linux/version.h` is always `265983` (4.14.**255**) while the top
+Makefile says `SUBLEVEL = 369`. `k6a_gov.c:27` hardcodes
+`K6A_GOV_KERNEL_VER KERNEL_VERSION(4,14,369)` = `266097`, hence on **every boot**:
+
+```
+[0.776990] k6a_gov: build/run version delta (266097 vs 265983) — continuing (built-in)
+```
+
+The `255` is deliberate, not an accident: `KERNEL_VERSION` stores `SUBLEVEL` in only 8 bits, so
+369 would be emitted as `266097`, which decodes back as **4.15.113**. Capping at 255 keeps the
+decoded version sane but makes every `#if LINUX_VERSION_CODE >= KERNEL_VERSION(4,14,NNN)` with
+`NNN > 255` evaluate false.
+
+**Audit (2026-10-02)**: across the whole tree there is exactly **one** such gate —
+`KERNEL_VERSION(4,14,369)` inside `k6a_gov.c` itself, i.e. the warning above. The only other
+out-of-4.14 gate is `KERNEL_VERSION(5,0,0)`, which is false under either value. So option (a)
+below costs nothing today, and option (b) would flip nothing but our own warning. The real risk
+is forward-looking: any *future* `> 255` gate would silently stay false, and the version lock
+compares `265983` against a `.ko` built with `266097`.
+
+**Decision needed for Build 341** — either
+(a) keep `+ 255` and make `K6A_GOV_KERNEL_VER` `KERNEL_VERSION(4,14,255)` so both sides agree,
+    documenting that `LINUX_VERSION_CODE` is capped on this tree, or
+(b) drop the cap to `0$(SUBLEVEL)` so `LINUX_VERSION_CODE = 266097` and make
+    `K6A_GOV_KERNEL_VER` decode-safe.
+
+The audit above says (b) flips only our own warning, so **(b) is the better option** — but it
+changes a generated header for the whole tree, so it must ship with the audit evidence in the
+commit body, not alone.
+
+### Planned work (unchanged)
+
+1. `arch/arm64/configs/sweet_defconfig:208` `CONFIG_K6A_GOV=y` → `=m`.
+2. `.github/workflows/build-kernel.yml`: `REQUIRED_CONFIGS` `"CONFIG_K6A_GOV=y"` → `=m`; add
+   `modules` to the `make -j$JOBS Image.gz dtb.img dtbo.img` target list (it compiles `obj-m`
+   but does not run modpost); copy `drivers/thermal/k6a_gov/k6a_gov.ko` into `anykernel/`.
+3. `k6a-ctl` `service.sh`: `insmod …/k6a_gov.ko`, falling back to the legacy userspace cooldown
+   on failure; refuse to load when the `.ko` `version=` differs from what k6a-ctl expects (TEIL 3).
+4. Fix finding 1 in the same commit — the lock depends on it.
 
 ## KernelSU-Next SUSFS
 - SUSFS in `fs/susfs.c`, `include/linux/susfs.h`
