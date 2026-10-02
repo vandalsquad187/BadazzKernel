@@ -2,12 +2,13 @@
 
 ## Current State
 - **Repo**: `vandalsquad187/BadazzKernel` branch `main`
-- **Kernel**: `4.14.369` — `K6A_GOV v1.3.1` built-in, `LOCALVERSION=-BadazzKernel-sweet-v1.3.2`
-- **Local**: clean, `main` @ `708e94da9` (Build 336: Fault 4 fixed — `ffs_func_eps_enable` now
-  assigns `ffs` before `ffs_log`)
+- **Kernel**: `4.14.369` — `K6A_GOV v1.4.0` built-in, `LOCALVERSION=-BadazzKernel-sweet-v1.3.2`
+- **Local**: `main` @ `75e8d0bee` + `341f6f5b0` (k6a_gov v1.4.0 / BW-floor release) and a dirty
+  `README.md` — next push is **Build 340** (the run number is 340: last runs are 337/338/339).
 - **GitHub**: CI builds on every push to `main` (release) and `miui/test` (artifacts only);
-  latest release `v4.14.369-badazz-build338` (CI run `36971228512`, success). **337/338 are
-  docs-only** — the kernel binary is identical to Build 336.
+  latest release `v4.14.369-badazz-build339` (2026-10-02 06:53, Latest). **337/338/339 are
+  docs-only** — the kernel binary is identical to Build 336 until Build 340 lands. The user is
+  running **build338**.
 - **KSU-Next Submodule**: `b100bd28` (`v3.3.0-95-gb100bd28`, dev-4.14-prctl-fix, UAPIv4)
   - `KernelSU-Next/kernel/Makefile:10` has `-DKSU_VERSION=33300`, **but that is only the
     non-git fallback**. The real value comes from `kernel/Kbuild:112` →
@@ -27,10 +28,13 @@
     `pm list packages | grep ksu` therefore finds **nothing**; look it up by `versionName` via
     `dumpsys package <pkg> | grep versionName`, or hunt the newest entry in `ls -1td /data/app/*/*`.
   - `kernel/Makefile:10`'s `33300` and any doc quoting it as "the version" are stale.
-- **Open blockers**: none. Fault 4 (whole-SoC reset on USB-C attach) **closed in Build 336 and
-  verified on device** — `USB_STATE=CONFIGURED`, no oops (see *USB Debugging*). Fault 2 (OTG host)
-  **no longer reproduces on Build 336** (stick enumerates, `usb-storage` + vold mount work). Only
-  Fault 3 (charger `APSD=OCP` rerun loop) is still open, and it is cosmetic.
+- **Open blockers**: none. All four USB faults are closed. Fault 4 (whole-SoC reset on USB-C
+  attach) **closed in Build 336 and verified on device** — `USB_STATE=CONFIGURED`, no oops.
+  Fault 2 (OTG host) **no longer reproduces on Build 336** (stick enumerates, `usb-storage` +
+  vold mount work). Fault 3 (charger `APSD=OCP` rerun loop) **closed 2026-10-02** by a 500 s
+  capture on Build 338 — 0× `APSD=OCP` (see *USB Debugging*). Fault 1's storm stopped in
+  Build 320/331. Remaining plan: Build 340 governor fixes → Build 341 `CONFIG_K6A_GOV=m` →
+  k6a-ctl bump.
 - **User speaks German**; device reports go out in German
 
 ## Repo & Docs Layout
@@ -58,10 +62,11 @@
 
 ## USB Debugging (Build 300–336)
 
-Status: **All four faults are now explained.** Fault 4 — the whole-SoC reset on USB-C attach —
+Status: **All four faults are closed.** Fault 4 — the whole-SoC reset on USB-C attach —
 was a one-line uninitialized local and is **fixed in Build 336, verified on device**. Fault 1 was
 closed by Builds 320/331; **Fault 2 no longer reproduces on Build 336** (OTG stick enumerates and
-mounts). Fault 3 (charger OCP rerun) is the only one still open, and it is cosmetic.
+mounts); **Fault 3 does not reproduce any more either** — closed 2026-10-02 by a 500 s capture
+(see below).
 
 Key files: `drivers/usb/gadget/function/f_fs.c`, `drivers/usb/dwc3/gadget.c`,
 `drivers/usb/dwc3/dwc3-msm.c`, `drivers/usb/dwc3/core.c`,
@@ -220,10 +225,66 @@ vold reported `public:8,97 failed filesystem check` / `state unmountable`, while
 inspection via `blkid` was fine. A later plug passed. Cannot be mounted manually for testing —
 root has no `CAP_SYS_ADMIN`, so `mount` returns `EPERM`.
 
-### Fault 3 — charger
-`APSD=OCP` rerun loop every 5 s. Expected **no** `vbus_notifier` line —
-`smblib_handle_apsd_done()` only calls `smblib_notify_device_mode()` for SDP/CDP/FLOAT
-(smb5-lib.c:8021).
+### Fault 3 — charger `APSD=OCP` (CLOSED 2026-10-02, does not reproduce)
+
+**Symptom**: `APSD=OCP` logged repeatedly, with `smblib_rerun_apsd: re-running APSD` every ~5 s
+while a charger was connected.
+
+**Where the string comes from**: `APSD=` is not a `pr_info` — it is the debug print
+`smb5-lib.c:1462` (`smblib_dbg(chg, PR_MISC, "APSD=%s PD=%d QC3P5=%d\n", …)`), so it only shows
+with the debug mask on. The value is `apsd_result->name`, i.e. the fault is literally
+`apsd_result->name == "OCP"`. The rerun itself is `smblib_rerun_apsd_if_required()` called from
+the `usb_source_change` ISR (`smb5-lib.c:8072`), `typec`/`attach` IRQs (`:9345`, `:9468`) and
+init (`:10297`).
+
+**The dwc3 side is deliberate, not a leak** (`smb5-lib.c:357-360`, comment added in Build 320):
+
+```c
+/* smblib_handle_apsd_done() only calls it for SDP/CDP/FLOAT, so
+ * DCP/OCP chargers never reach the dwc3 core - seeing no
+ * vbus_notifier line next to an APSD line is expected, not a bug. */
+```
+
+`smblib_handle_apsd_done()` is at `smb5-lib.c:8003`; the SDP/CDP/FLOAT branch (marker
+`Build320: apsd=%s -> will notify dwc3`, `:8018`) is `:8014-8027`, `OCP_CHARGER_BIT` +
+`DCP_CHARGER_BIT` fall into `:8029-8033` with the marker `Build320: apsd=%s -> no dwc3
+notification (expected)`.
+
+**Evidence — 500 s capture on Build 338, 2026-10-02, `~/tmp/f3/clean.log`
+(40 491 lines / 3 208 295 B, `printk 8 4 1 7`, `panic_on_oops=0`, `cap334.sh start` → `stop`):**
+
+| Grep | Hits | Meaning |
+|---|---|---|
+| `APSD=OCP` | **0** | the fault itself is absent |
+| `APSD=` (all values) | 49 | `HVDCP2` 32, `UNKNOWN` 11, `DCP` 4, `FLOAT` 2 |
+| `smblib_rerun_apsd` | **5** | one per plug event at 12064.77 / 12289.35 / 12339.31 / 12409.06 / 12564.48 s — **no 5 s loop** |
+| `Build320: apsd=` | 6 | 4× `DCP -> no dwc3 notification (expected)`, 2× `FLOAT -> will notify dwc3` |
+| `vbus_notifier` | 9 | 3 bursts of 3 lines, `msm-dwc3 a600000.ssusb`, only after `APSD=FLOAT` connect (12291.3, 12566.5) and its matching detach (`event=0`, 12291.7) — never for DCP/HVDCP2 |
+| `Oops` / `Unable to handle` / `Kernel panic` / `power cycle` / `Cannot enable` | 0 | no crash, no storm |
+
+Side observation from the same capture, **userspace, not a kernel bug**: after the 4th transient
+event (20:32:26) the charger stayed on `real_type=USB_FLOAT`, `current_max=1000000`,
+`voltage_max=5000000` (5 V/1 A, QC lost), battery 88 % charging ~203 mA. One clean replug
+restores `HVDCP2`. Also `Build320: notify_device_mode extcon_usb=` printed **0** times while
+`vbus_notifier` fired — the extcon state change comes in over the PD/typec path
+(`usbpd usbpd0: typec mode:6` sits right in front of it), not through the charger's
+`smblib_notify_device_mode()`.
+
+**Re-test** (charger connected, adb over TCP 5555 so a replug does not drop the session):
+
+```bash
+echo 8 4 1 7 > /proc/sys/kernel/printk        # root; restore 4 6 1 7 afterwards
+bash ~/tmp/cap334.sh start                     # prints T0/T0epoch + worker pids
+# now plug/unplug the charger 4-5 times over ~8 min
+bash ~/tmp/cap334.sh stop
+adb pull /data/local/tmp/live/kmsg334.log ~/tmp/f3/
+tr -d '\0' < ~/tmp/f3/kmsg334.log > ~/tmp/f3/clean.log
+grep -c 'APSD=OCP'  ~/tmp/f3/clean.log         # expected 0
+grep -c 'smblib_rerun_apsd' ~/tmp/f3/clean.log # expected = number of plug events
+```
+
+Capture evidence lives in `~/tmp/f3/` (`clean.log`, `kmsg334.log`, `pm334.log`,
+`banner334.log`) and on the device under `/data/local/tmp/live/`.
 
 ### Ring buffer
 `CONFIG_LOG_BUF_SHIFT=20` (1 MB, raised from 17 in Build 320) **and** `log_buf_len=2M loglevel=6`
@@ -323,27 +384,98 @@ git show HEAD:drivers/power/supply/qcom/smb5-lib.c > ~/tmp/smb5_pristine.c
 `smb5-lib.c` currently reports 4 such errors (`1364`, `7798`, `8247`, `9904` pristine / `1364`,
 `7799`, `8248`, `9908` after the Build 333 markers shifted the lines).
 
-## k6a_gov v1.3.1
+For the governor replace the include set with `-Idrivers/thermal/k6a_gov` and the file argument
+with `drivers/thermal/k6a_gov/k6a_gov.c`; for `devfreq.c` there is no extra include path. **Both
+currently pass with 0 errors** (as does pristine `k6a_gov.c`), and `devfreq.c` reports exactly
+one pre-existing clang-only error in both versions (`a parameter list without types`, line 1389
+pristine / 1388 after the Build 340 edit) — CI uses GCC, so it never sees it. Compare
+`drivers/devfreq/devfreq_pristine.c` **inside the tree** (write it to `drivers/devfreq/`), not to
+`~/tmp/`: a `#include "governor.h"` resolves relative to the file, so a copy outside the tree
+fails with a bogus "file not found".
+
+## k6a_gov v1.4.0
 
 ### Location
-- `drivers/thermal/k6a_gov/k6a_gov.c` (997 lines, `CONFIG_K6A_GOV=y`)
+- `drivers/thermal/k6a_gov/k6a_gov.c` (1143 lines, `CONFIG_K6A_GOV=y`) — commit `341f6f5b0`
 - `drivers/thermal/k6a_gov/Kconfig` / `Makefile`
 - `drivers/gpu/msm/kgsl_pwrctrl.c` — `kgsl_k6a_get_levels()` + `kgsl_k6a_set_max_level_idx()`
-- `drivers/devfreq/devfreq.c` — `k6a_devfreq_get_bw()` + `k6a_devfreq_set_bw()`
+- `drivers/devfreq/devfreq.c` — `k6a_devfreq_get_bw()` + `k6a_devfreq_set_bw()` (**the `min` half
+  of `set_bw` used to be `if (min) …`, which silently ignored a release — it is unconditional now**)
 
 ### Features
-- State Machine: OFF→GAMING→CD_L2/L3/L4, hysteresis fast/normal + dwell
-- Temp: max over 4 Gold zones `cpu-1-0..3-usr`, fallback `xo-therm`/`soc-therm`
-- CPU: `find_gold_cpu()` portable, `clamp_freq` order-independent, `enforce_max_freq` + `cpufreq_update_policy` (kthread only)
+- State Machine: OFF→GAMING→CD_L2/L3/L4, `dwell_in`/`dwell_out` (`fast` for a ≥5 °C rise, `fast`
+  for a ≤−5 °C fall, `normal` otherwise), an **entry dwell** before GAMING gives way to CD_L2/L3
+  (fast applies to the entry), and **immediate escalation** L2→L3, L2→L4, L3→L4
+  (`Build340: escalate …`, counted in `throttle_events`); only recovery is dwell-gated. Three zero
+  thresholds (reachable from sysfs) short-circuit the whole switch instead of pinning `CD_L4`
+  at `t >= 0`.
+- Temp: max over 4 Gold zones `cpu-1-0..3-usr`, then `cpu-0-0-usr` → `xo-therm` → `soc-therm` →
+  `thermal_zone0`. Failure returns 0 and clears `temp_valid` → `state_machine()` and the battery
+  guard are skipped and the state is held (`Build340: no temperature source, holding state %u`).
+  v1.3.1 returned a hard-coded `40` and throttled on fake data. `temp_src` says which zone answered.
+- CPU: `find_gold_cpu()` portable, `clamp_freq` order-independent, `enforce_max_freq()` tracks
+  `gov->enforced_max` and releases through `cpufreq_update_policy()`, which resets min/max from
+  `policy->user_policy` (never touched by us) and re-runs `CPUFREQ_ADJUST` — `cpufreq_notify()`
+  re-clamps only while the state is ≥ CD_L2. Released on GAMING recovery, `enable=0`, `legacy=0`.
+  `cpufreq_notify()` does not take `gov->lock`, so there is no recursion and no lock inversion.
 - GPU: native enforcement via KGSL pwrlevels, caps per CD state
-- BW: floors `gpubw` + `cpu-llcc-ddr-bw` per profile/CD state, `bw_floors` sysfs, reset on disable
-- Battery: `battery_guard` @45°C → CD_L2 via `power_supply`
-- Poll: `poll_ms` 100..5000
-- Profiles: 0 off, 1 gaming, 2 battery, 3 badazz, 4 custom, 5 badazz_safe
+- BW: floors `gpubw` + `cpu-llcc-ddr-bw` per profile/CD state, `bw_floors` sysfs, written **every
+  tick including 0** so a floor really drops again. Before this the `if (gpubw)` guard plus
+  `k6a_devfreq_set_bw()`'s `if (min)` made every release path a no-op — live proof on Build 338:
+  `state=gaming` while `bw_gpubw min=4000`.
+- Battery: `battery_guard` @`battery_guard_temp` (35..60, default 45) → CD_L2 via `power_supply`,
+  now counted as a throttle event
+- Poll: `poll_ms` 100..5000 (default 250)
+- Profiles: 0 off, 1 gaming, 2 battery, 3 badazz, 4 custom (**keeps** the current thresholds),
+  5 badazz_safe. Profile is validated at init — an out-of-range module parameter used to index
+  past `profiles[]`; an unconfigured profile falls back to the gaming thresholds
 - Safety: `verify_build_hash` vs `k6a_features/git_hash`, `hash_verified` in status
-- History: `K6A_HIST_N=16` ringbuffer, `hist=` in status
-- Sysfs: `enable/profile/status/hysteresis/cd_thresholds/gpu_caps/bw_floors/battery_guard/poll_ms/legacy/game_pid`
-- Hardening: `get_cd_max_freq` lock-free (caller holds lock), `cool_cur`/`status_show` locked, `freq_init_worker` mutex, ticks fix
+- History: `K6A_HIST_N=16` ringbuffer, `hist=` in status; `enable=0` now goes through
+  `set_state_locked()` so the OFF transition is recorded too
+- Sysfs validation: `cd_thresholds` gold caps all-or-none zero + non-increasing (`clamp_freq()`
+  maps a requested 0 to the **lowest** available frequency, i.e. the opposite of "no cap"),
+  `gpu_caps` all-or-none zero + non-increasing + ≤2 000 000 000, `bw_floors` each ≤30000,
+  `hysteresis` 1..1000 / 1..5000, `poll_ms` 100..5000, `battery_guard_temp` 35..60
+- Sysfs: `enable/profile/status/hysteresis/cd_thresholds/gpu_caps/bw_floors/battery_guard/
+  battery_guard_temp/poll_ms/legacy/game_pid`
+- Status keys added in v1.4.0: `policy_max` (live `policy->max`, proves the cap is applied),
+  `state_age_ms`, `temp_src`, `temp_valid`
+- `game_pid` is stored and echoed in `status` only — the kernel never acts on it
+- Hardening: `get_cd_max_freq` lock-free (caller holds lock), `cool_cur`/`status_show` locked,
+  `freq_init_worker` mutex, ticks fix
+
+### Pre-fix evidence on Build 338 (v1.3.1, read 2026-10-02)
+
+Both leaks are measurable on the device *right now*, with the governor reporting
+`state=gaming`, `legacy=1 enabled=1 profile=1(gaming)`, `gold_max=0`, `throttle_events=184`:
+
+```
+cpu6 scaling_max=1708800  cpuinfo_max=2304000   # K6A_PROFILE_GAMING cd_l2_gold_max = 1708800
+cpu7 scaling_max=1708800  cpuinfo_max=2304000
+soc:qcom,gpubw            min=4000 max=6881 cur=5161    # gaming cd_l2_bw_gpubw = 4000
+soc:qcom,cpu-llcc-ddr-bw  min=762  max=6881 cur=6881    # gaming cd_l2_bw_llcc = 0 -> `if (llcc)`
+                                                         # skipped the write, 762 = table min
+```
+
+`gold_max=0` (i.e. `get_cd_max_freq()` says "no cap in GAMING") while `scaling_max_freq` is
+still `1708800` is exactly the raw `policy->max` poke that `cpufreq_update_policy()` now undoes.
+Devfreq nodes live under `/sys/class/devfreq/soc:qcom,gpubw` (colon in the name, so always
+`/system/bin/cat` with an absolute path — the root PATH is broken inside `su -c`).
+
+**Phase-4 acceptance for Build 340** — all of this must hold while `state=gaming`:
+
+| Check | Expected |
+|---|---|
+| `cat …/cpu6/cpufreq/scaling_max_freq` | `2304000` (= `cpuinfo_max_freq`) |
+| `cat /sys/class/devfreq/soc:qcom,gpubw/min_freq` | `0` |
+| `cat /sys/class/devfreq/soc:qcom,cpu-llcc-ddr-bw/min_freq` | `0` |
+| `grep version /sys/kernel/k6a_gov/status` | `version=1.4.0` |
+| `grep -E 'policy_max\|temp_src\|temp_valid\|state_age_ms' …/status` | all four present, `temp_valid=1`, `policy_max` tracking `scaling_max_freq` |
+| `dmesg \| grep Build340` | `k6a_gov v1.4.0 loaded`, `gold cap … Hz state=…` on entry and `0 Hz` on recovery |
+| heat / `grep Build340: escalate` | `hist=` shows `gaming>cd_l3` without a `gaming>cd_l2` step, `throttle_events` increments |
+
+Reproduce a CD transition with a CPU load (e.g. `sha256sum` on 8 cores) and watch `state` and
+`policy_max` move together; after the load stops, `scaling_max_freq` must return to `2304000`.
 
 ### sweet_defconfig
 - `CONFIG_K6A_GOV=y`
@@ -368,10 +500,54 @@ cd anykernel && zip -r9 ../BadazzKernel-sweet-k6a-gov-v1.3.2.zip . -x "*.git*"
 ```
 Local full builds are blocked in Termux — see **Local Build Notes (Termux)** above.
 
+### Build 341 (planned): `CONFIG_K6A_GOV=m`
+
+The governor was *written* as a module — `module_init(k6a_gov_init)` / `module_exit(k6a_gov_exit)`
+and `MODULE_LICENSE/AUTHOR/DESCRIPTION/VERSION` are the last five lines of the file, and
+`Kconfig` is `tristate` with `default m` and the help line *"Build as module for version-lock
+with kernel."* Only `arch/arm64/configs/sweet_defconfig:208` forces `CONFIG_K6A_GOV=y`.
+
+Every symbol it needs outside its own file is already exported — this was checked symbol by
+symbol (only `filp_open`/`kernel_read`/`filp_close`/`msleep` are non-obvious, all
+`EXPORT_SYMBOL`; `pr_*`, `IS_ERR`, `kthread_run` are macros):
+
+| Symbol | Export |
+|---|---|
+| `kgsl_k6a_get_levels` / `kgsl_k6a_set_max_level_idx` | `kgsl_pwrctrl.c:3462` / `:3488` `EXPORT_SYMBOL` |
+| `k6a_devfreq_get_bw` / `k6a_devfreq_set_bw` | `devfreq.c:838` / `:802` `EXPORT_SYMBOL_GPL` |
+| `cpufreq_update_policy` | `cpufreq.c:2474` `EXPORT_SYMBOL` |
+| `cpufreq_cpu_get` / `cpufreq_cpu_put` | `cpufreq.c:258` / `:272` `EXPORT_SYMBOL_GPL` |
+| `cpufreq_register_notifier` / `cpufreq_unregister_notifier` | `cpufreq.c:1910` / `:1950` `EXPORT_SYMBOL` |
+| `thermal_cooling_device_register` / `_unregister` | `drivers/thermal/core.c:1144` / `:1232` `EXPORT_SYMBOL_GPL` |
+| `thermal_zone_get_zone_by_name` / `thermal_zone_get_temp` | `core.c:1519` / `:117` `EXPORT_SYMBOL_GPL` |
+| `power_supply_get_by_name` / `power_supply_put` | `power_supply_core.c:474` / `:490` `EXPORT_SYMBOL_GPL` |
+| `filp_open` / `kernel_read` / `filp_close` / `msleep` / `kthread_stop` | `EXPORT_SYMBOL` |
+
+`CONFIG_MODULES=y`, `CONFIG_MODULE_UNLOAD=y`, `# CONFIG_MODULE_SIG is not set` are already in
+`sweet_defconfig:336/338/342`.
+
+Steps:
+1. `arch/arm64/configs/sweet_defconfig:208` `CONFIG_K6A_GOV=y` → `CONFIG_K6A_GOV=m`.
+2. `.github/workflows/build-kernel.yml` — the `REQUIRED_CONFIGS` array contains
+   `"CONFIG_K6A_GOV=y"` (change to `=m`) and the build step is
+   `make -j$JOBS Image.gz dtb.img dtbo.img`, which compiles `obj-m` but does **not** run modpost.
+   Add `modules` to that target list, then copy
+   `drivers/thermal/k6a_gov/k6a_gov.ko` next to `Image.gz` in the *Build flashable ZIP* step
+   (that step currently copies only `Image.gz`, `dtb.img`, `dtbo.img`).
+3. `k6a-ctl`'s `service.sh` runs `insmod …/k6a_gov.ko` and falls back to the legacy userspace
+   cooldown if it fails (the module already ships a full CD_L2/L3/L4 state machine, so this is
+   a graceful degradation, not a brick).
+4. Version lock (Kconfig help + `synergie2.txt` TEIL 3): refuse to load when the `.ko`
+   `version=` differs from what k6a-ctl expects — that is the whole point of the module.
+
 ### Git History (main)
-Full log: `git log --oneline -40`. Current head is the USB debug series:
+Full log: `git log --oneline -40`. Head is the k6a_gov fix, on top of the USB debug series:
 
 ```
+341f6f5b0 Build 340: release the k6a_gov CPU cap and BW floors again, escalate, validate sysfs
+75e8d0bee docs: the KSU version is 38309 at runtime, and userspace is now v3.4.0-19
+2a32967d3 docs: Fault 2 does not reproduce on Build 336 + the libaums trap
+df3908cb2 docs: Fault 4 root cause and corrected capture recipe (Build 336)
 708e94da9 Build 336: initialise ffs before ffs_log in ffs_func_eps_enable
 17465e65f Build 335: pin the NULL pointer behind ffs_func_set_alt on SET_CONFIGURATION
 054b9fc2f docs: refresh README.md + AGENTS.md from Build 320 to Build 333
@@ -403,15 +579,36 @@ bff0adc79 Build 313: link/PHY state + DEVT diagnostics (no behavior change)
 
 Note: **Build 331 (`524ca3253`) was released but never flashed** — testing jumped from 330 to 332.
 
-k6a_gov history: `81d69ae` v1.3.1 ticks fix, `d4835b6` deadlock, `53bb809` v1.3.1 hardening,
-`967c134` v1.3.0 BW floors + profile 5, `dfcb96b` v1.2.1, `602a281` `CONFIG_K6A_GOV=y`.
+k6a_gov history: `341f6f5b0` v1.4.0 cap/BW release + escalation + validation, `81d69ae` v1.3.1 ticks
+fix, `d4835b6` deadlock, `53bb809` v1.3.1 hardening, `967c134` v1.3.0 BW floors + profile 5,
+`dfcb96b` v1.2.1, `602a281` `CONFIG_K6A_GOV=y`.
 
 ## k6a-ctl Companion
-- **Repo**: `vandalsquad187/k6a-ctl` branch `main` @ `b130d68`
-- **Mode**: `delegated=1` — Kernel handles thermal (CPU/GPU/BW), module handles game detection + sched + auto `badazz_safe` @85°C
+- **Repo**: `vandalsquad187/k6a-ctl` branch `main` @ **`a049fac` (v1.1.6, versionCode 116)**,
+  local clone `~/k6a-ctl`. The `b130d68` pin quoted in older notes is stale but still in history.
+  Recent commits: `a049fac` v1.1.6 version format, `a9170b6` v1.1.5 **removed the USB autosuspend
+  workaround** (so userspace no longer masks a kernel bug), `de3c037` v1.1.4 dwc3 autosuspend off,
+  `18cf392` v1.1.3 log rotation + `battery_guard_temp`, `a639e7c` v1.1.2 robustheit, `e43ccf6`
+  v1.1.1 whitelisted handler.
+- **Device is 6 versions stale** (read 2026-10-02): `/data/adb/modules/k6a-ctl/module.prop` =
+  **v1.0.0 / versionCode 1**; `bin/` holds only `k6a-controller k6a-lib.sh webui-handler.sh
+  webui-server.sh` — **no `check_module.sh`** (the repo has it, 89 lines, delegation-aware);
+  `webroot/` has `app.js index.html style.css`; the module is **disabled**
+  (`/data/adb/modules/k6a-ctl/disable`, 2026-09-27 18:25).
+- **Mode**: `delegated=1` — Kernel handles thermal (CPU/GPU/BW), module handles game detection +
+  sched tuning + auto `badazz_safe` @85°C
 - **WebUI**: Gov-Status, BW-Floors, GPU-Caps, History timeline
 - **Check**: `bin/check_module.sh` delegation-aware gate
-- **Synergy**: `k6a-ctl` writes `profile`/`enable` to `/sys/kernel/k6a_gov/`, reads `status`
+- **Synergy**: `k6a-ctl` writes `profile`/`enable` to `/sys/kernel/k6a_gov/`, reads `status`.
+  Its `bin/k6a-controller` parses `version=[^ ]+` and `webroot/app.js` just echoes it, so the
+  v1.4.0 bump and the extra `status` keys are backwards compatible with v1.0.0.
+- **Do not re-enable before Build 340**: on v1.3.1 the Gold cap and the BW floors are never
+  released (see *Pre-fix evidence*), so a userspace cooldown would fight the kernel.
+- **Next (Phase 5, no flash needed)**: bump past v1.1.6, ship `check_module.sh`, honour
+  `battery_guard`/`battery_guard_temp`, never call `cpu_apply()` when `delegated=1`, surface
+  `policy_max`/`state_age_ms`/`temp_src`/`temp_valid` in the WebUI, write and remove `game_pid`,
+  drop the `disable` file. `synergie2.txt` TEIL 3 additionally wants the governor version string
+  burned into both sides with a mismatch refusing to load — that is Build 341's `k6a_gov.ko`.
 
 ## KernelSU-Next SUSFS
 - SUSFS in `fs/susfs.c`, `include/linux/susfs.h`

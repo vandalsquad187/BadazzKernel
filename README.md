@@ -15,7 +15,7 @@
 
 ## Overview
 
-BadazzKernel is a performance and gaming tuned kernel for **Redmi Note 12 Pro 4G (sweet / sweetin)**. Core is the in-kernel governor **k6a_gov v1.3.1** — the perfect base for the companion module **[k6a-ctl](https://github.com/vandalsquad187/k6a-ctl)**. Both work hand-in-hand in delegated mode: kernel throttles, module controls.
+BadazzKernel is a performance and gaming tuned kernel for **Redmi Note 12 Pro 4G (sweet / sweetin)**. Core is the in-kernel governor **k6a_gov v1.4.0** — the perfect base for the companion module **[k6a-ctl](https://github.com/vandalsquad187/k6a-ctl)**. Both work hand-in-hand in delegated mode: kernel throttles, module controls.
 
 🤌🏻 Join my Telegram channel: https://t.me/Badazz89
 
@@ -26,9 +26,9 @@ BadazzKernel is a performance and gaming tuned kernel for **Redmi Note 12 Pro 4G
 ```
 linux-4.14.369
 ├── KernelSU-Next 38309 (UAPIv4) + SUSFS v2.2.0  # Root + Hide (submodule b100bd28)
-├── drivers/thermal/k6a_gov/k6a_gov.c v1.3.1     # In-kernel gaming governor
+├── drivers/thermal/k6a_gov/k6a_gov.c v1.4.0     # In-kernel gaming governor
 ├── drivers/gpu/msm/kgsl_pwrctrl.c               # GPU pwrlevel export (k6a_gov)
-├── drivers/devfreq/devfreq.c                    # BW floors (gpubw / llcc)
+├── drivers/devfreq/devfreq.c                    # BW floors (gpubw / llcc), 0 = release floor
 ├── drivers/gpu/msm/ + drivers/thermal/          # Thermal + cooling floors
 ├── drivers/usb/dwc3/ + phy/qcom                 # USB: SM6150 clocks, WAIT_FOR_LPM, bus_aggr, ep-cmd recovery
 └── arch/arm64/boot/dts/qcom/                    # sweet / sdmmagpie DT (AOSP + MIUI overlay)
@@ -38,13 +38,13 @@ linux-4.14.369
 
 | Area | Feature | Details |
 |------|---------|---------|
-| **Governor** | **k6a_gov v1.3.1** | Built-in (`CONFIG_K6A_GOV=y`), state machine OFF→GAMING→CD_L2/L3/L4, hysteresis, throttle history (16) |
-| **CPU** | Gold clamp | `find_gold_cpu()` + `clamp_freq`, `enforce_max_freq` + `cpufreq_update_policy` (kthread only), hardened notifier |
-| **Temp** | Multi-zone | Max over 4 Gold zones `cpu-1-0..3-usr`, fallback `xo-therm`/`soc-therm` |
+| **Governor** | **k6a_gov v1.4.0** | Built-in (`CONFIG_K6A_GOV=y`), state machine OFF→GAMING→CD_L2/L3/L4, hysteresis, **immediate escalation** L2→L3→L4, entry dwell on GAMING, throttle history (16) |
+| **CPU** | Gold clamp | `find_gold_cpu()` + `clamp_freq`, `enforce_max_freq` + `cpufreq_update_policy` (kthread only), hardened notifier, **released again on recovery/disable** |
+| **Temp** | Multi-zone | Max over 4 Gold zones `cpu-1-0..3-usr`, fallback `cpu-0-0-usr` → `xo-therm` → `soc-therm` → `thermal_zone0`; `temp_src`/`temp_valid` in status, holds the last state if no zone answers |
 | **GPU** | Native enforcement | `kgsl_k6a_get_levels` / `kgsl_k6a_set_max_level_idx`, caps per CD state |
-| **BW** | Devfreq floors | `k6a_devfreq_set_bw` for `gpubw` + `cpu-llcc-ddr-bw`, per profile/CD state, reset on disable |
+| **BW** | Devfreq floors | `k6a_devfreq_set_bw` for `gpubw` + `cpu-llcc-ddr-bw`, per profile/CD state, **really released again when the state recovers** |
 | **Profiles** | 6 profiles | `off/gaming/battery/badazz/custom/badazz_safe` — temps, Gold/GPU/BW floors |
-| **Safety** | Battery guard + hash | `battery_guard` @45°C → CD_L2, `poll_ms` 100..5000, `verify_build_hash` vs `k6a_features/git_hash` |
+| **Safety** | Battery guard + hash | `battery_guard` @`battery_guard_temp` (35..60 °C, default 45) → CD_L2, `poll_ms` 100..5000, `verify_build_hash` vs `k6a_features/git_hash` |
 | **Thermal** | Cooling device | `k6a_gov` as `thermal_cooling_device`, `cool_cur` locked, `K6A_CD_L4` clamp |
 | **Root** | KSU-Next + SUSFS | 38309 **UAPIv4** (submodule `b100bd28`), SUSFS `v2.2.0` (sus_path/mount/kstat/map), `tamper_syscall_table` |
 | **USB** | DWC3 / QUSB2 | SM6150 clocks (`GCC/DISPCC/CAMCC`), `WAIT_FOR_LPM` clear, `bus_aggr`/`GCTL` 50ms, `is_a_peripheral` fix — PC bootloop gone since v1.3.2. Full device-mode enumeration works since Build 336 (Faults 1/4 fixed) — see [USB status](#usb-status) |
@@ -77,17 +77,18 @@ k6a-ctl v1.1.6 (delegated=1)
 
 | Node | R/W | Purpose |
 |------|-----|---------|
-| `enable` | RW | 0/1 — kill switch, resets BW floors + GPU cap |
-| `profile` | RW | 0..5 — off/gaming/battery/badazz/custom/badazz_safe |
-| `status` | RO | `version/state/temp/ticks/throttle_events/gold_* /bw_* /hash_verified/hist=` |
-| `hysteresis` | RW | `fast normal` — dwell ms (e.g. `3 10`) |
-| `cd_thresholds` | RW | `l2t l3t l4t rec l2g l3g l4g` — 7 values, Celsius |
-| `gpu_caps` | RW | `l2 l3 l4` — GPU Hz caps |
-| `bw_floors` | RW | `gpubw_l2 l3 l4 llcc_l2 l3 l4` — 6 BW floors |
-| `battery_guard` | RW | 0/1 — battery guard 45°C |
-| `poll_ms` | RW | 100..5000 — kthread interval |
-| `legacy` | RW | 0/1 — enforcement on/off |
-| `game_pid` | RW | PID of the game |
+| `enable` | RW | 0/1 — kill switch, releases the Gold cap + BW floors + GPU cap |
+| `profile` | RW | 0..5 — off/gaming/battery/badazz/custom/badazz_safe (4 = keeps the current thresholds) |
+| `status` | RO | `version/state/temp/temp_src/temp_valid/ticks/state_age_ms/policy_max/throttle_events/gold_* /bw_* /hash_verified/hist=` |
+| `hysteresis` | RW | `fast normal` — dwell ms, `fast` 1..1000 (default 500), `normal` 1..5000 (default 2000) |
+| `cd_thresholds` | RW | `l2t l3t l4t rec` in **°C** then `l2g l3g l4g` in **Hz** — 7 values, all-or-none zero, Gold caps must be non-increasing |
+| `gpu_caps` | RW | `l2 l3 l4` — GPU Hz caps, all-or-none zero, must be non-increasing, ≤ 2 000 000 000 |
+| `bw_floors` | RW | `gpubw_l2 l3 l4 llcc_l2 l3 l4` — MB/s, each ≤ 30000, 0 = no floor |
+| `battery_guard` | RW | 0/1 — battery guard (trip point in `battery_guard_temp`) |
+| `battery_guard_temp` | RW | 35..60 °C, default 45 |
+| `poll_ms` | RW | 100..5000 — kthread interval, default 250 |
+| `legacy` | RW | 0/1 — enforcement on/off; 0 releases everything the governor holds |
+| `game_pid` | RW | PID of the game — stored and echoed in `status` only, the kernel never acts on it |
 
 > **Kernel provides the levers — k6a-ctl pulls them.** Without module k6a_gov runs with safe defaults. With module it reacts dynamically to load/temperature.
 
@@ -123,8 +124,8 @@ Runtime ~13–17 min: `gh run list` / `gh run watch <id>`.
 ## Status & Debug
 
 ```bash
-dmesg | grep k6a_gov          # v1.3.1 loaded, hash_verified, gpu levels
-cat /sys/kernel/k6a_gov/status
+dmesg | grep k6a_gov          # v1.4.0 loaded, hash_verified, gpu levels, Build340 markers
+cat /sys/kernel/k6a_gov/status   # incl. policy_max, state_age_ms, temp_src, temp_valid
 cat /sys/kernel/k6a_gov/battery_guard; cat /sys/kernel/k6a_gov/poll_ms
 echo 0 > /sys/kernel/k6a_gov/enable  # kill switch
 ```
@@ -150,7 +151,7 @@ The v1.3.2 PC-bootloop fix landed. Builds 307–336 then worked through a chain 
 |---|-------|-------|
 | **Fault 1** | `SETEPCFG` ep0out timeout → `RESTART_USB_SESSION` → gadget torn down and restarted every ~2 s until unplug | **Storm stopped** — Build 320 adds quiescent-core recovery + a give-up counter, Build 331 holds the dwc3 core PM reference across a connection |
 | **Fault 2** | OTG host mode: `usb1-port1: Cannot enable. Maybe the USB cable is bad?` ×4 → `unable to enumerate` | **No longer reproduces** — retested on Build 336 with a USB stick: port enable, enumeration, `usb-storage`, SCSI and the vold mount all succeed |
-| **Fault 3** | Charger: `APSD=OCP` re-runs every 5 s | **Open**, cosmetic — OCP/DCP deliberately never reach the dwc3 core |
+| **Fault 3** | Charger: `APSD=OCP` re-runs every 5 s | **No longer reproduces** — retested 2026-10-02 on Build 338 with a 500 s capture (`printk 8 4 1 7`, `cap334.sh`, 40 491 lines): 0× `APSD=OCP`, 0× `Oops`/`power cycle`, `smblib_rerun_apsd` = 5 = exactly one per plug event (no 5 s loop), `vbus_notifier` = 9 lines in 3 bursts of 3 and only on `APSD=FLOAT` connect (×2) + the matching detach (×1) — never for DCP/HVDCP2 |
 | **Fault 4** | **Instant whole-SoC reset the moment a USB-C cable is plugged in** (5 s of vibration, then reboot) | **Fixed in Build 336** — see below |
 
 ### Fault 4 — instant reset on attach (fixed in Build 336)
@@ -219,6 +220,7 @@ Build 320 raised `CONFIG_LOG_BUF_SHIFT` 17 → 20 (128 KB → 1 MB), and the ker
 
 | Version | Highlights |
 |---------|------------|
+| **k6a_gov v1.4.0 (Build 340)** | Gold cap is released again on recovery/`enable=0`/`legacy=0` (`cpufreq_update_policy` instead of pokes into `policy->max`); **immediate escalation** L2→L3→L4 and L3→L4; entry dwell in GAMING (fast only for a ≥5 °C *rise*); temperature fail-safe holds the last state when no zone answers (`temp_src`, `temp_valid`); BW floors are actually released again (`k6a_devfreq_set_bw(…,0,0)` silently did nothing before); sysfs validation (all-or-none zero, monotonic caps, bounds) + `battery_guard_temp`, `profile` sanitised at init |
 | **v1.3.2 (current)** | **USB fix**: SM6150 clocks, `WAIT_FOR_LPM` deadlock, `bus_aggr`/`GCTL` 50ms, `is_a_peripheral` — no PC bootloop; **MIUI**: `sweet_miui.config` overlay + DTS `xiaomi/sweet` + CI matrix `aosp`/`miui`; **CI**: build number in release/ZIP (`vX-buildXX`); **KSU**: submodule at `b100bd28` (runtime `38309` = `35000 + git`, UAPIv4) until `88feb68` 4.14 port on PC; userspace ksud + manager `v3.4.0-19-g2b31f718` (CI `36750739326`), spoofed APK with random applicationId |
 | **v1.3.1** | Hardening: `find_gold_cpu`, notifier/mutex fixes, `cool_cur`/`status_show` locked, `ticks` fix |
 | v1.3.0 | BW floors write, hash coupling, `badazz_safe` profile 5 |
@@ -249,9 +251,11 @@ Full Changelog: `git log --oneline`
 | **P0** | **KSU 88feb68 4.14 Port on PC** | `badazzrebase.md` ready | `k6a-sweet` rebase `b100bd28` → `88feb68` (Squash 49 files, `meld` for `Kconfig/Makefile/selinux.c` `susfs_is_current`), new branch `k6a-sweet-88feb68`, Badazz bump, CI green ~15 min |
 | **P0** | **SUSFS full restore** | Hotfix relaxed validation, `fs/susfs` `v2.2.0` intact but KSU side `k6a-sweet` patches pending | After rebase: `CONFIG_KSU_SUSFS` + `TAMPER_SYSCALL_TABLE` validation back, `nm vmlinux \| grep susfs_is_current` green |
 | **P1** | **MIUI/HOS verification** | `sweet_miui.config` + DTS + `miui/test` CI `aosp+miui` artifacts | Flash `…-miui.zip` on HyperOS `V14.0.1.0` (or `2.0`), test `dmesg` `fpc/goodix/touchfeature/ds28e16`, 120Hz, NFC, `usb` `host/device` |
-| **P1** | **USB Fault 3 (charger)** | PC bootloop fixed (v1.3.2); Fault 4 fixed in Build 336; Fault 2 no longer reproduces; ep-cmd storm stopped (Build 320/331). Only the cosmetic charger `APSD=OCP` rerun loop is left | Capture with `~/tmp/cap334.sh` while charging, grep `Build333: irq` against `APSD=OCP` |
+| **P1** | **USB Fault 3 (charger)** | **Closed 2026-10-02** — 500 s capture on Build 338 (`printk 8 4 1 7`, 40 491 lines): 0× `APSD=OCP`, `smblib_rerun_apsd` exactly once per plug event, `vbus_notifier` only on FLOAT connect/detach | Nothing to fix; keep `~/tmp/cap334.sh` as the recipe if it ever returns |
+| **P1** | **k6a_gov → loadable module** | Governor fixes ship as **Build 340** (still `CONFIG_K6A_GOV=y`) | Build 341: `CONFIG_K6A_GOV=m`, CI ships `k6a_gov.ko`, `service.sh` insmods it with the k6a-ctl legacy cooldown as fallback — tuning without a reflash |
+| **P1** | **k6a-ctl sync** | Device runs **v1.0.0** vs repo **v1.1.6**; device has no `check_module.sh` | Bump past v1.1.6, ship `check_module.sh`, `battery_guard` + `battery_guard_temp` support, no `cpu_apply()` when `delegated=1`, WebUI keys for `policy_max`/`state_age_ms`/`temp_src`/`temp_valid`, drop the `disable` file |
 | **P2** | **Release hygiene** | `main` `v1.3.2` + `k6a-ctl` `v1.1.6` versioned ZIPs | Releases are `v4.14.369-badazz-buildXX` automatically via CI; next `main` release gets a changelog |
-| **P2** | **Docs** | `README.md` + `AGENTS.md` refreshed at Build 336 (Fault 4 root cause + corrected capture recipe) | `Documentation/` is stock Linux 4.14 — leave it alone, keep project docs in the root `*.md` |
+| **P2** | **Docs** | `README.md` + `AGENTS.md` refreshed at Build 340 (Fault 3 closed + k6a_gov v1.4.0 sysfs) | `Documentation/` is stock Linux 4.14 — leave it alone, keep project docs in the root `*.md` |
 
 ---
 
