@@ -11,7 +11,8 @@
   in `KernelSU-Next/kernel/Makefile`)
 - **Open blockers**: none. Fault 4 (whole-SoC reset on USB-C attach) **closed in Build 336 and
   verified on device** — `USB_STATE=CONFIGURED`, no oops (see *USB Debugging*). Fault 2 (OTG host)
-  and Fault 3 (charger OCP loop) remain open.
+  **no longer reproduces on Build 336** (stick enumerates, `usb-storage` + vold mount work). Only
+  Fault 3 (charger `APSD=OCP` rerun loop) is still open, and it is cosmetic.
 - **User speaks German**; device reports go out in German
 
 ## Repo & Docs Layout
@@ -40,8 +41,9 @@
 ## USB Debugging (Build 300–336)
 
 Status: **All four faults are now explained.** Fault 4 — the whole-SoC reset on USB-C attach —
-was a one-line uninitialized local and is **fixed in Build 336, verified on device**. Faults 1/3
-were closed by Builds 320/331; Fault 2 (OTG host mode) is the only one still open.
+was a one-line uninitialized local and is **fixed in Build 336, verified on device**. Fault 1 was
+closed by Builds 320/331; **Fault 2 no longer reproduces on Build 336** (OTG stick enumerates and
+mounts). Fault 3 (charger OCP rerun) is the only one still open, and it is cosmetic.
 
 Key files: `drivers/usb/gadget/function/f_fs.c`, `drivers/usb/dwc3/gadget.c`,
 `drivers/usb/dwc3/dwc3-msm.c`, `drivers/usb/dwc3/core.c`,
@@ -144,9 +146,61 @@ Empirical rule across **all** logs (Build 319):
 | `DSTS.COREIDLE=0` | 692/692 ep-cmd timeout |
 | `DSTS.COREIDLE=1` && `USBLNKST=3` (U3/Suspend) | 1/1 timeout (host never bus-reset) |
 
-### Fault 2 — host mode
-`usb1-port1: Cannot enable. Maybe the USB cable is bad?` ×4 + `attempt power cycle` then
-`unable to enumerate` (see `dm313otg.txt`). Not touched since Build 320.
+### Fault 2 — host mode (NOT reproducible on Build 336)
+
+Original evidence (`dm313otg.txt`): `usb1-port1: Cannot enable. Maybe the USB cable is bad?` ×4 +
+`attempt power cycle`, then `unable to enumerate`. Not touched since Build 320.
+
+**Retested 2026-10-02 on Build 336 with a SanDisk 3.2Gen1 stick on a USB-C OTG adapter — the
+fault does not occur.** Everything works end to end:
+
+```
+extcon4: USB-HOST=1
+xhci-hcd xhci-hcd.0.auto: new USB bus registered, assigned bus number 1   (and 2 for USB3)
+hub 1-0:1.0: 1 port detected
+usb 1-1: new high-speed USB device number 2 using xhci-hcd
+usb 1-1: New USB device found, idVendor=0781, idProduct=5581
+usb-storage 1-1:1.0: USB Mass Storage device detected
+scsi host1: usb-storage 1-1:1.0
+scsi 1:0:0:0: Direct-Access      USB      SanDisk 3.2Gen1 1.00 PQ: 0 ANSI: 6
+sd 1:0:0:0: [sdg] Write Protect is off
+sdg: sdg1
+FAT-fs (sdg1): Volume was not properly unmounted. Some data may be corrupt. Please run fsck.
+```
+
+`blkid /dev/block/sdg1` → `LABEL="ALG_XFCE_20" UUID="7C3A-3FFD" TYPE="vfat"`; vold mounts it on
+`/mnt/media_rw/7C3A-3FFD` and `dumpsys usb` reports the volume `state mounted`. Zero
+`Cannot enable`, zero `power cycle`, zero `unable to enumerate`, zero oopses. Whether Builds
+320/331/336 fixed it incidentally cannot be attributed retroactively — only that it no longer
+happens.
+
+**Gotcha found while testing — the stick can vanish with no kernel log at all.** Termux ships
+`com.github.mjdev.libaums.storageprovider.UsbDocumentProvider` (libaums, a *userspace* USB mass
+storage driver). When the SAF DocumentsProvider probes the stick it calls
+`UsbManager.openDevice()`, which issues `USBDEVFS_DISCONNECT`, so `usb-storage` unbinds,
+`scsi host1` and `sdg` disappear, vold ejects the volume — and **`dmesg` prints nothing**, because
+a userspace driver claim is silent. Symptoms and how to tell them apart:
+
+| Observation | Meaning |
+|---|---|
+| `1-1` present, `1-1:1.0/driver -> …/usbfs`, `sdg` gone, no kernel line | libaums took the device. Not a kernel fault |
+| `1-1` absent, `usb 1-1: USB disconnect` | real unplug |
+| `usb1-port1: Cannot enable` / `power cycle` | the actual Fault 2 |
+
+Fix from the outside: `echo 1-1:1.0 > /sys/bus/usb/drivers/usbfs/unbind` then
+`echo 1-1:1.0 > /sys/bus/usb/drivers/usb-storage/bind` — `sdg` returns in ~1 s and vold
+remounts. (It succeeded without `EBUSY` even while libaums looked like the holder, because
+libaums also leaks: `A resource failed to call UsbDeviceConnection.close`.)
+
+Root-cause search for that claim failed the obvious way: scanning `/proc/<pid>/fd` for
+`/dev/bus/usb/*` finds nothing, because root here has **`CapBnd=0`** and therefore no
+`CAP_SYS_PTRACE`, so `readlink` on another UID's fds (uid 10339) fails silently. Identity came
+from `dumpsys package` instead — grep for the provider class name, then `cmd package path`.
+
+Secondary observation, also userspace: on one occasion `fsck_msdos -p -f -y` exited **8** and
+vold reported `public:8,97 failed filesystem check` / `state unmountable`, while a manual
+inspection via `blkid` was fine. A later plug passed. Cannot be mounted manually for testing —
+root has no `CAP_SYS_ADMIN`, so `mount` returns `EPERM`.
 
 ### Fault 3 — charger
 `APSD=OCP` rerun loop every 5 s. Expected **no** `vbus_notifier` line —
@@ -371,6 +425,11 @@ k6a_gov history: `81d69ae` v1.3.1 ticks fix, `d4835b6` deadlock, `53bb809` v1.3.
    `panic_on_oops=0` first so the oops does not reboot the phone (see *On-device Capture*)
 9. **A tool call hangs forever**: an orphaned worker is still holding the pipe — run
    `$SU -c "sh $HOME/tmp/cap_scan.sh kill"`
+10. **OTG stick / `sdg` vanishes with no kernel log**: Termux's libaums
+    (`com.github.mjdev.libaums.storageprovider.UsbDocumentProvider`) claims the interface via
+    `UsbManager.openDevice()`, unbinding `usb-storage`. Restore with `usbfs/unbind` +
+    `usb-storage/bind` — see *Fault 2* in *USB Debugging*. Do not chase it as a kernel bug; you
+    will not find the holder in `/proc/*/fd` either, because root has `CapBnd=0` (no ptrace).
 
 ## Boot-Hang Root Cause (Build 267-278)
 - **Symptom**: Boot hängt bei crDroid Boot-Logo (95%), intermittierend

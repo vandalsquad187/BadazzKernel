@@ -149,7 +149,7 @@ The v1.3.2 PC-bootloop fix landed. Builds 307–336 then worked through a chain 
 | # | Issue | State |
 |---|-------|-------|
 | **Fault 1** | `SETEPCFG` ep0out timeout → `RESTART_USB_SESSION` → gadget torn down and restarted every ~2 s until unplug | **Storm stopped** — Build 320 adds quiescent-core recovery + a give-up counter, Build 331 holds the dwc3 core PM reference across a connection |
-| **Fault 2** | OTG host mode: `usb1-port1: Cannot enable. Maybe the USB cable is bad?` ×4 → `unable to enumerate` | **Open**, not touched since Build 320 |
+| **Fault 2** | OTG host mode: `usb1-port1: Cannot enable. Maybe the USB cable is bad?` ×4 → `unable to enumerate` | **No longer reproduces** — retested on Build 336 with a USB stick: port enable, enumeration, `usb-storage`, SCSI and the vold mount all succeed |
 | **Fault 3** | Charger: `APSD=OCP` re-runs every 5 s | **Open**, cosmetic — OCP/DCP deliberately never reach the dwc3 core |
 | **Fault 4** | **Instant whole-SoC reset the moment a USB-C cable is plugged in** (5 s of vibration, then reboot) | **Fixed in Build 336** — see below |
 
@@ -194,6 +194,13 @@ Zero oopses, `/sys/class/udc/a600000.dwc3/state` = `configured`, `usb/online=1`,
 `real_type=USB_PD`.
 
 Faults 1–3 detail and the full evidence tables live in `AGENTS.md`.
+
+**Fault 2 was retested on Build 336** with a USB stick on a USB-C OTG adapter and no longer
+reproduces: `xhci-hcd` registers both buses, `usb 1-1: New USB device found`, `usb-storage`
+creates `sdg`/`sdg1`, and vold mounts the volume. Zero `Cannot enable` / `power cycle` /
+`unable to enumerate`. One trap worth knowing: Termux bundles the libaums *userspace* mass-storage
+provider, and whenever it probes the stick it claims the interface and the disk disappears **without
+a single line in `dmesg`** — that is userspace, not a kernel fault.
 
 Empirical rule from all logs so far (Build 319):
 
@@ -242,7 +249,7 @@ Full Changelog: `git log --oneline`
 | **P0** | **KSU 88feb68 4.14 Port on PC** | `badazzrebase.md` ready | `k6a-sweet` rebase `b100bd28` → `88feb68` (Squash 49 files, `meld` for `Kconfig/Makefile/selinux.c` `susfs_is_current`), new branch `k6a-sweet-88feb68`, Badazz bump, CI green ~15 min |
 | **P0** | **SUSFS full restore** | Hotfix relaxed validation, `fs/susfs` `v2.2.0` intact but KSU side `k6a-sweet` patches pending | After rebase: `CONFIG_KSU_SUSFS` + `TAMPER_SYSCALL_TABLE` validation back, `nm vmlinux \| grep susfs_is_current` green |
 | **P1** | **MIUI/HOS verification** | `sweet_miui.config` + DTS + `miui/test` CI `aosp+miui` artifacts | Flash `…-miui.zip` on HyperOS `V14.0.1.0` (or `2.0`), test `dmesg` `fpc/goodix/touchfeature/ds28e16`, 120Hz, NFC, `usb` `host/device` |
-| **P1** | **USB Fault 1/2/3** | PC bootloop fixed (v1.3.2); Fault 4 fixed in Build 336; ep-cmd storm stopped (Build 320/331), OTG host `Cannot enable` and charger `OCP` rerun still open | Attack Fault 2 (host mode): capture with `~/tmp/cap334.sh`, grep `Build327: ep_cmd` + the `usb1-port1` block |
+| **P1** | **USB Fault 3 (charger)** | PC bootloop fixed (v1.3.2); Fault 4 fixed in Build 336; Fault 2 no longer reproduces; ep-cmd storm stopped (Build 320/331). Only the cosmetic charger `APSD=OCP` rerun loop is left | Capture with `~/tmp/cap334.sh` while charging, grep `Build333: irq` against `APSD=OCP` |
 | **P2** | **Release hygiene** | `main` `v1.3.2` + `k6a-ctl` `v1.1.6` versioned ZIPs | Releases are `v4.14.369-badazz-buildXX` automatically via CI; next `main` release gets a changelog |
 | **P2** | **Docs** | `README.md` + `AGENTS.md` refreshed at Build 336 (Fault 4 root cause + corrected capture recipe) | `Documentation/` is stock Linux 4.14 — leave it alone, keep project docs in the root `*.md` |
 
