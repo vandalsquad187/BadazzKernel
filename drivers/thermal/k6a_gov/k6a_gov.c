@@ -9,7 +9,6 @@
 #include <linux/kobject.h>
 #include <linux/sysfs.h>
 #include <linux/ktime.h>
-#include <linux/version.h>
 #include <linux/notifier.h>
 #include <linux/pid.h>
 #include <linux/sched.h>
@@ -24,7 +23,6 @@ extern int k6a_devfreq_get_bw(const char *name, u32 *cur, u32 *min, u32 *max);
 extern int k6a_devfreq_set_bw(const char *name, u32 min, u32 max);
 
 #define K6A_GOV_VERSION       "1.5.0"
-#define K6A_GOV_KERNEL_VER    KERNEL_VERSION(4,14,369)
 #define K6A_GOV_KTHREAD_SLEEP_MS   250
 #define K6A_GOV_MAX_FREQS     32
 #define K6A_HIST_N            16
@@ -1047,11 +1045,6 @@ static struct notifier_block k6a_cpufreq_nb = {
 /* ── Init / Exit ─────────────────────────────────────────────────── */
 static int __init k6a_gov_init(void) {
     int ret;
-
-    if (LINUX_VERSION_CODE != K6A_GOV_KERNEL_VER) {
-        pr_warn("k6a_gov: build/run version delta (%d vs %d) — continuing (module)\n",
-                K6A_GOV_KERNEL_VER, LINUX_VERSION_CODE);
-    }
 
     gov = kzalloc(sizeof(*gov), GFP_KERNEL);
     if (!gov) return -ENOMEM;

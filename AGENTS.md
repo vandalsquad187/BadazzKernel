@@ -4,8 +4,8 @@
 - **Repo**: `vandalsquad187/BadazzKernel` branch `main`
 - **Kernel**: `4.14.369` — `K6A_GOV v1.5.0` **as a loadable module** (`CONFIG_K6A_GOV=m`),
   `LOCALVERSION=-BadazzKernel-sweet-v1.3.2`
-- **Local**: `main` @ `c42a67d07` — Build 341 (module conversion + `hash_state` +
-  `LINUX_VERSION_CODE`). Before that `e0e8d0d9f` (k6a-ctl v1.2.0 record) and
+- **Local**: `main` @ `c42a67d07` — Build 341 (module conversion + `hash_state`). Before that
+  `e0e8d0d9f` (k6a-ctl v1.2.0 record) and
   `341f6f5b0` (k6a_gov v1.4.0 / BW-floor release). Working tree clean.
 - **GitHub**: CI builds on every push to `main` (release) and `miui/test` (artifacts only);
   latest release `v4.14.369-badazz-build340` (2026-10-02). **337/338/339 are docs-only** —
@@ -38,8 +38,9 @@
   capture on Build 338 — 0× `APSD=OCP` (see *USB Debugging*). Fault 1's storm stopped in
   Build 320/331. **Build 340 governor fixes landed, flashed and accepted 2026-10-02**;
   **k6a-ctl v1.2.0 flashed the same day**. **Build 341 is implemented and pushed** —
-  `CONFIG_K6A_GOV=m` + the version lock + both findings of *Build 341 scope*, with
-  k6a-ctl **v1.3.0**. Remaining: **the flash** plus the post-flash verification.
+  `CONFIG_K6A_GOV=m` + the version lock + finding 1 of *Build 341 scope*, with k6a-ctl
+  **v1.3.0**. Finding 2 (`LINUX_VERSION_CODE`) was measured, **tried, and reverted** — it broke
+  CI, see its section. Remaining: **the flash** plus the post-flash verification.
 - **User speaks German**; device reports go out in German
 
 ## Repo & Docs Layout
@@ -416,9 +417,10 @@ fails with a bogus "file not found".
   -1 mismatch, the governor thread retries every 250 ms up to 60× (15 s) and only then gives
   up. `hash_state` 0 pending / 1 verified / 2 mismatch / 3 gave up; `hash_verified` is now
   `hash_state == 1` so k6a-ctl and the WebUI keep working.
-- **`LINUX_VERSION_CODE` fix lives in the top Makefile**, not here:
-  `K6A_GOV_KERNEL_VER KERNEL_VERSION(4,14,369)` is now equal to `LINUX_VERSION_CODE`
-  (266097), so the boot-time `build/run version delta` warning is gone.
+- **No `LINUX_VERSION_CODE` change** — see *Build 341 scope, finding 2*: the Makefile cap at
+  `255` stays. The boot-time `build/run version delta` warning is gone because the check itself
+  was deleted (`#include <linux/version.h>`, `K6A_GOV_KERNEL_VER`, the `pr_warn`). Vermagic
+  (`4.14.369-…-buildNNN`) is the real mismatch guard and does not use `LINUX_VERSION_CODE`.
 - Markers are `Build341:` (`k6a_gov v%s loaded`, `build hash verified`,
   `k6a_features/git_hash not readable yet, retrying`, `hash verify gave up`).
 
@@ -502,7 +504,7 @@ single snapshot): at `cd_l2` → `cpu6_max=1708800`, `gpubw_min=4000`; back to `
 Note: `uname`/`/proc/version` report `6.12.0-android16-6.12-perf-g1d01cd293` — that is the
 SUSFS spoof (it patches `init_uts_ns`, which `/proc/version` also reads). The real banner proof
 is the `Build340:` markers, and `k6a_features: … version=265983` shows the genuine
-`LINUX_VERSION_CODE` (see *Build 341 scope*).
+`LINUX_VERSION_CODE` — capped at 4.14.255 on this tree on purpose (see *Build 341 scope*).
 
 `Build340: escalate …` correctly printed **zero** times: every observed transition was either
 direct `gaming>cd_l3` (the GAMING branch has no marker by design) or a de-escalation
@@ -663,7 +665,7 @@ bff0adc79 Build 313: link/PHY state + DEVT diagnostics (no behavior change)
 
 Note: **Build 331 (`524ca3253`) was released but never flashed** — testing jumped from 330 to 332.
 
-k6a_gov history: `c42a67d07` v1.5.0 module + hash_state + LINUX_VERSION_CODE, `341f6f5b0`
+k6a_gov history: `c42a67d07` v1.5.0 module + hash_state, `341f6f5b0`
 v1.4.0 cap/BW release + escalation + validation, `81d69ae` v1.3.1 ticks
 fix, `d4835b6` deadlock, `53bb809` v1.3.1 hardening, `967c134` v1.3.0 BW floors + profile 5,
 `dfcb96b` v1.2.1, `602a281` `CONFIG_K6A_GOV=y`.
@@ -734,7 +736,7 @@ fix, `d4835b6` deadlock, `53bb809` v1.3.1 hardening, `967c134` v1.3.0 BW floors 
   in the kernel — with `check_module.sh` gate `[5b]` keeping the two shells in sync, plus
   vermagic as the kernel-side lock.
 
-## Build 341 scope (both findings FIXED in `c42a67d07`, 2026-10-02)
+## Build 341 scope (finding 1 FIXED in `c42a67d07`; finding 2 investigated and dropped)
 
 Two findings from the Build 340 acceptance run, both in the version-lock area, both **pre-existing**
 (not introduced by Build 340) and both invisible until today:
@@ -778,7 +780,7 @@ succeeds or N attempts), and report a third state instead of a bool — `0 = mis
 1 = verified` must not be one bit. This is the same code path TEIL 3 wants for the version lock,
 so fix it there rather than separately.
 
-### 2. `LINUX_VERSION_CODE` is pinned to 4.14.255
+### 2. `LINUX_VERSION_CODE` is pinned to 4.14.255 — **tried, failed CI, reverted**
 
 `Makefile:1392-1396` does **not** use `$(SUBLEVEL)`:
 
@@ -791,34 +793,70 @@ endef
 ```
 
 so `include/generated/uapi/linux/version.h` is always `265983` (4.14.**255**) while the top
-Makefile says `SUBLEVEL = 369`. `k6a_gov.c:27` hardcodes
-`K6A_GOV_KERNEL_VER KERNEL_VERSION(4,14,369)` = `266097`, hence on **every boot**:
+Makefile says `SUBLEVEL = 369`, and `k6a_gov` warned on every boot:
 
 ```
 [0.776990] k6a_gov: build/run version delta (266097 vs 265983) — continuing (built-in)
 ```
 
-The `255` is deliberate, not an accident: `KERNEL_VERSION` stores `SUBLEVEL` in only 8 bits, so
-369 would be emitted as `266097`, which decodes back as **4.15.113**. Capping at 255 keeps the
-decoded version sane but makes every `#if LINUX_VERSION_CODE >= KERNEL_VERSION(4,14,NNN)` with
-`NNN > 255` evaluate false.
+The `255` is not an accident: `KERNEL_VERSION` stores `SUBLEVEL` in 8 bits, so 369 would be
+emitted as `266097`, which decodes back as **4.15.113** — `KERNEL_VERSION(4,14,369)` and
+`KERNEL_VERSION(4,15,113)` are the *same number*.
 
-**Audit (2026-10-02)**: across the whole tree there is exactly **one** such gate —
-`KERNEL_VERSION(4,14,369)` inside `k6a_gov.c` itself, i.e. the warning above. The only other
-out-of-4.14 gate is `KERNEL_VERSION(5,0,0)`, which is false under either value. So option (a)
-below costs nothing today, and option (b) would flip nothing but our own warning. The real risk
-is forward-looking: any *future* `> 255` gate would silently stay false, and the version lock
-compares `265983` against a `.ko` built with `266097`.
+**Attempted in `c42a67d07` as `+ 0$(SUBLEVEL)`, CI run `37067437853` failed after 14m37s:**
 
-**Decision needed for Build 341** — either
-(a) keep `+ 255` and make `K6A_GOV_KERNEL_VER` `KERNEL_VERSION(4,14,255)` so both sides agree,
-    documenting that `LINUX_VERSION_CODE` is capped on this tree, or
-(b) drop the cap to `0$(SUBLEVEL)` so `LINUX_VERSION_CODE = 266097` and make
-    `K6A_GOV_KERNEL_VER` decode-safe.
+```
+drivers/staging/qca-wifi-host-cmn/qdf/linux/src/i_qdf_timer.h:76:17: error: implicit
+  declaration of function 'timer_setup_on_stack'; did you mean 'hrtimer_init_on_stack'?
+  [-Werror=implicit-function-declaration]
+make[3]: *** [scripts/Makefile.build:364:
+  drivers/staging/qcacld-3.0/core/hdd/src/wlan_hdd_assoc.o] Error 1
+make: *** [Makefile:1238: drivers] Error 2
+```
 
-The audit above says (b) flips only our own warning, so **(b) is the better option** — but it
-changes a generated header for the whole tree, so it must ship with the audit evidence in the
-commit body, not alone.
+**The first audit was wrong.** It only searched for `KERNEL_VERSION(4,14,N)` with `N > 255`
+(exactly one hit, our own file) and never enumerated the **alias range**. Moving
+`265983 → 266097` flips every gate in `[265984 .. 266097]`, and that range is not empty —
+measured over the whole tree (`*.c`/`*.h`/`*.S`, `.git` excluded):
+
+| Gate | Hits | File |
+|------|-----:|------|
+| `KERNEL_VERSION(4,15,0)` = 265984 | 17 | `drivers/staging/qca-wifi-host-cmn/qdf/linux/src/i_qdf_timer.h` ×2, `qdf_mc_timer.c`, `drivers/staging/qcacld-3.0/.../wlan_hdd_cfg80211.c`, `net/wireguard/compat/compat.h` ×10, `net/wireguard/compat/ptr_ring/include/linux/ptr_ring.h`, **`KernelSU-Next/kernel/kernel_compat.h:288`**, **`KernelSU-Next/kernel/selinux/sepolicy.c:30`** |
+| `KERNEL_VERSION(4,15,8)` = 265992 | 1 | `net/wireguard/compat/compat.h:600` |
+| `KERNEL_VERSION(4,15,29)` = 266013 | 3 | `net/wireguard/compat/compat.h` ×3 |
+| `KERNEL_VERSION(4,14,369)` = 266097 | 1 | `drivers/thermal/k6a_gov/k6a_gov.c` (the `!=` that printed the warning) |
+| **Total** | **22** | 21 of them outside our own file |
+
+How each one breaks — read from the source, not guessed:
+
+- `i_qdf_timer.h:54` — `#if LINUX_VERSION_CODE >= KERNEL_VERSION(4,15,0)` selects the
+  `timer_setup_on_stack()` code path, which **does not exist in 4.14** → the CI error above.
+- `KernelSU-Next/kernel/selinux/sepolicy.c:30` — defines `CONFIG_IS_HW_HISI` when
+  `>= 4.14.0 && < 4.15.0`. Flipping it would **silently** stop defining it and change the
+  SELinux ebitmap path on a rooted device. Not a trade worth one `pr_warn`.
+- `KernelSU-Next/kernel/kernel_compat.h:288` — `#if < KERNEL_VERSION(4,15,0)` provides a
+  `__weak groups_sort()` no-op; flipping removes it.
+- `net/wireguard/compat/compat.h:27` — `#elif >= 4.15 && < 4.16` selects `ISUBUNTU1804`
+  (wrong compat profile for a 4.14 tree); `:600/:326/:727/:898` activate shims keyed on
+  `4.15.0..4.15.8` / `4.15.29`.
+- `wlan_hdd_cfg80211.c:15846` — `>= 4.15.0` compiles the OCE scan-flag helper.
+
+`KernelSU-Next` is a **git submodule**; two of those sites cannot even be patched in this repo.
+
+**Decision: the `+ 255` cap stays.** `Makefile` reverted to `+ 255`, so
+`LINUX_VERSION_CODE = 265983` again and CI sees byte-identical preprocessor behaviour to the
+last green build (re-audit of `[265984..265983]` → **0 gates**, i.e. no change at all).
+
+The warning is removed on the consumer side instead: `k6a_gov.c` lost
+`#include <linux/version.h>`, `#define K6A_GOV_KERNEL_VER KERNEL_VERSION(4,14,369)` and the
+`if (LINUX_VERSION_CODE != …) pr_warn(...)` block. That check compared two constants compiled
+from the same headers, so inside this tree it could only ever report the known cap; it had no
+action attached. The mismatch guard that actually matters for the version lock is **vermagic**
+(`4.14.369-openela-rc1-BadazzKernel-sweet-v1.3.2-buildNNN`), which is built from `UTS_RELEASE`
+and rejects a stale `.ko` at `insmod` time — it does not consult `LINUX_VERSION_CODE`.
+
+Regenerate with `make ARCH=arm64 include/generated/uapi/linux/version.h` (confirmed → `265983`);
+`make sweet_defconfig` alone does **not** touch it.
 
 ### Landed — `c42a67d07` (2026-10-02)
 
@@ -833,13 +871,16 @@ commit body, not alone.
    expectation drift apart.
 4. Finding 1 fixed in the same commit: `hash_state` (0/1/2/3) + bounded retry replace the
    unconditional `hash_verified = true` latch.
+5. Finding 2 **attempted and reverted in a follow-up commit**: `+ 0$(SUBLEVEL)` broke CI on
+   `qca-wifi-host-cmn` (see the finding-2 section). `Makefile` is back to `+ 255` and the
+   `build/run version delta` check is gone from `k6a_gov.c` instead.
 
 #### After the flash — what to verify
 
 ```sh
 dmesg | grep -E 'Build341|k6a_gov'      # Build341: k6a_gov v1.5.0 loaded
                                         # Build341: build hash verified (full-synergy) retries=0
-                                        # (kein "version delta" mehr, kein "not readable yet")
+                                        # (kein "version delta" — Check entfernt; vermagic ist der Lock)
 grep -E 'version|hash_state|hash_verified' /sys/kernel/k6a_gov/status
                                         # version=1.5.0  hash_verified=1  hash_state=1
 grep k6a_gov /data/adb/modules/k6a-ctl/config/service.log
