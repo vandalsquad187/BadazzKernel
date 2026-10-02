@@ -118,7 +118,7 @@ jobs:
             "CONFIG_KSU=y"
             "CONFIG_KSU_SUSFS=y"
             "CONFIG_KSU_TAMPER_SYSCALL_TABLE=y"
-            "CONFIG_K6A_GOV=y"
+            "CONFIG_K6A_GOV=m"
             "CONFIG_NFC_NQ_PN80T=y"
             "CONFIG_PHY_QCOM_QUSB2=y"
           )
@@ -155,9 +155,11 @@ jobs:
             JOBS=2
           fi
           make -j$JOBS Image.gz dtb.img dtbo.img
+          make -j$JOBS modules
 
       # -------------------------------------------------------
       # Schritt 7b: Post-Build Config verifizieren + QUSB2-Objekt prüfen
+      # + k6a_gov.ko prüfen
       # -------------------------------------------------------
       - name: Verify post-build config
         run: |
@@ -174,6 +176,17 @@ jobs:
             exit 1
           fi
           echo "::notice::QUSB2 verified in post-build config and objects"
+          echo "=== k6a_gov.ko check ==="
+          if ! grep -q "^CONFIG_K6A_GOV=m$" .config; then
+            echo "::error::CONFIG_K6A_GOV is not =m in post-build .config"
+            exit 1
+          fi
+          if [ ! -f drivers/thermal/k6a_gov/k6a_gov.ko ]; then
+            echo "::error::drivers/thermal/k6a_gov/k6a_gov.ko was not built"
+            exit 1
+          fi
+          ls -la drivers/thermal/k6a_gov/k6a_gov.ko
+          echo "::notice::k6a_gov.ko verified"
 
       # -------------------------------------------------------
       # Schritt 8: AnyKernel3-flashbares ZIP + Metadaten erstellen
@@ -186,11 +199,16 @@ jobs:
           cp arch/arm64/boot/Image.gz anykernel/
           cp arch/arm64/boot/dtb.img anykernel/
           cp arch/arm64/boot/dtbo.img anykernel/
+          cp drivers/thermal/k6a_gov/k6a_gov.ko anykernel/
+
+          K6A_GOV_VERSION=$(grep -aoE 'version=[0-9]+\.[0-9]+\.[0-9]+' drivers/thermal/k6a_gov/k6a_gov.ko | head -1 | sed 's/version=//')
+          [ -n "$K6A_GOV_VERSION" ] || K6A_GOV_VERSION=unknown
 
           # Build-Info für Debugging und User-Transparenz
           cat > anykernel/build-info.txt << EOF
           KERNEL_VERSION=${VERSION}
           KSU_VERSION=${KSU_VER}
+          K6A_GOV_VERSION=${K6A_GOV_VERSION}
           BUILD_DATE=$(date -u +%Y-%m-%dT%H:%M:%SZ)
           BUILD_NUMBER=${{ github.run_number }}
           COMMIT_SHA=${{ github.sha }}

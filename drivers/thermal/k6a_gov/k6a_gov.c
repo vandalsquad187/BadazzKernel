@@ -23,7 +23,7 @@ extern int kgsl_k6a_set_max_level_idx(unsigned int level);
 extern int k6a_devfreq_get_bw(const char *name, u32 *cur, u32 *min, u32 *max);
 extern int k6a_devfreq_set_bw(const char *name, u32 min, u32 max);
 
-#define K6A_GOV_VERSION       "1.4.0"
+#define K6A_GOV_VERSION       "1.5.0"
 #define K6A_GOV_KERNEL_VER    KERNEL_VERSION(4,14,369)
 #define K6A_GOV_KTHREAD_SLEEP_MS   250
 #define K6A_GOV_MAX_FREQS     32
@@ -520,13 +520,20 @@ static int read_bat_temp(void) {
 }
 
 /* ── Kthread ─────────────────────────────────────────────────────── */
-static bool hash_verified = false;
+#define K6A_HASH_PENDING   0
+#define K6A_HASH_OK        1
+#define K6A_HASH_MISMATCH  2
+#define K6A_HASH_SKIPPED   3
+#define K6A_HASH_TRIES     60
+
+static int hash_state = K6A_HASH_PENDING;
+static int hash_tries;
 
 static int verify_build_hash(void) {
     /* KB15: Verify build hash against k6a_features/git_hash.
      * The hash is exposed by k6a_features module in sysfs.
-     * We read it once and compare with our compile-time hash.
-     * On mismatch, disable legacy_mode (enforcement off). */
+     * Retried while sysfs is still unmounted; 1 = match, 0 = retry,
+     * -1 = mismatch (caller disables legacy_mode, enforcement off). */
     struct file *filp;
     char buf[64];
     loff_t pos = 0;
@@ -534,14 +541,16 @@ static int verify_build_hash(void) {
 
     filp = filp_open("/sys/kernel/k6a_features/git_hash", O_RDONLY, 0);
     if (IS_ERR(filp)) {
-        pr_warn("k6a_gov: k6a_features/git_hash not found, skipping hash verify\n");
+        if (hash_tries == 0)
+            pr_info("Build341: k6a_features/git_hash not readable yet, retrying\n");
         return 0;
     }
 
     ret = kernel_read(filp, buf, sizeof(buf) - 1, &pos);
     filp_close(filp, NULL);
     if (ret <= 0) {
-        pr_warn("k6a_gov: failed to read git_hash\n");
+        if (hash_tries == 0)
+            pr_info("Build341: k6a_features/git_hash read failed, retrying\n");
         return 0;
     }
     buf[ret] = '\0';
@@ -551,10 +560,10 @@ static int verify_build_hash(void) {
     if (strncmp(buf, K6A_BUILD_HASH, strlen(K6A_BUILD_HASH)) != 0) {
         pr_warn("k6a_gov: hash mismatch! build=%s runtime=%s -> legacy_mode=0\n",
                 K6A_BUILD_HASH, buf);
-        return -EINVAL;
+        return -1;
     }
-    pr_info("k6a_gov: hash verified OK (%s)\n", K6A_BUILD_HASH);
-    return 0;
+    pr_info("Build341: build hash verified (%s) retries=%d\n", K6A_BUILD_HASH, hash_tries);
+    return 1;
 }
 
 static int gov_thread(void *data) {
@@ -562,10 +571,19 @@ static int gov_thread(void *data) {
         int t;
         mutex_lock(&gov->lock);
         if (gov->enabled) {
-            if (!hash_verified) {
-                if (verify_build_hash() != 0)
+            if (hash_state == K6A_HASH_PENDING) {
+                int r = verify_build_hash();
+
+                hash_tries++;
+                if (r > 0) {
+                    hash_state = K6A_HASH_OK;
+                } else if (r < 0) {
+                    hash_state = K6A_HASH_MISMATCH;
                     gov->legacy_mode = 0;
-                hash_verified = true;
+                } else if (hash_tries >= K6A_HASH_TRIES) {
+                    hash_state = K6A_HASH_SKIPPED;
+                    pr_warn("Build341: hash verify gave up after %d tries\n", hash_tries);
+                }
             }
             t = read_temp();
             if (gov->temp_valid) {
@@ -786,7 +804,9 @@ static ssize_t status_show(struct kobject *k, struct kobj_attribute *a, char *b)
 
     /* KB15: hash verification */
     len += scnprintf(b + len, PAGE_SIZE - len,
-        "hash_verified=%d\n", hash_verified);
+        "hash_verified=%d\n"
+        "hash_state=%d\n",
+        hash_state == K6A_HASH_OK, hash_state);
 
     /* KB7: throttle history, oldest first */
     len += scnprintf(b + len, PAGE_SIZE - len, "hist=");
@@ -1029,7 +1049,7 @@ static int __init k6a_gov_init(void) {
     int ret;
 
     if (LINUX_VERSION_CODE != K6A_GOV_KERNEL_VER) {
-        pr_warn("k6a_gov: build/run version delta (%d vs %d) — continuing (built-in)\n",
+        pr_warn("k6a_gov: build/run version delta (%d vs %d) — continuing (module)\n",
                 K6A_GOV_KERNEL_VER, LINUX_VERSION_CODE);
     }
 
@@ -1102,7 +1122,7 @@ static int __init k6a_gov_init(void) {
         goto err_cooling;
     }
 
-    pr_info("Build340: k6a_gov v%s loaded (legacy=%d profile=%d freq_init=deferred)\n",
+    pr_info("Build341: k6a_gov v%s loaded (legacy=%d profile=%d freq_init=deferred)\n",
             K6A_GOV_VERSION, gov->legacy_mode, gov->profile);
     return 0;
 
