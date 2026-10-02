@@ -584,31 +584,52 @@ fix, `d4835b6` deadlock, `53bb809` v1.3.1 hardening, `967c134` v1.3.0 BW floors 
 `dfcb96b` v1.2.1, `602a281` `CONFIG_K6A_GOV=y`.
 
 ## k6a-ctl Companion
-- **Repo**: `vandalsquad187/k6a-ctl` branch `main` @ **`a049fac` (v1.1.6, versionCode 116)**,
-  local clone `~/k6a-ctl`. The `b130d68` pin quoted in older notes is stale but still in history.
-  Recent commits: `a049fac` v1.1.6 version format, `a9170b6` v1.1.5 **removed the USB autosuspend
-  workaround** (so userspace no longer masks a kernel bug), `de3c037` v1.1.4 dwc3 autosuspend off,
-  `18cf392` v1.1.3 log rotation + `battery_guard_temp`, `a639e7c` v1.1.2 robustheit, `e43ccf6`
-  v1.1.1 whitelisted handler.
-- **Device is 6 versions stale** (read 2026-10-02): `/data/adb/modules/k6a-ctl/module.prop` =
+- **Repo**: `vandalsquad187/k6a-ctl` branch `main` @ **`426b516` (v1.2.0, versionCode 120)**,
+  release `v1.2.0` → asset `k6a-ctl-v1.2.0.zip` (20 543 B), local clone `~/k6a-ctl`.
+  Recent commits: `426b516` v1.2.0 (Phase 5), `a049fac` v1.1.6 version format,
+  `a9170b6` v1.1.5 **removed the USB autosuspend workaround** (so userspace no longer masks a
+  kernel bug), `de3c037` v1.1.4 dwc3 autosuspend off, `18cf392` v1.1.3 log rotation +
+  `battery_guard_temp`, `a639e7c` v1.1.2 robustheit, `e43ccf6` v1.1.1 whitelisted handler.
+- **Device is 7 versions stale** (read 2026-10-02): `/data/adb/modules/k6a-ctl/module.prop` =
   **v1.0.0 / versionCode 1**; `bin/` holds only `k6a-controller k6a-lib.sh webui-handler.sh
-  webui-server.sh` — **no `check_module.sh`** (the repo has it, 89 lines, delegation-aware);
-  `webroot/` has `app.js index.html style.css`; the module is **disabled**
+  webui-server.sh`; `webroot/` has `app.js index.html style.css`; the module is **disabled**
   (`/data/adb/modules/k6a-ctl/disable`, 2026-09-27 18:25).
+- **`check_module.sh` is a build gate, not a shipped tool** — `build.sh:17` deliberately excludes
+  it (with `build.sh` itself) from the ZIP. Earlier notes framed its absence on the device as a
+  defect; that was wrong. Running it by hand is repo-side only:
+  `sh <repo>/bin/check_module.sh <repo>`. Gate result 2026-10-02: **green, 0 warns**.
+- **Phase 5 shipped (`426b516`, v1.2.0)**:
+  - **BW-floor payload order bug found + fixed.** `applyBwFloors()` built the string interlaced
+    `[gpubw_L2, llcc_L2, gpubw_L3, llcc_L3, gpubw_L4, llcc_L4]` while `bw_floors_store()` parses
+    grouped `sscanf("%u %u %u %u %u %u", &gpubw_l2..llcc_l4)` → **4 of 6 values landed wrong**,
+    silently (`bw_floors` has no monotonicity validation). Now `g.concat(l).join("_")`.
+    `resetBwFloors()` defaults were the same interlaced nonsense → replaced by the gaming profile
+    `dg=[4000,3000,1500] dl=[0,4000,3000]`, verified against the live node
+    (`bw_floor_gpubw=4000 3000 1500`, `bw_floor_llcc=0 4000 3000`).
+  - **Single authority**: k6a-ctl now writes **only** `legacy` (`delegated=1` → 1, else 0) and
+    never races `scaling_max_freq`/`bw_floors` against the kernel. `_LEGACY_SYNCED` guards rewrites.
+  - **`battery_guard` honoured**: config key `battery_guard=on|off` (default `on`) syncs the node;
+    WebUI toggle via `/battguard?e=0|1` alongside the existing `?t=35..60`. Kernel default is
+    **0** (`kzalloc`), so until now the threshold was stored but inert. Wire-up is
+    `k6a_gov.c:576`, gated on `state == K6A_GAMING`.
+  - **`game_pid`**: k6a-ctl writes `pidof $game_pkg` only on change (not per 1s tick) and `0` on
+    leaving GAMING. Kernel side is store+echo only (`k6a_gov.c:808/:815`), never acted upon.
+  - **Build-340 status surfaced**: `policy_max`, `state_age_ms`, `temp_src`, `temp_valid` parsed
+    from `/status` into `data.txt` and the WebUI (Gold cap in MHz, State age in s, temp-source
+    code table 0 none / 1 Gold / 2 Silver / 3 xo / 4 soc / 5 zone0, plus an explicit
+    `temp_valid=0` → "keine Quelle, State gehalten" state). All four are empty on a pre-340
+    kernel — extraction regexes checked against the live 1.3.1 `status`, no false matches.
+  - `_startup` logs `k6a_gov <version> legacy=<n>` and warns unless the version matches `1.4.*`.
 - **Mode**: `delegated=1` — Kernel handles thermal (CPU/GPU/BW), module handles game detection +
   sched tuning + auto `badazz_safe` @85°C
-- **WebUI**: Gov-Status, BW-Floors, GPU-Caps, History timeline
-- **Check**: `bin/check_module.sh` delegation-aware gate
-- **Synergy**: `k6a-ctl` writes `profile`/`enable` to `/sys/kernel/k6a_gov/`, reads `status`.
-  Its `bin/k6a-controller` parses `version=[^ ]+` and `webroot/app.js` just echoes it, so the
-  v1.4.0 bump and the extra `status` keys are backwards compatible with v1.0.0.
+- **WebUI**: Gov-Status (+ policy_max/state_age/temp_src/temp_valid), BW-Floors, GPU-Caps,
+  History timeline, Akku-Guard toggle
 - **Do not re-enable before Build 340**: on v1.3.1 the Gold cap and the BW floors are never
-  released (see *Pre-fix evidence*), so a userspace cooldown would fight the kernel.
-- **Next (Phase 5, no flash needed)**: bump past v1.1.6, ship `check_module.sh`, honour
-  `battery_guard`/`battery_guard_temp`, never call `cpu_apply()` when `delegated=1`, surface
-  `policy_max`/`state_age_ms`/`temp_src`/`temp_valid` in the WebUI, write and remove `game_pid`,
-  drop the `disable` file. `synergie2.txt` TEIL 3 additionally wants the governor version string
-  burned into both sides with a mismatch refusing to load — that is Build 341's `k6a_gov.ko`.
+  released (see *Pre-fix evidence*), so a userspace cooldown would fight the kernel. Drop
+  `/data/adb/modules/k6a-ctl/disable` only after the Build 340 acceptance run.
+- **Still open**: drop the `disable` file (after Build 340), and `synergie2.txt` TEIL 3 —
+  governor version string burned into both sides with a mismatch refusing to load — which is
+  Build 341's `k6a_gov.ko`.
 
 ## KernelSU-Next SUSFS
 - SUSFS in `fs/susfs.c`, `include/linux/susfs.h`
