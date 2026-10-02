@@ -3,14 +3,15 @@
 ## Current State
 - **Repo**: `vandalsquad187/BadazzKernel` branch `main`
 - **Kernel**: `4.14.369` — `K6A_GOV v1.3.1` built-in, `LOCALVERSION=-BadazzKernel-sweet-v1.3.2`
-- **Local**: clean, `main` @ `4dcd00df3` (Build 333: every SMB5 IRQ now logs its name + markers on the
-  previously blind Type-C handlers)
+- **Local**: clean, `main` @ `708e94da9` (Build 336: Fault 4 fixed — `ffs_func_eps_enable` now
+  assigns `ffs` before `ffs_log`)
 - **GitHub**: CI builds on every push to `main` (release) and `miui/test` (artifacts only);
-  latest release `v4.14.369-badazz-build333` (CI run `36892664057`, success)
+  latest release `v4.14.369-badazz-build336` (CI run `36939069596`, success)
 - **KSU-Next Submodule**: `b100bd28` (`v3.3.0-95-gb100bd28`, dev-4.14-prctl-fix, UAPIv4, `KSU_VERSION=33300`
   in `KernelSU-Next/kernel/Makefile`)
-- **Open blocker**: Fault 4 — instant whole-SoC reset on USB-C attach, **zero software trace**
-  (see *USB Debugging* below)
+- **Open blockers**: none. Fault 4 (whole-SoC reset on USB-C attach) **closed in Build 336 and
+  verified on device** — `USB_STATE=CONFIGURED`, no oops (see *USB Debugging*). Fault 2 (OTG host)
+  and Fault 3 (charger OCP loop) remain open.
 - **User speaks German**; device reports go out in German
 
 ## Repo & Docs Layout
@@ -36,65 +37,93 @@
   → release `v${VERSION}-badazz-build${run_number}`
 - Build time ~13–17 min; `gh run list` / `gh run watch <id>` to follow
 
-## USB Debugging (Build 300–333, open)
+## USB Debugging (Build 300–336)
 
-Status: **Faults 1–3 addressed in Builds 320/331/325. The blocker is Fault 4 — an instant
-whole-SoC reset on USB-C attach with no kernel trace at all. Build 333 is the current attempt.**
+Status: **All four faults are now explained.** Fault 4 — the whole-SoC reset on USB-C attach —
+was a one-line uninitialized local and is **fixed in Build 336, verified on device**. Faults 1/3
+were closed by Builds 320/331; Fault 2 (OTG host mode) is the only one still open.
 
-Key files: `drivers/usb/dwc3/gadget.c`, `drivers/usb/dwc3/dwc3-msm.c`, `drivers/usb/dwc3/core.c`,
+Key files: `drivers/usb/gadget/function/f_fs.c`, `drivers/usb/dwc3/gadget.c`,
+`drivers/usb/dwc3/dwc3-msm.c`, `drivers/usb/dwc3/core.c`,
 `drivers/power/supply/qcom/smb5-lib.c`, `drivers/power/supply/qcom/qpnp-smb5.c`,
 `arch/arm64/boot/dts/qcom/sdmmagpie-*.dts(i)`.
 Known-good reference commits: `096e0a0c9`, `d8cf6ae19` (high-speed DTS), `79b3b4147` (bus_aggr).
 
-### Fault 4 — instant reset on USB-C attach (BLOCKER, open)
+### Fault 4 — instant reset on USB-C attach (FIXED in Build 336)
 
-Repro (user): *S21 mit Bildschirm aus an sweet stecken → sofort 5 s Vibration + Reboot.*
+**Symptom**: *S21 an sweet stecken → 5 s Vibration + Reboot*, i.e. a `panic=5` window followed by
+a PS_HOLD cold power-cycle. `panic_on_oops=1` meant the oops that killed the gadget never made it
+to a durable log.
 
-Build 332 evidence, captured with the direct `/dev/kmsg` reader (see *On-device Capture*) and
-**seq gaps = 0**, i.e. the log is provably loss-free:
+**Root cause** (`drivers/usb/gadget/function/f_fs.c`, `ffs_func_eps_enable()`):
 
-| | run 1 (`control=auto`) | run 2 (`control=on`) |
-|---|---|---|
-| death | 17:26:50.84 | 18:20:25.9 |
-| last heartbeat | `hb n=4403` `dj=504` | `hb n=2453` `dj=504` |
-| lines after `capture_start` | 368 | 159 |
-| `typec_irq`/`vbus_nb`/`usbin-plugin`/`notify_device_mode` | 0/0/0/0 | 0/0/0/0 |
-| runtime PM | `suspended` ×499 polls | `active` the whole time |
-| `usb/online` at 14 Hz | — | stayed `0`, only 1 `CHANGE` (initial line) |
-| last Type-C IRQ of the boot | 17:22:20 (4½ min early) | none in window |
+```c
+static int ffs_func_eps_enable(struct ffs_function *func)
+{
+	struct ffs_data *ffs;              /* uninitialised local */
+	...
+	int ret = 0;
 
-What this proves:
-- **Suspend/runtime-PM is not the cause.** With `control=on` and `runtime_status=active` the device
-  still dies, so Build 330/331 were not it.
-- The attach reaches **no software observer whatsoever** — no charger IRQ, no VBUS notifier, no
-  `usb/online` flip, no USB intent, no Android vibrator call (last `vendor.qti.vibratorOL` = 17:21:45).
-- Reset signature is identical every time:
-  `PMIC@SID0 Power-off: Triggered from PS_HOLD (PS_HOLD/MSM Controlled Shutdown)` +
-  `PMIC@SID0 Power-on: Hard Reset and 'cold' boot` + `PMIC@SID4 Power-off: SOFT (Software)`
-  → SoC-initiated reset, not UVLO/SMPL/overcurrent.
-- The 5 s vibration is **not** Android — the haptic rail latches during the reset. Duration matches
-  `panic=5`.
-- **No lockup detectors are compiled**: `CONFIG_SOFTLOCKUP_DETECTOR=n`, `CONFIG_DETECT_HUNG_TASK=n`,
-  `CONFIG_HARDLOCKUP_DETECTOR=n`, `CONFIG_WQ_WATCHDOG=n` → a freeze produces nothing but the
-  heartbeat/poller going silent. `CONFIG_PREEMPT=y`, `CONFIG_PANIC_ON_OOPS=y`, `CONFIG_DEBUG_BUGVERBOSE=y`.
+	ffs_log("enter: state %d ...", ...);   /* <- reads ffs->ipc_log */
+	...
+	ffs = func->ffs;                       /* <- assigned only afterwards */
+```
 
-**pstore/ramoops cannot record this fault**: `CONFIG_PSTORE=y`, `console [pstore-1] enabled`,
-`ramoops attached 0x400000@0xb0000000`, yet after *every* crash `/sys/fs/pstore` holds 0 files and
-`/proc/last_kmsg` is 0 bytes (no `SYSTEM_LAST_KMSG` either). The PMIC reports a `'cold'` boot, which
-wipes the reserved region. Real-time capture is the only channel that exists.
+`ffs_log` (f_fs.c:47) expands to
+`ipc_log_string(ffs->ipc_log, "%s: " fmt, __func__, …)`, so it dereferences an
+uninitialised `ffs`. Everything else on that path was healthy — this ran on **every**
+SET_CONFIGURATION, so the fault was host-independent and the S21/PC A/B was a red herring.
 
-Two separate failures caused the blind spot:
-1. Handlers logged only via `smblib_dbg`, which is compiled out (Build 332's marker sat *after* the
-   micro-USB early return).
-2. Each SMB5 IRQ registered its own handler directly, so there was no single place that could prove
-   an IRQ fired.
+**Evidence** (Build 335, with `panic_on_oops=0` so the system survived to be read):
 
-**Build 333** closes both: `b333_irq()` in `qpnp-smb5.c` is registered for *every* SMB5 IRQ, prints
-`Build333: irq <name>` first, then forwards to the original handler (`smb5_irqs[i].irq_data` is now
-assigned *before* `devm_request_threaded_irq`, cleared again on failure). `smb5-lib.c` gained entry
-markers in `typec_state_change_irq_handler` (before the micro-USB return),
-`typec_attach_detach_irq_handler`, `typec_or_rid_detection_change_irq_handler` and
-`usb_plugin_irq_handler`.
+```
+Build335: set_alt enter intf=0 alt=0 func=…44200 ffs=…e981800 gadget=…ab15348
+Build335: set_alt ffs:   func=(null) epfiles=…c705f00 state=2 setup=0 eps=2 ifaces=1
+Build335: set_alt revmap intf=0
+Build335: set_alt state=2 alt=0 gadget=…
+Unable to handle kernel NULL pointer dereference at virtual address 000001a8
+Internal error: Oops: 96000006 [#1] PREEMPT SMP
+Process kworker/u16:1 (pid: 68)   Workqueue: dwc_wq dwc3_bh_work
+pc : ffs_func_set_alt+0x298/0x59c   x19 = ffs   x27 = func   x0 = 0
+Code: … 910702fa 900033a1 f9400b65 aa1a03e2 (f940d400)
+```
+
+- `Build335: eps_enable enter` **never printed** → the fault sits between the last breadcrumb and
+  it, i.e. inside the `ffs_log`.
+- `(f940d400)` = `ldr x0,[x0,#0x1a8]` with `x0 = 0`; `ipc_log` is at `+0x1a8` because LOCKDEP,
+  DEBUG_LOCK_ALLOC and INIT_STACK_ALL are all off (`work_struct` = 32 B) and the oops pins
+  `func` at `ffs+0xb0` via `str x27,[x19,#0xb0]`.
+- `ipc_log_string` itself is NULL-safe (`kernel/trace/ipc_logging.c:512 if (!ilctxt) return
+  -EINVAL;`) — only the uninitialised local faults.
+- A scan of every `ffs_log(` call site found **exactly one** other place where a local
+  `struct ffs_data *ffs` is read before assignment, and it was this one.
+
+**Fix (Build 336, `708e94da9`)**: `ffs = func->ffs;` moved above the `ffs_log`, plus a
+`Build336: eps_enable ffs=%px ipc_log=%px …` marker. Verified on device:
+
+```
+Build336: eps_enable ffs=ffffffde9e981800 ipc_log=ffffffdea3516200 func->ffs=… eps=… count=2
+Build335: set_alt eps_enable ret=0
+Build335: set_alt done ok
+android_work: sent uevent USB_STATE=CONFIGURED
+```
+
+Zero `Unable to handle` / `Oops` / `Kernel panic` lines; `/sys/class/udc/a600000.dwc3/state`
+= `configured`; `usb/online=1`, `real_type=USB_PD`.
+
+**Why the log always looked empty** — three compounding causes, all now understood:
+
+1. `panic_on_oops=1` + `panic=5` → oops → 5 s (the "vibration") → PS_HOLD reboot. Drop to
+   `echo 0 > /proc/sys/kernel/panic_on_oops` while diagnosing, restore to `1` afterwards.
+2. **pstore/ramoops is a dead end here**: `CONFIG_PSTORE=y`, `console [pstore-1] enabled`,
+   `ramoops attached 0x400000@0xb0000000`, yet after every crash `/sys/fs/pstore` is empty and
+   `/proc/last_kmsg` is 0 bytes. The PMIC logs `Power-off: PS_HOLD (MSM Controlled Shutdown)` +
+   `Power-on: Hard Reset and 'cold' boot` → DRAM lost. Real-time capture is the only channel.
+3. The capture wrote with too slow a flush — see *On-device Capture*.
+
+**What the early evidence wrongly suggested**: Build 332 saw *no* Type-C IRQ, no `usb/online`
+flip, no vibrator call before the reset, which pointed at PMIC/hardware. That was a symptom of
+#1/#3 (the oops happened before the charger path could be observed), not a hardware fault.
 
 ### Fault 1 — ep-cmd timeout storm (storm stopped in Build 320)
 
@@ -137,39 +166,58 @@ Scripts live in `~/tmp/`. Do **not** use `/tmp` (not writable in Termux) and do 
 
 | Script | What |
 |---|---|
-| `~/tmp/cap332.sh` | `start\|stop\|pstore\|scan` — the working driver |
-| `~/tmp/cap_scan.sh` | `kill\|count` — matches `readlink /proc/<pid>/fd/1` against `*/tmp/live/*` |
+| `~/tmp/cap334.sh` | `start\|stop\|pstore\|poll\|scan` — the working driver (source lives in `~/tmp`, pushed to `/data/local/tmp/`) |
+| `~/tmp/cap_scan.sh` | `kill\|count` — matches `readlink /proc/<pid>/fd/1` against `*/data/local/tmp/live/*` |
 | `~/tmp/pm_poll.sh` | root poller ~14 Hz: `runtime_status\|online\|real_type\|type\|status\|capacity`, prints `CHANGE` only on a real state change |
 
-`cap332.sh start` spawns under `setsid` + root:
+`cap334.sh start` spawns under `setsid` + root:
 
-1. **`dd if=/dev/kmsg bs=65536`** → `~/tmp/live/kmsg332.log`. This is the only proven loss-free
-   channel — gaps = 0 over the last 159 and 368 lines of two separate crashes. `dd` writes one
-   block per read, so it is unbuffered. **`cat /dev/kmsg` fails with `EINVAL`** (buffer too small).
-2. logcat `main`/`system`/`events` with `stdbuf -oL`.
-3. `pm_poll.sh`, then a `BuildNNN: capture_start` banner marker (printk, `T0`, banner, heartbeat,
-   control/runtime state, battery, `usb/online` + `real_type`).
+1. **`cat /dev/kmsg`** → `/data/local/tmp/live/kmsg334.log`. This is the proven loss-free channel
+   (gaps = 0 across 44 MB / 1.09 M lines). **`dd if=/dev/kmsg` does NOT work** — toybox `dd` dies
+   with `read error: Invalid argument`, and toybox `dd` has no `conv=fsync` anyway
+   (`oflag` only supports `append|direct|seek_bytes`).
+2. logcat `main`/`system`/`events`/`crash` with `stdbuf -oL`.
+3. `pm_poll.sh` (a `poll()` loop writing `CHANGE` lines), then a `BuildNNN: capture_start` banner
+   marker (printk, `T0`, banner, heartbeat, control/runtime state, battery, `usb/online` +
+   `real_type`).
+4. The poll loop calls **`sync` on every iteration (every ~70 ms)**, not every Nth — a run that
+   synced only every ~1 s lost the whole tail of the crash, because the oops/panic lands in the
+   unflushed window. `sync` costs ~12 ms (global) / ~13 ms (`sync -f FILE`, GNU coreutils; the
+   toybox `sync` accepts **no** file argument), i.e. ~17 % of a 70 ms cycle.
 
-`/dev/kmsg` line format is `seq,ts_us_since_boot,-;msg`. Seq deltas give the gap check;
-`ts_us_since_boot` + `T0` from the banner converts to wall clock.
+`/dev/kmsg` record format is `pri,seq,ts_us_since_boot,-;msg` — **field 1 is the syslog priority,
+field 2 is the sequence number**, field 3 the timestamp. Seq deltas give the gap check;
+`ts + T0epoch` from the banner converts to wall clock (`cap334.sh start` prints `T0=`, `T0epoch=`).
 
 Gotchas learned the hard way:
-- Capture files end **NUL-padded** → `tr -d '\0'` before grepping.
+- Capture files end **NUL-padded** → `tr -d '\0'` before grepping (NULs also break `grep -c` on
+  some toybox builds).
 - **Orphan hazard**: any worker whose stdout is still the tool's pipe hangs the tool forever.
-  Always redirect worker stdout to a file.
+  Always redirect worker stdout to a file. `cat /dev/kmsg` runs forever — that is expected, not a
+  hang; `cap334.sh stop` kills it by `readlink /proc/<pid>/fd/1` target, never by pattern.
 - Kill via `cap_scan.sh kill` (fd-target matching). **Never** `pkill -f` — the pattern matches the
   scanning shell's own cmdline. **Never** `ps | grep` — `hidepid` hides root procs from Termux.
 - Full root path is **`/system/bin/su`** (KSU `sucompat.c` intercepts `execve` on `su`), and use
-  full paths inside `su -c` (`/system/bin/dumpsys`, `tr`, …). SELinux is Enforcing.
+  full paths **inside** `su -c` (`/system/bin/dmesg`, `/system/bin/cat`, …) — the root PATH is
+  broken there. Note `su` only exists in Termux's mount namespace (KSU magic-mounts it for granted
+  apps): `adb shell '/system/bin/su …'` fails with `inaccessible or not found`. Termux cannot write
+  `/data/local/tmp` (owner root) — use `adb push` to `/sdcard/Download/`, which Termux *can*
+  overwrite.
+- Root has **no capabilities** (`CapEff=0`, `CapBnd=0`), but the standard sysctls still write.
+- Re-apply after **every reboot**: `echo 8 4 1 7 > /proc/sys/kernel/printk` (otherwise `4 6 1 7`),
+  `echo 144 > /proc/sys/kernel/sysrq` (resets to 0), and — only while diagnosing —
+  `echo 0 > /proc/sys/kernel/panic_on_oops`. Restore `panic_on_oops=1` when done.
 - SUSFS spoofs `uname` → `6.12.0-android16-6.12-perf-g1d01cd293`; the real banner is
-  `Linux version 4.14.369-openela-rc1-BadazzKernel-sweet-v1.3.2-buildNNN`. It leaves the ring
-  within ~1 h, so prove the build with `BuildNNN: hb` lines, not the banner.
+  `Linux version 4.14.369-openela-rc1-BadazzKernel-sweet-v1.3.2-buildNNN`. `BuildNNN: hb` lines
+  are the reliable build proof.
 
 ```bash
-bash ~/tmp/cap332.sh start      # then reproduce the fault
-bash ~/tmp/cap332.sh pstore     # IMMEDIATELY after the reboot: /sys/fs/pstore + PMIC/LMK/tombstone dump
-bash ~/tmp/cap332.sh stop
-tr -d '\0' < ~/tmp/live/kmsg332.log | grep -E "Build333|Build332"
+bash ~/tmp/cap334.sh start      # prints T0/T0epoch + worker pids, then reproduce the fault
+bash ~/tmp/cap334.sh pstore     # /sys/fs/pstore + PMIC/LMK/tombstone dump (expect 0 files)
+bash ~/tmp/cap334.sh stop
+adb pull /data/local/tmp/live/kmsg334.log ~/tmp/bNNN/
+tr -d '\0' < ~/tmp/bNNN/kmsg334.log > ~/tmp/bNNN/clean.log
+grep -E 'BuildNNN|set_alt|USB_STATE|Unable to handle|Oops|Kernel panic' ~/tmp/bNNN/clean.log
 ```
 
 ## Local Build Notes (Termux)
@@ -250,6 +298,9 @@ Local full builds are blocked in Termux — see **Local Build Notes (Termux)** a
 Full log: `git log --oneline -40`. Current head is the USB debug series:
 
 ```
+708e94da9 Build 336: initialise ffs before ffs_log in ffs_func_eps_enable
+17465e65f Build 335: pin the NULL pointer behind ffs_func_set_alt on SET_CONFIGURATION
+054b9fc2f docs: refresh README.md + AGENTS.md from Build 320 to Build 333
 4dcd00df3 Build 333: cover every SMB5 IRQ + markers on the blind Type-C handlers
 c576e8ab5 Build 332: global kernel heartbeat + Type-C/VBUS path markers
 524ca3253 Build 331: hold the dwc3 core PM reference across a connection
@@ -314,9 +365,10 @@ k6a_gov history: `81d69ae` v1.3.1 ticks fix, `d4835b6` deadlock, `53bb809` v1.3.
 4. **Hardcoded CPU6**: fixed — use `find_gold_cpu()` portable
 5. **Boot hang at crDroid logo** (Build 267-278): see Boot-Hang Root Cause below
 6. **Local Termux build fails** (`modpost` / `elf.h`, no `bison`/`perl`): use the syntax-check recipe in *Local Build Notes (Termux)*, let CI do real builds
-7. **USB `ep cmd timeout` / device not enumerating**: see *USB Debugging (Build 300-333, open)*
-8. **Whole SoC resets on USB-C plug, log empty**: that is Fault 4 — do not trust logcat or
-   `/proc/last_kmsg`, capture with `~/tmp/cap332.sh` (see *On-device Capture*)
+7. **USB `ep cmd timeout` / device not enumerating**: see *USB Debugging (Build 300–336)*
+8. **Whole SoC resets on USB-C plug, log empty**: that was Fault 4 — fixed in Build 336. If it ever
+   recurs, do not trust logcat or `/proc/last_kmsg`; capture with `~/tmp/cap334.sh` and set
+   `panic_on_oops=0` first so the oops does not reboot the phone (see *On-device Capture*)
 9. **A tool call hangs forever**: an orphaned worker is still holding the pipe — run
    `$SU -c "sh $HOME/tmp/cap_scan.sh kill"`
 

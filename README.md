@@ -47,7 +47,7 @@ linux-4.14.369
 | **Safety** | Battery guard + hash | `battery_guard` @45°C → CD_L2, `poll_ms` 100..5000, `verify_build_hash` vs `k6a_features/git_hash` |
 | **Thermal** | Cooling device | `k6a_gov` as `thermal_cooling_device`, `cool_cur` locked, `K6A_CD_L4` clamp |
 | **Root** | KSU-Next + SUSFS | 33300 **UAPIv4** (submodule `b100bd28`), SUSFS `v2.2.0` (sus_path/mount/kstat/map), `tamper_syscall_table` |
-| **USB** | DWC3 / QUSB2 | SM6150 clocks (`GCC/DISPCC/CAMCC`), `WAIT_FOR_LPM` clear, `bus_aggr`/`GCTL` 50ms, `is_a_peripheral` fix — PC bootloop gone since v1.3.2. *Current work (Build 307–333): restart-storm breaker, EP0 enable, runtime-PM hold, SMB5 IRQ coverage — see [USB status](#usb-status-open)* |
+| **USB** | DWC3 / QUSB2 | SM6150 clocks (`GCC/DISPCC/CAMCC`), `WAIT_FOR_LPM` clear, `bus_aggr`/`GCTL` 50ms, `is_a_peripheral` fix — PC bootloop gone since v1.3.2. Full device-mode enumeration works since Build 336 (Faults 1/4 fixed) — see [USB status](#usb-status) |
 | **Scheduler** | UCLAMP, SCHED_CASS | Latency/efficiency tuning |
 | **Memory** | KSM, LRU_GEN, ZRAM lz4 | Gaming stability |
 | **Net** | BBR | Low latency |
@@ -134,44 +134,64 @@ k6a-ctl: `check_module.sh` validates delegated/profile, WebUI shows gov status l
 ```bash
 # USB health
 dmesg | grep -E "Build31[3-9]|Build320|STARTFAIL|STARTTOUT"   # fault markers
+dmesg | grep -E "Build336|set_alt done ok|USB_STATE=CONFIGURED"  # enumeration succeeded
 dmesg | grep -E "dwc3|bus_aggr|GCTL"                          # no ep0out timeout loop, IRQ >0
 ```
 Healthy connect: `mtp,adb` with `f1/f2` endpoints and `dwc3_msm mtp,adb` bound.
 
 ---
 
-## USB status (open)
+## USB status
 
-The v1.3.2 PC-bootloop fix landed. Builds 307–333 then worked through a chain of deeper faults.
-One blocker remains.
+The v1.3.2 PC-bootloop fix landed. Builds 307–336 then worked through a chain of deeper faults.
+**The blocker is closed — full enumeration now works.**
 
 | # | Issue | State |
 |---|-------|-------|
 | **Fault 1** | `SETEPCFG` ep0out timeout → `RESTART_USB_SESSION` → gadget torn down and restarted every ~2 s until unplug | **Storm stopped** — Build 320 adds quiescent-core recovery + a give-up counter, Build 331 holds the dwc3 core PM reference across a connection |
 | **Fault 2** | OTG host mode: `usb1-port1: Cannot enable. Maybe the USB cable is bad?` ×4 → `unable to enumerate` | **Open**, not touched since Build 320 |
 | **Fault 3** | Charger: `APSD=OCP` re-runs every 5 s | **Open**, cosmetic — OCP/DCP deliberately never reach the dwc3 core |
-| **Fault 4** | **Instant whole-SoC reset the moment a USB-C cable is plugged in** (5 s of vibration, then reboot) | **Open — blocker.** See below |
+| **Fault 4** | **Instant whole-SoC reset the moment a USB-C cable is plugged in** (5 s of vibration, then reboot) | **Fixed in Build 336** — see below |
 
-### Fault 4 — instant reset on attach
+### Fault 4 — instant reset on attach (fixed in Build 336)
 
-Plugging sweet into a Galaxy S21 resets the phone immediately. The kernel has been observed with a
-loss-free `/dev/kmsg` stream (zero sequence gaps) right up to the last millisecond, and it shows
-**nothing**: no Type-C IRQ, no VBUS notifier, no `usb/online` flip, no USB intent, no Android
-vibrator call. The PMIC consistently reports
+Plugging sweet into a Galaxy S21 reset the phone immediately: 5 s of vibration, then a reboot. For
+several builds the log was completely silent, which pointed the investigation at PMIC hardware and
+runtime suspend. Both were wrong.
+
+The real cause was one uninitialized local in `ffs_func_eps_enable()`:
+
+```c
+struct ffs_data *ffs;                 /* never assigned before use ... */
+ffs_log("enter: ...");                /* ... this reads ffs->ipc_log */
+```
+
+`ffs_log()` expands to `ipc_log_string(ffs->ipc_log, ...)` — a dereference of an uninitialized
+pointer. It runs on **every** `SET_CONFIGURATION`, i.e. on the first real setup packet of any
+enumeration, so the reset was host-independent; the S21 was simply the host that talked far enough
+to trigger it. The resulting oops kills the dwc3 bottom-half work item, `panic_on_oops` turns it
+into `panic=5` (the 5 s of vibration) and the PMIC performs a PS_HOLD power-cycle.
+
+Three compounding problems made it invisible:
+
+1. `panic_on_oops=1` + `panic=5` meant the oops never reached a durable log.
+2. The power-cycle is reported as a **`'cold' boot`**, which wipes the 4 MB ramoops region — so
+   `/sys/fs/pstore` and `/proc/last_kmsg` are always empty afterwards, even with
+   `CONFIG_PSTORE_RAM=y`.
+3. The capture script flushed too slowly, dropping everything written since its last sync.
+
+**Build 335** added breadcrumbs at every step of `ffs_func_set_alt()`; **Build 336** fixes the bug.
+Verified on device:
 
 ```
-Power-off: Triggered from PS_HOLD (PS_HOLD/MSM Controlled Shutdown)
-Power-on : Hard Reset and 'cold' boot
+Build336: eps_enable ffs=ffffffde9e981800 ipc_log=ffffffdea3516200 ... count=2
+Build335: set_alt eps_enable ret=0
+Build335: set_alt done ok
+android_work: sent uevent USB_STATE=CONFIGURED
 ```
 
-and afterwards `/proc/last_kmsg` and `/sys/fs/pstore` are empty — the cold boot wipes the ramoops
-region, so there is no post-mortem record. Runtime suspend was ruled out twice (with the root port
-forced `control=on` and `runtime_status=active` the phone still dies).
-
-**Build 332** added a 500 ms kernel heartbeat plus Type-C/VBUS markers and proved the SoC healthy
-to the last millisecond. **Build 333** closes the blind spot: every SMB5 charger/Type-C IRQ now
-prints its name through a single dispatcher, and the four Type-C handlers that previously logged
-only through the compiled-out `smblib_dbg` gained entry markers.
+Zero oopses, `/sys/class/udc/a600000.dwc3/state` = `configured`, `usb/online=1`,
+`real_type=USB_PD`.
 
 Faults 1–3 detail and the full evidence tables live in `AGENTS.md`.
 
@@ -208,6 +228,7 @@ Full Changelog: `git log --oneline`
 | Bug | Symptom | Root Cause | Fix |
 |-----|---------|------------|-----|
 | **USB PC Bootloop** | PC host → instant reboot/bootloop, 67W charger OK, `No data transfer` didn't help, `bq2597x` init cut at 0.73s, stock boot.img OK | DWC3 `WAIT_FOR_LPM` deadlock + EP0 `TRB timeout` (`bus_aggr`/`noc_aggr` clocks off, `GCTL RAMCLKSEL` on `rev 00000000` wrong, `is_a_peripheral=0`) → WDT bite | SM6150 clocks (`GCC/DISPCC/CAMCC/SCC`), `WAIT_FOR_LPM` clear on extcon, `bus_aggr` enable + IOMMU guard, `GCTL` 50ms delay, `is_a_peripheral` `pullup`/`vbus_connect` — verified S21 + PC `IRQ>0` `mtp,adb` |
+| **USB attach → whole-SoC reset** (Fault 4) | USB-C into a Galaxy S21 → 5 s vibration + reboot, log empty, `/sys/fs/pstore` empty every time | `ffs_func_eps_enable()` used the local `struct ffs_data *ffs` in an `ffs_log()` **before** `ffs = func->ffs;` → `ipc_log_string(ffs->ipc_log, …)` dereferences an uninitialised pointer (`+0x1a8`, x0=0) → oops kills `dwc_wq` → `panic=5` → PS_HOLD `'cold' boot` wipes ramoops | **Build 336**: assign `ffs` before the `ffs_log`; **Build 335** breadcrumbs proved it. Verified: `USB_STATE=CONFIGURED`, UDC `configured`, zero oops |
 | **Identical Release Names** | All GitHub Releases/ZIPs named identically (`v4.14.369`) | `build-kernel.yml` `name: "Badazz-kernel v${VERSION}"` + ZIP `v${VERSION}.zip` without `run_number` | CI now `name: "v${VERSION}-badazz-build${run_number}"` + ZIP `v${VERSION}-build${run_number}[ -miui].zip` + artifact `…-buildXX-variant` |
 | **KSU Manager "update required"** | Manager CI `34252913097` (`88feb68` `e801e16` version matching) on kernel `a5ff54c` → red banner | `e801e16` new UAPI + `bundled_lkm` check, old kernel UAPI mismatch; `88feb68` needs `KPROBES` + 5.x APIs (`syscall_fn_t`, `pgtable.h`, `lsm_hook`) not 4.14 compatible | Fork `dev` → `88feb68` for PC, hotfix `CONFIG_KPROBES=y` + `syscall_fn_t`/`pgtable`/`ksys_close` guards, then **revert** to the current line (`b100bd28`, UAPIv4) until a proper 4.14 port exists (manager stays on `34142634591`) |
 | **MIUI/HOS not booting** | Stock HyperOS `V14.0.1.0` `4.14.190-perf` needs `ARCH_SM6150/CAMCC/GCC/PDC` + `xiaomi/sweet` DTS (`GTX9896_K6`, `FPC1540`) | `sweet_defconfig` flattened to `atoll/sm6150`, `QUSB2` only | `sweet_miui.config` overlay (7 lines) + `xiaomi/sweet` DTS shim + CI matrix `aosp`/`miui` (`miui/test` artifacts, `main` release `…-miui.zip`) |
@@ -221,10 +242,9 @@ Full Changelog: `git log --oneline`
 | **P0** | **KSU 88feb68 4.14 Port on PC** | `badazzrebase.md` ready | `k6a-sweet` rebase `b100bd28` → `88feb68` (Squash 49 files, `meld` for `Kconfig/Makefile/selinux.c` `susfs_is_current`), new branch `k6a-sweet-88feb68`, Badazz bump, CI green ~15 min |
 | **P0** | **SUSFS full restore** | Hotfix relaxed validation, `fs/susfs` `v2.2.0` intact but KSU side `k6a-sweet` patches pending | After rebase: `CONFIG_KSU_SUSFS` + `TAMPER_SYSCALL_TABLE` validation back, `nm vmlinux \| grep susfs_is_current` green |
 | **P1** | **MIUI/HOS verification** | `sweet_miui.config` + DTS + `miui/test` CI `aosp+miui` artifacts | Flash `…-miui.zip` on HyperOS `V14.0.1.0` (or `2.0`), test `dmesg` `fpc/goodix/touchfeature/ds28e16`, 120Hz, NFC, `usb` `host/device` |
-| **P1** | **USB Fault 4 (blocker)** | Instant whole-SoC reset on USB-C attach, zero software trace, ruled out twice as a suspend bug | Flash `…-build333`, capture with the direct `/dev/kmsg` reader, then grep `Build333: irq` — a line present means the attach IRQ fired, absent means the reset happens below the driver |
-| **P1** | **USB Fault 1/2/3** | PC bootloop fixed (v1.3.2); ep-cmd storm stopped (Build 320/331), OTG host `Cannot enable` and charger `OCP` rerun still open | After Fault 4: attack Fault 2 (host mode) |
+| **P1** | **USB Fault 1/2/3** | PC bootloop fixed (v1.3.2); Fault 4 fixed in Build 336; ep-cmd storm stopped (Build 320/331), OTG host `Cannot enable` and charger `OCP` rerun still open | Attack Fault 2 (host mode): capture with `~/tmp/cap334.sh`, grep `Build327: ep_cmd` + the `usb1-port1` block |
 | **P2** | **Release hygiene** | `main` `v1.3.2` + `k6a-ctl` `v1.1.6` versioned ZIPs | Releases are `v4.14.369-badazz-buildXX` automatically via CI; next `main` release gets a changelog |
-| **P2** | **Docs** | `README.md` + `AGENTS.md` refreshed at Build 333 | `Documentation/` is stock Linux 4.14 — leave it alone, keep project docs in the root `*.md` |
+| **P2** | **Docs** | `README.md` + `AGENTS.md` refreshed at Build 336 (Fault 4 root cause + corrected capture recipe) | `Documentation/` is stock Linux 4.14 — leave it alone, keep project docs in the root `*.md` |
 
 ---
 
