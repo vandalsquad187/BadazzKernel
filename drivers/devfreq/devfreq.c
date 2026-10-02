@@ -789,8 +789,7 @@ int k6a_devfreq_set_bw(const char *name, u32 min, u32 max)
 			continue;
 
 		mutex_lock(&df->lock);
-		if (min)
-			df->min_freq = min;
+		df->min_freq = min;
 		if (max)
 			df->max_freq = max;
 		mutex_unlock(&df->lock);
