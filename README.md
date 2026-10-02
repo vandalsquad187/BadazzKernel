@@ -15,7 +15,7 @@
 
 ## Overview
 
-BadazzKernel is a performance and gaming tuned kernel for **Redmi Note 12 Pro 4G (sweet / sweetin)**. Core is the in-kernel governor **k6a_gov v1.4.0** — the perfect base for the companion module **[k6a-ctl](https://github.com/vandalsquad187/k6a-ctl)**. Both work hand-in-hand in delegated mode: kernel throttles, module controls.
+BadazzKernel is a performance and gaming tuned kernel for **Redmi Note 12 Pro 4G (sweet / sweetin)**. Core is the in-kernel governor **k6a_gov v1.5.0** (shipped as a loadable module since Build 341) — the perfect base for the companion module **[k6a-ctl](https://github.com/vandalsquad187/k6a-ctl)**. Both work hand-in-hand in delegated mode: kernel throttles, module controls.
 
 🤌🏻 Join my Telegram channel: https://t.me/Badazz89
 
@@ -26,7 +26,7 @@ BadazzKernel is a performance and gaming tuned kernel for **Redmi Note 12 Pro 4G
 ```
 linux-4.14.369
 ├── KernelSU-Next 38309 (UAPIv4) + SUSFS v2.2.0  # Root + Hide (submodule b100bd28)
-├── drivers/thermal/k6a_gov/k6a_gov.c v1.4.0     # In-kernel gaming governor
+├── drivers/thermal/k6a_gov/k6a_gov.c v1.5.0     # In-kernel gaming governor (CONFIG_K6A_GOV=m)
 ├── drivers/gpu/msm/kgsl_pwrctrl.c               # GPU pwrlevel export (k6a_gov)
 ├── drivers/devfreq/devfreq.c                    # BW floors (gpubw / llcc), 0 = release floor
 ├── drivers/gpu/msm/ + drivers/thermal/          # Thermal + cooling floors
@@ -38,7 +38,7 @@ linux-4.14.369
 
 | Area | Feature | Details |
 |------|---------|---------|
-| **Governor** | **k6a_gov v1.4.0** | Built-in (`CONFIG_K6A_GOV=y`), state machine OFF→GAMING→CD_L2/L3/L4, hysteresis, **immediate escalation** L2→L3→L4, entry dwell on GAMING, throttle history (16) |
+| **Governor** | **k6a_gov v1.5.0** | Loadable module (`CONFIG_K6A_GOV=m`, `k6a_gov.ko` shipped in the zip and loaded by k6a-ctl), state machine OFF→GAMING→CD_L2/L3/L4, hysteresis, **immediate escalation** L2→L3→L4, entry dwell on GAMING, throttle history (16) |
 | **CPU** | Gold clamp | `find_gold_cpu()` + `clamp_freq`, `enforce_max_freq` + `cpufreq_update_policy` (kthread only), hardened notifier, **released again on recovery/disable** |
 | **Temp** | Multi-zone | Max over 4 Gold zones `cpu-1-0..3-usr`, fallback `cpu-0-0-usr` → `xo-therm` → `soc-therm` → `thermal_zone0`; `temp_src`/`temp_valid` in status, holds the last state if no zone answers |
 | **GPU** | Native enforcement | `kgsl_k6a_get_levels` / `kgsl_k6a_set_max_level_idx`, caps per CD state |
@@ -124,7 +124,7 @@ Runtime ~13–17 min: `gh run list` / `gh run watch <id>`.
 ## Status & Debug
 
 ```bash
-dmesg | grep k6a_gov          # v1.4.0 loaded, hash_verified, gpu levels, Build340 markers
+dmesg | grep k6a_gov          # v1.5.0 loaded, hash verified, gpu levels, Build341 markers
 cat /sys/kernel/k6a_gov/status   # incl. policy_max, state_age_ms, temp_src, temp_valid
 cat /sys/kernel/k6a_gov/battery_guard; cat /sys/kernel/k6a_gov/poll_ms
 echo 0 > /sys/kernel/k6a_gov/enable  # kill switch
@@ -220,6 +220,7 @@ Build 320 raised `CONFIG_LOG_BUF_SHIFT` 17 → 20 (128 KB → 1 MB), and the ker
 
 | Version | Highlights |
 |---------|------------|
+| **k6a_gov v1.5.0 (Build 341)** | **`CONFIG_K6A_GOV=m`** — the governor ships as `k6a_gov.ko` inside the flash zip, is dropped at `/data/adb/k6a_gov.ko` and insmodded by k6a-ctl, so governor updates no longer need a kernel flash. **Version lock**: `hash_state` (0 pending / 1 verified / 2 mismatch / 3 not checked) with a bounded retry replaces a `hash_verified` latch that reported "verified" for a check skipped because `/sys` was not mounted yet; `LINUX_VERSION_CODE` now really is `4.14.369` (was pinned to `.255`), killing the boot-time `build/run version delta` warning. Vermagic ties the `.ko` to exactly this build. |
 | **k6a_gov v1.4.0 (Build 340)** | Gold cap is released again on recovery/`enable=0`/`legacy=0` (`cpufreq_update_policy` instead of pokes into `policy->max`); **immediate escalation** L2→L3→L4 and L3→L4; entry dwell in GAMING (fast only for a ≥5 °C *rise*); temperature fail-safe holds the last state when no zone answers (`temp_src`, `temp_valid`); BW floors are actually released again (`k6a_devfreq_set_bw(…,0,0)` silently did nothing before); sysfs validation (all-or-none zero, monotonic caps, bounds) + `battery_guard_temp`, `profile` sanitised at init |
 | **v1.3.2 (current)** | **USB fix**: SM6150 clocks, `WAIT_FOR_LPM` deadlock, `bus_aggr`/`GCTL` 50ms, `is_a_peripheral` — no PC bootloop; **MIUI**: `sweet_miui.config` overlay + DTS `xiaomi/sweet` + CI matrix `aosp`/`miui`; **CI**: build number in release/ZIP (`vX-buildXX`); **KSU**: submodule at `b100bd28` (runtime `38309` = `35000 + git`, UAPIv4) until `88feb68` 4.14 port on PC; userspace ksud + manager `v3.4.0-19-g2b31f718` (CI `36750739326`), spoofed APK with random applicationId |
 | **v1.3.1** | Hardening: `find_gold_cpu`, notifier/mutex fixes, `cool_cur`/`status_show` locked, `ticks` fix |
@@ -252,8 +253,8 @@ Full Changelog: `git log --oneline`
 | **P0** | **SUSFS full restore** | Hotfix relaxed validation, `fs/susfs` `v2.2.0` intact but KSU side `k6a-sweet` patches pending | After rebase: `CONFIG_KSU_SUSFS` + `TAMPER_SYSCALL_TABLE` validation back, `nm vmlinux \| grep susfs_is_current` green |
 | **P1** | **MIUI/HOS verification** | `sweet_miui.config` + DTS + `miui/test` CI `aosp+miui` artifacts | Flash `…-miui.zip` on HyperOS `V14.0.1.0` (or `2.0`), test `dmesg` `fpc/goodix/touchfeature/ds28e16`, 120Hz, NFC, `usb` `host/device` |
 | **P1** | **USB Fault 3 (charger)** | **Closed 2026-10-02** — 500 s capture on Build 338 (`printk 8 4 1 7`, 40 491 lines): 0× `APSD=OCP`, `smblib_rerun_apsd` exactly once per plug event, `vbus_notifier` only on FLOAT connect/detach | Nothing to fix; keep `~/tmp/cap334.sh` as the recipe if it ever returns |
-| **P1** | **k6a_gov → loadable module** | Governor fixes ship as **Build 340** (still `CONFIG_K6A_GOV=y`) | Build 341: `CONFIG_K6A_GOV=m`, CI ships `k6a_gov.ko`, `service.sh` insmods it with the k6a-ctl legacy cooldown as fallback — tuning without a reflash |
-| **P1** | **k6a-ctl sync** | Device runs **v1.0.0** vs repo **v1.1.6**; device has no `check_module.sh` | Bump past v1.1.6, ship `check_module.sh`, `battery_guard` + `battery_guard_temp` support, no `cpu_apply()` when `delegated=1`, WebUI keys for `policy_max`/`state_age_ms`/`temp_src`/`temp_valid`, drop the `disable` file |
+| **P1** | **k6a_gov → loadable module** | **Done in Build 341 (`c42a67d07`)** — `CONFIG_K6A_GOV=m`, CI builds `modules` and ships `k6a_gov.ko`, `anykernel.sh` drops it at `/data/adb/k6a_gov.ko` (`/system` is dm-verity, not writable), k6a-ctl v1.3.0 insmods it with a three-stage version lock and the legacy cooldown as fallback | Flash Build 341 + k6a-ctl v1.3.0, then verify `version=1.5.0` / `hash_state=1` |
+| **P1** | **k6a-ctl sync** | **Done** — repo at **v1.3.0 (`1513fd8`)**: `check_module.sh`, `battery_guard`/`_temp`, `policy_max`/`state_age_ms`/`temp_src`/`temp_valid` WebUI keys, `disable` file dropped, device on v1.2.0 awaiting the v1.3.0 flash | Flash v1.3.0 together with Build 341 |
 | **P2** | **Release hygiene** | `main` `v1.3.2` + `k6a-ctl` `v1.1.6` versioned ZIPs | Releases are `v4.14.369-badazz-buildXX` automatically via CI; next `main` release gets a changelog |
 | **P2** | **Docs** | `README.md` + `AGENTS.md` refreshed at Build 340 (Fault 3 closed + k6a_gov v1.4.0 sysfs) | `Documentation/` is stock Linux 4.14 — leave it alone, keep project docs in the root `*.md` |
 
