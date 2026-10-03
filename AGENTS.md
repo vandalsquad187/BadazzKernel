@@ -4,14 +4,17 @@
 - **Repo**: `vandalsquad187/BadazzKernel` branch `main`
 - **Kernel**: `4.14.369` — `K6A_GOV v1.5.0` **as a loadable module** (`CONFIG_K6A_GOV=m`),
   `LOCALVERSION=-BadazzKernel-sweet-v1.3.2`
-- **Local**: `main` @ `11c2ae479` — the Build-341 scope plus its `LINUX_VERSION_CODE` revert.
-  Before that `786aae15a` (docs), `c42a67d07` (the scope itself). Working tree clean.
+- **Local**: `main` @ `11c2ae479` + the **Build-345 scope** (see below) — Working tree clean.
+  Before that `786aae15a` (docs), `c42a67d07` (Build-341 scope), `11c2ae479` (its
+  `LINUX_VERSION_CODE` revert).
 - **GitHub**: CI builds on every push to `main` (release) and `miui/test` (artifacts only);
   latest release `v4.14.369-badazz-build344` (2026-10-02). Release names come from
   `github.run_number`, so **the Build-341 scope shipped as `build344`**: `build341` and
   `build342` are older **docs-only** builds that do *not* contain the module conversion, and run
-  343 is the one that failed. The user is **running build344** (flashed 2026-10-02) together
-  with **k6a-ctl v1.3.1** — post-flash verification **passed**, see *After the flash* below.
+  343 is the one that failed. The **next** push becomes **`build345`** — that is the single
+  flash the Build-345 scope is waiting for. The user is **running build344** (flashed
+  2026-10-02) together with **k6a-ctl v1.3.2** — post-flash verification of *that* pair
+  **passed**, see *After the flash* below.
   **337/338/339 are also docs-only** (their binary equals Build 336).
 - **KSU-Next Submodule**: `b100bd28` (`v3.3.0-95-gb100bd28`, dev-4.14-prctl-fix, UAPIv4)
   - `KernelSU-Next/kernel/Makefile:10` has `-DKSU_VERSION=33300`, **but that is only the
@@ -43,6 +46,9 @@
   k6a-ctl **v1.3.1**. Finding 2 (`LINUX_VERSION_CODE`) was measured, **tried, and reverted** —
   it broke CI, see its section. Finding 3 (sysfs denied to the governor thread) was surfaced by
   that very flash and fixed by a `sepolicy.rule`, verified after a reboot. Nothing outstanding.
+- **Build-345 scope (pending, one flash)** — K1–K7 + D, see its own section below. Verified
+  locally by compiling `drivers/thermal/` with the in-tree config (`k6a_gov.o`,
+  `k6a_features.o`, zero warnings) before pushing; CI is the real gate.
 - **User speaks German**; device reports go out in German
 
 ## Repo & Docs Layout
@@ -403,8 +409,76 @@ fails with a bogus "file not found".
 
 ## k6a_gov v1.5.0
 
+### Build 345 scope (K1–K7 + D) — pending one flash
+The governor version stays **1.5.0** (`K6A_GOV_VERSION` untouched: there is no
+`GOV_KO_VER` migration window left to spend, and vermagic already locks the `.ko` to the
+build). The build identity now comes from the **git hash**, not from the version string.
+
+- **D — real build hash.** `drivers/thermal/Makefile` computes
+  `K6A_H := $(shell git -C $(srctree) rev-parse --short=8 HEAD 2>/dev/null || echo unknown)` and
+  exports it through `subdir-ccflags-y += -DK6A_GIT_HASH='"$(K6A_H)"' -DK6A_BUILD_HASH='"$(K6A_H)"'`.
+  `scripts/Makefile.lib:11` accumulates `subdir-ccflags-y` into the exported
+  `KBUILD_SUBDIR_CCFLAGS`, so the flag reaches both `drivers/thermal/k6a_features.c` and the
+  `drivers/thermal/k6a_gov/` sub-directory (`orig_c_flags` at `scripts/Makefile.lib:105`).
+  Both `.c` files now `#ifndef`/`#error` instead of falling back to `"full-synergy"` — a build
+  without the flag fails loudly instead of shipping a lie.
+  `verify_build_hash()` trims trailing whitespace and compares **length + `memcmp`** (the old
+  `strncmp` accepted any runtime hash that merely *started* with the build one) and now returns
+  `2 = unavailable` when `k6a_features/git_hash` is missing while `/sys/kernel` opens.
+  `git_hash` and `build_hash` are both printed (`k6a_features: … git_hash=%s`, `status: build_hash=%s`).
+  **Note when testing locally:** a bare `make drivers/thermal/k6a_gov/k6a_gov.o` short-circuits
+  the recursion and skips `drivers/thermal/Makefile` entirely (the flag is then missing and the
+  `#error` fires); build `drivers/thermal/` or the full image instead.
+- **Fail-safe instead of fail-open.** The `gov->legacy_mode = 0;` on hash mismatch is gone —
+  enforcement stays on, `pr_err("Build345: hash mismatch! … enforcement stays on")` fires and
+  `hash_state=2` turns the WebUI row red (`✗ mismatch`, `webroot/app.js:152`).
+- **K1 — gold cap is verified, not assumed.** `enforce_max_freq()` re-reads the gold policy after
+  `cpufreq_update_policy()`: if `policy->max` is still above the requested cap, or a release did
+  not bring it back up to `cpuinfo.max_freq`, the cached `enforced_max` is reset so the next tick
+  retries, and the failure is logged `pr_err_ratelimited`. Success logs
+  `Build345: gold cap %u Hz state=%u policy_max=%u`.
+- **K2 — the gold cluster is identified properly.** `find_gold_cpu()` picks the policy with the
+  highest `cpuinfo.max_freq` that does **not** contain CPU 0 (CPU 0 always sits in the silver
+  policy) and returns **-1** when there is no distinct gold cluster; every caller guards it
+  (the old fallback `? : 6` could hand `cpufreq_update_policy()`/`cpufreq_cpu_get()` a CPU that
+  is not gold). `freq_init_worker()` copies `related_cpus` into `gov->gold_mask` under
+  `gov->lock`; `cpufreq_notify()` uses `is_gold_policy()` instead of comparing `p->cpu == gold_cpu`,
+  so the cap applies to every CPU of the gold policy, not just to one of them.
+- **K3 — battery guard latches.** The trip sets `gov->batt_latched`, the release needs
+  `battery_guard_temp - 5` (5 K hysteresis) and `batt_latched` also gates the `CD_L2 → GAMING`
+  recovery, so a hot battery can no longer be undone by a `cd_recover` dip one tick later.
+  The guard runs **before** `state_machine()` on purpose: it only ever trips *from* `GAMING`, so
+  it can never downgrade a `CD_L3/L4` that the state machine just entered for the CPU, while the
+  latch keeps the recovery from undoing it. `batt_latched` is exported in `status`.
+- **K4 — dwell no longer depends on a noisy per-tick delta.** `prev_temp` is gone; escalation is
+  evaluated first and is always immediate (`state < CD_L4 && t >= cd_l4`, `CD_L2 && t >= cd_l3`),
+  de-escalation always uses `hysteresis_normal`, entering `CD_*` from `GAMING` always uses
+  `hysteresis_fast`. The old `delta >= 5 / <= -5` ternary picked the dwell from a difference that
+  flips sign every tick around ~770 ms of sensor noise. `entry_since` is reset inside
+  `set_state_locked()` so a transition can never inherit a stale dwell start.
+- **K5 — BW floors change-detect + readback.** `enforce_bw_floors()`/`reset_bw_floors()` write
+  only when the target changed (`bw_last_gpubw`/`bw_last_llcc`, seeded `~0u`), verify the write
+  through `k6a_devfreq_get_bw()` and only latch when the floor actually took effect, so a failed
+  write retries on the next tick instead of going quiet. One `Build345: bw floors …` line per
+  change instead of two writes per tick.
+- **K6 — thermal zone lookup is cached.** `read_temp()` used to do four
+  `thermal_zone_get_zone_by_name()` string lookups per tick; the pointers are now cached in the
+  struct (the core takes no reference — `thermal_core.c:1493`, and the zones live for the whole
+  uptime) and a failed `thermal_zone_get_temp()` invalidates the slot for the next tick.
+- **K7 — boot default governor.** `sweet_defconfig`: `CPU_FREQ_DEFAULT_GOV_PERFORMANCE` →
+  `CPU_FREQ_DEFAULT_GOV_SCHEDUTIL`, so the kernel comes up on schedutil instead of pinned at
+  `performance` (k6a-ctl still force-writes `schedutil` afterwards — F1 of v1.3.2 — but the
+  default no longer fights it).
+
+Local build recipe used to gate this scope (Termux, no `as`, host tools of `scripts/` do not
+build here, so the single-file shortcut does not work):
+
+```bash
+make ARCH=arm64 stackp-name= -o scripts -o vdso_prepare KCFLAGS=-fintegrated-as -k drivers/thermal/
+```
+
 ### Location
-- `drivers/thermal/k6a_gov/k6a_gov.c` (1163 lines, `CONFIG_K6A_GOV=m`) — v1.4.0 `341f6f5b0`,
+- `drivers/thermal/k6a_gov/k6a_gov.c` (1284 lines, `CONFIG_K6A_GOV=m`) — v1.4.0 `341f6f5b0`,
   v1.5.0 `c42a67d07`
 - `drivers/thermal/k6a_gov/Kconfig` / `Makefile`
 - `drivers/gpu/msm/kgsl_pwrctrl.c` — `kgsl_k6a_get_levels()` + `kgsl_k6a_set_max_level_idx()`
@@ -416,39 +490,53 @@ fails with a bogus "file not found".
   `service.sh` insmods it. Everything else about the file is unchanged: `module_init/exit`,
   `MODULE_*`, `module_param(legacy_mode/profile)` were already there.
 - **`hash_state` instead of a latch** — `verify_build_hash()` returns 1 match / 0 retry /
-  -1 mismatch, the governor thread retries every 250 ms up to 60× (15 s) and only then gives
-  up. `hash_state` 0 pending / 1 verified / 2 mismatch / 3 gave up; `hash_verified` is now
+  -1 mismatch / **2 unavailable** (Build 345: `k6a_features` missing while `/sys/kernel`
+  opens — skips straight to `3` instead of burning the 60 retries), the governor thread retries
+  every 250 ms up to 60× (15 s) and only then gives
+  up. `hash_state` 0 pending / 1 verified / 2 mismatch / 3 gave up or unavailable; `hash_verified` is now
   `hash_state == 1` so k6a-ctl and the WebUI keep working.
 - **No `LINUX_VERSION_CODE` change** — see *Build 341 scope, finding 2*: the Makefile cap at
   `255` stays. The boot-time `build/run version delta` warning is gone because the check itself
   was deleted (`#include <linux/version.h>`, `K6A_GOV_KERNEL_VER`, the `pr_warn`). Vermagic
   (`4.14.369-…-buildNNN`) is the real mismatch guard and does not use `LINUX_VERSION_CODE`.
 - Markers are `Build341:` (`k6a_gov v%s loaded`, `build hash verified`,
-  `k6a_features/git_hash not readable yet, retrying`, `hash verify gave up`).
+  `k6a_features/git_hash not readable yet, retrying`, `hash verify gave up`) and — since
+  Build 345 — `Build345:` for everything the scope touched (`k6a_gov v%s loaded`,
+  `build hash verified`, `hash mismatch`, `gold cluster/cpu`, `gold cap`, `escalate`,
+  `bw floors`, `battery guard`, `OFF -> GAMING`). Older `Build340:` lines in untouched paths
+  are left alone; dmesg only ever holds the current build anyway.
 
 ### Features
-- State Machine: OFF→GAMING→CD_L2/L3/L4, `dwell_in`/`dwell_out` (`fast` for a ≥5 °C rise, `fast`
-  for a ≤−5 °C fall, `normal` otherwise), an **entry dwell** before GAMING gives way to CD_L2/L3
-  (fast applies to the entry), and **immediate escalation** L2→L3, L2→L4, L3→L4
-  (`Build340: escalate …`, counted in `throttle_events`); only recovery is dwell-gated. Three zero
+- State Machine: OFF→GAMING→CD_L2/L3/L4, an **entry dwell** before GAMING gives way to CD_L2/L3
+  and **immediate escalation** L2→L3, L2→L4, L3→L4 (`Build345: escalate …`, counted in
+  `throttle_events`); only recovery is dwell-gated — `hysteresis_fast` on the way in,
+  `hysteresis_normal` on the way out (Build 345 dropped the per-tick `delta >= 5` ternary that
+  picked the dwell from a noise-flipping difference). Three zero
   thresholds (reachable from sysfs) short-circuit the whole switch instead of pinning `CD_L4`
   at `t >= 0`.
 - Temp: max over 4 Gold zones `cpu-1-0..3-usr`, then `cpu-0-0-usr` → `xo-therm` → `soc-therm` →
-  `thermal_zone0`. Failure returns 0 and clears `temp_valid` → `state_machine()` and the battery
+  `thermal_zone0`; zone **pointers are cached** since Build 345 (K6), so a tick costs five
+  `thermal_zone_get_temp()` calls instead of nine lookups + reads. Failure returns 0 and clears
+  `temp_valid` → `state_machine()` and the battery
   guard are skipped and the state is held (`Build340: no temperature source, holding state %u`).
   v1.3.1 returned a hard-coded `40` and throttled on fake data. `temp_src` says which zone answered.
-- CPU: `find_gold_cpu()` portable, `clamp_freq` order-independent, `enforce_max_freq()` tracks
-  `gov->enforced_max` and releases through `cpufreq_update_policy()`, which resets min/max from
-  `policy->user_policy` (never touched by us) and re-runs `CPUFREQ_ADJUST` — `cpufreq_notify()`
-  re-clamps only while the state is ≥ CD_L2. Released on GAMING recovery, `enable=0`, `legacy=0`.
+- CPU: `find_gold_cpu()` returns the highest-`cpuinfo.max_freq` policy **without CPU 0**, or -1
+  (Build 345; the old `?: 6` fallback could name a CPU outside the gold cluster), `clamp_freq`
+  order-independent, `enforce_max_freq()` tracks `gov->enforced_max`, **re-reads the policy to
+  prove the cap took** (K1) and releases through `cpufreq_update_policy()`, which resets min/max
+  from `policy->user_policy` (never touched by us) and re-runs `CPUFREQ_ADJUST` —
+  `cpufreq_notify()` clamps **every CPU of `gov->gold_mask`** (K2) and only while the state is
+  ≥ CD_L2. Released on GAMING recovery, `enable=0`, `legacy=0`.
   `cpufreq_notify()` does not take `gov->lock`, so there is no recursion and no lock inversion.
 - GPU: native enforcement via KGSL pwrlevels, caps per CD state
-- BW: floors `gpubw` + `cpu-llcc-ddr-bw` per profile/CD state, `bw_floors` sysfs, written **every
-  tick including 0** so a floor really drops again. Before this the `if (gpubw)` guard plus
-  `k6a_devfreq_set_bw()`'s `if (min)` made every release path a no-op — live proof on Build 338:
-  `state=gaming` while `bw_gpubw min=4000`.
+- BW: floors `gpubw` + `cpu-llcc-ddr-bw` per profile/CD state, `bw_floors` sysfs — written
+  **only when the target changed and only latched after a successful readback** (Build 345 K5),
+  which keeps the release paths honest *and* stops the per-tick write storm. Before Build 338
+  the `if (gpubw)` guard plus `k6a_devfreq_set_bw()`'s `if (min)` made every release path a no-op
+  — live proof on Build 338: `state=gaming` while `bw_gpubw min=4000`.
 - Battery: `battery_guard` @`battery_guard_temp` (35..60, default 45) → CD_L2 via `power_supply`,
-  now counted as a throttle event
+  **latched** until the battery is 5 K below the threshold (Build 345 K3), counted as a
+  throttle event
 - Poll: `poll_ms` 100..5000 (default 250)
 - Profiles: 0 off, 1 gaming, 2 battery, 3 badazz, 4 custom (**keeps** the current thresholds),
   5 badazz_safe. Profile is validated at init — an out-of-range module parameter used to index
@@ -677,16 +765,25 @@ fix, `d4835b6` deadlock, `53bb809` v1.3.1 hardening, `967c134` v1.3.0 BW floors 
 `dfcb96b` v1.2.1, `602a281` `CONFIG_K6A_GOV=y`.
 
 ## k6a-ctl Companion
-- **Repo**: `vandalsquad187/k6a-ctl` branch `main` @ **`eec3d96` (v1.3.1, versionCode 131)**,
-  release `v1.3.1` → asset `k6a-ctl-v1.3.1.zip` (22 171 B), local clone `~/k6a-ctl`.
-  Previous: `6317a27` (drop the stale `LINUX_VERSION_CODE` hint), `1513fd8` v1.3.0 (130),
+- **Repo**: `vandalsquad187/k6a-ctl` branch `main` @ **`768d1bc` (v1.3.2, versionCode 132)**,
+  release `v1.3.2` → asset `k6a-ctl-v1.3.2.zip` (23 456 B), local clone `~/k6a-ctl`.
+  Previous: `eec3d96` (v1.3.1, sepolicy.rule + gate `[5c]`), `6317a27` (drop the stale
+  `LINUX_VERSION_CODE` hint), `1513fd8` v1.3.0 (130),
   `426b516` v1.2.0 (120) → `k6a-ctl-v1.2.0.zip` (20 543 B).
-  Recent commits: `eec3d96` v1.3.1 (sepolicy.rule + gate `[5c]`), `6317a27` (warning text),
+  Recent commits: `768d1bc` **v1.3.2** (F1 force `schedutil` + `_ensure_gov` drift re-assert,
+  F8 `w_checked`, F9 `cfg_load` single pass, F10 `read_temp` real return code, F11 F12 F13
+  per-tick cost cuts), `eec3d96` v1.3.1 (sepolicy.rule + gate `[5c]`), `6317a27` (warning text),
   `1513fd8` v1.3.0 (Build 341: insmod + version lock), `426b516` v1.2.0 (Phase 5),
   `a049fac` v1.1.6 version format,
   `a9170b6` v1.1.5 **removed the USB autosuspend workaround** (so userspace no longer masks a
   kernel bug), `de3c037` v1.1.4 dwc3 autosuspend off, `18cf392` v1.1.3 log rotation +
   `battery_guard_temp`, `a639e7c` v1.1.2 robustheit, `e43ccf6` v1.1.1 whitelisted handler.
+- **v1.3.2 is on the device** (deployed 2026-10-03, six files piped through
+  `su -c "cat > …"` so SELinux contexts survive; backup `/data/adb/k6a-ctl-v1.3.1.bak`):
+  `module.prop` `version=1.3.2` / `versionCode=132`, controller logged `k6a-ctl v1.3.2 start`,
+  gate `[1]`–`[6]` all OK (incl. the new governor checks), `scaling_governor → schedutil` on
+  `p0`/`p6`, a manual flip to `performance` was back on `schedutil` within one tick, and the
+  WebUI mode switch (cfg hot-reload) works end to end.
 - **v1.3.1 is on the device** (read 2026-10-03): `module.prop` `version=1.3.1` /
   `versionCode=131`, `sepolicy.rule` root-owned 94 B, controller logged
   `k6a-ctl v1.3.1 start`, `/ping` → `OK`.
@@ -702,6 +799,11 @@ fix, `d4835b6` deadlock, `53bb809` v1.3.1 hardening, `967c134` v1.3.0 BW floors 
   `sh <repo>/bin/check_module.sh <repo>`. Gate result 2026-10-03 (v1.3.1): **green, 0 warns**
   including `[5b] Version-Lock k6a_gov` and the new `[5c] sepolicy.rule` check (file present,
   `allow kernel sysfs file {read open getattr}` present, no `:` anywhere in it).
+  **v1.3.2 renumbered the gates to `[1]`–`[6]`** (the old `[5*]` numbering had gaps and the
+  new governor checks needed room): result 2026-10-03 (v1.3.2) **green, 0 warns**, `[6]` being
+  the governor block (`_ensure_gov()` in `k6a-lib.sh` *and* `k6a-controller`, the
+  `scaling_governor` write, `w_checked()`, no `echo 40` in `read_temp`). Mentions of `[5b]`/
+  `[5c]` further down describe the v1.3.0/v1.3.1 numbering and are kept as written.
 - **Phase 5 shipped (`426b516`, v1.2.0)**:
   - **BW-floor payload order bug found + fixed.** `applyBwFloors()` built the string interlaced
     `[gpubw_L2, llcc_L2, gpubw_L3, llcc_L3, gpubw_L4, llcc_L4]` while `bw_floors_store()` parses

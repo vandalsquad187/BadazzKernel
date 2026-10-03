@@ -38,7 +38,7 @@ linux-4.14.369
 
 | Area | Feature | Details |
 |------|---------|---------|
-| **Governor** | **k6a_gov v1.5.0** | Loadable module (`CONFIG_K6A_GOV=m`, `k6a_gov.ko` shipped in the zip and loaded by k6a-ctl), state machine OFF→GAMING→CD_L2/L3/L4, hysteresis, **immediate escalation** L2→L3→L4, entry dwell on GAMING, throttle history (16) |
+| **Governor** | **k6a_gov v1.5.0** | Loadable module (`CONFIG_K6A_GOV=m`, `k6a_gov.ko` shipped in the zip and loaded by k6a-ctl), state machine OFF→GAMING→CD_L2/L3/L4, hysteresis, **immediate escalation** L2→L3→L4, entry dwell on GAMING, throttle history (16), boot default **schedutil** |
 | **CPU** | Gold clamp | `find_gold_cpu()` + `clamp_freq`, `enforce_max_freq` + `cpufreq_update_policy` (kthread only), hardened notifier, **released again on recovery/disable** |
 | **Temp** | Multi-zone | Max over 4 Gold zones `cpu-1-0..3-usr`, fallback `cpu-0-0-usr` → `xo-therm` → `soc-therm` → `thermal_zone0`; `temp_src`/`temp_valid` in status, holds the last state if no zone answers |
 | **GPU** | Native enforcement | `kgsl_k6a_get_levels` / `kgsl_k6a_set_max_level_idx`, caps per CD state |
@@ -88,7 +88,7 @@ exactly what makes this trap invisible.
 |------|-----|---------|
 | `enable` | RW | 0/1 — kill switch, releases the Gold cap + BW floors + GPU cap |
 | `profile` | RW | 0..5 — off/gaming/battery/badazz/custom/badazz_safe (4 = keeps the current thresholds) |
-| `status` | RO | `version/state/temp/temp_src/temp_valid/ticks/state_age_ms/policy_max/throttle_events/gold_* /bw_* /hash_verified/hist=` |
+| `status` | RO | `version/state/temp/temp_src/temp_valid/ticks/state_age_ms/policy_max/throttle_events/gold_* /bw_* /hash_verified/hash_state/build_hash/batt_latched/hist=` |
 | `hysteresis` | RW | `fast normal` — dwell ms, `fast` 1..1000 (default 500), `normal` 1..5000 (default 2000) |
 | `cd_thresholds` | RW | `l2t l3t l4t rec` in **°C** then `l2g l3g l4g` in **Hz** — 7 values, all-or-none zero, Gold caps must be non-increasing |
 | `gpu_caps` | RW | `l2 l3 l4` — GPU Hz caps, all-or-none zero, must be non-increasing, ≤ 2 000 000 000 |
@@ -235,6 +235,7 @@ Build 320 raised `CONFIG_LOG_BUF_SHIFT` 17 → 20 (128 KB → 1 MB), and the ker
 
 | Version | Highlights |
 |---------|------------|
+| **Build 345 scope (K1–K7 + D) → release `build345`** | **Real build identity**: `drivers/thermal/Makefile` injects `git rev-parse --short=8 HEAD` as `K6A_GIT_HASH`/`K6A_BUILD_HASH` through `subdir-ccflags-y`, and both C files `#error` if the flag is missing instead of falling back to `full-synergy`. `verify_build_hash()` now compares the **whole** string (the old prefix `strncmp` accepted any runtime hash that merely started with the build one) and can report *unavailable*. **Fail-safe instead of fail-open**: a mismatch no longer turns enforcement off — it logs `pr_err`, sets `hash_state=2` (WebUI row turns red) and keeps the governor running. **K1** the gold cap is re-read after `cpufreq_update_policy()` and retried if it did not take; **K2** the gold cluster is identified by `gold_mask` (CPU 0 excluded, no more `?: 6` fallback) and the `CPUFREQ_ADJUST` notifier clamps every CPU of it; **K3** the battery guard latches until the pack is 5 K cooler; **K4** dwell is fixed (`fast` in, `normal` out) instead of being picked from a per-tick delta that flips with sensor noise; **K5** BW floors are written only on change and latched only after a successful readback; **K6** thermal zone lookups are cached; **K7** the boot default governor is `schedutil` instead of `performance`. Version stays **1.5.0** — vermagic and the hash do the locking. |
 | **k6a_gov v1.5.0 (Build 341 scope → release `build344`)** | **`CONFIG_K6A_GOV=m`** — the governor ships as `k6a_gov.ko` inside the flash zip, is dropped at `/data/adb/k6a_gov.ko` and insmodded by k6a-ctl, so governor updates no longer need a kernel flash. **Version lock**: `hash_state` (0 pending / 1 verified / 2 mismatch / 3 not checked) with a bounded retry replaces a `hash_verified` latch that reported "verified" for a check skipped because `/sys` was not mounted yet; the per-boot `build/run version delta` warning is gone (the check was dropped — `LINUX_VERSION_CODE` stays pinned at `4.14.255` on purpose, see AGENTS.md, and vermagic does the real locking). Vermagic ties the `.ko` to exactly this build. **Shipped and accepted on device 2026-10-03**:
 `version=1.5.0 hash_verified=1 hash_state=1`, `build hash verified (full-synergy) retries=0`.
 Note the release is named `build344` — `build341`/`build342` are older docs-only builds and run
@@ -272,9 +273,10 @@ Full Changelog: `git log --oneline`
 | **P1** | **MIUI/HOS verification** | `sweet_miui.config` + DTS + `miui/test` CI `aosp+miui` artifacts | Flash `…-miui.zip` on HyperOS `V14.0.1.0` (or `2.0`), test `dmesg` `fpc/goodix/touchfeature/ds28e16`, 120Hz, NFC, `usb` `host/device` |
 | **P1** | **USB Fault 3 (charger)** | **Closed 2026-10-02** — 500 s capture on Build 338 (`printk 8 4 1 7`, 40 491 lines): 0× `APSD=OCP`, `smblib_rerun_apsd` exactly once per plug event, `vbus_notifier` only on FLOAT connect/detach | Nothing to fix; keep `~/tmp/cap334.sh` as the recipe if it ever returns |
 | **P1** | **k6a_gov → loadable module** | **Done in Build 341 (`c42a67d07`), flashed as `build344` 2026-10-03** — `CONFIG_K6A_GOV=m`, CI builds `modules` and ships `k6a_gov.ko`, `anykernel.sh` drops it at `/data/adb/k6a_gov.ko` (`/system` is dm-verity, not writable), k6a-ctl insmods it with a three-stage version lock and the legacy cooldown as fallback | Verified on device: `version=1.5.0`, `hash_state=1` |
-| **P1** | **k6a-ctl sync** | **Done** — repo at **v1.3.1 (`eec3d96`)**: `check_module.sh` gates `[5b]` (version lock) and `[5c]` (`sepolicy.rule`), `battery_guard`/`_temp`, `policy_max`/`state_age_ms`/`temp_src`/`temp_valid` WebUI keys, `disable` file dropped, **device runs v1.3.1** | Nothing outstanding |
-| **P2** | **Release hygiene** | `main` `v1.3.2` + `k6a-ctl` `v1.1.6` versioned ZIPs | Releases are `v4.14.369-badazz-buildXX` automatically via CI; next `main` release gets a changelog |
-| **P2** | **Docs** | `README.md` + `AGENTS.md` refreshed at `build344` (module conversion, `LINUX_VERSION_CODE` revert, the `hash_state=3` SELinux finding) | `Documentation/` is stock Linux 4.14 — leave it alone, keep project docs in the root `*.md` |
+| **P1** | **Build 345 governor scope (K1–K7 + D)** | **Written, locally compiled, waiting for one flash** — real git hash in the build, fail-safe hash mismatch, gold-cap readback, `gold_mask` clamp, battery latch, fixed dwell, BW change-detect, zone cache, `schedutil` boot default | Push → CI green → **flash `build345` once** → post-flash checklist (marker `Build345:`, `hash_state=1`, `build_hash` = `git_hash`, `gold_max == policy_max`, battery-guard counter stagnant, `state_age_ms > 2000` in CD states, idle temp < baseline) |
+| **P1** | **k6a-ctl sync** | **Done** — repo at **v1.3.2 (`768d1bc`)**: `check_module.sh` gates `[1]`–`[6]` incl. the governor checks, `battery_guard`/`_temp`, `policy_max`/`state_age_ms`/`temp_src`/`temp_valid` WebUI keys, **F1 forces `schedutil` and re-asserts it on drift**, **device runs v1.3.2** | Nothing outstanding |
+| **P2** | **Release hygiene** | `main` `v1.3.2` + `k6a-ctl` `v1.3.2` versioned ZIPs | Releases are `v4.14.369-badazz-buildXX` automatically via CI; next `main` release gets a changelog |
+| **P2** | **Docs** | `README.md` + `AGENTS.md` refreshed at `build344` (module conversion, `LINUX_VERSION_CODE` revert, the `hash_state=3` SELinux finding) + the Build-345 scope | `Documentation/` is stock Linux 4.14 — leave it alone, keep project docs in the root `*.md` |
 
 ---
 
