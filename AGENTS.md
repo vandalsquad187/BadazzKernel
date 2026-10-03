@@ -4,9 +4,9 @@
 - **Repo**: `vandalsquad187/BadazzKernel` branch `main`
 - **Kernel**: `4.14.369` — `K6A_GOV v1.5.0` **as a loadable module** (`CONFIG_K6A_GOV=m`),
   `LOCALVERSION=-BadazzKernel-sweet-v1.3.2`
-- **Local**: `main` @ `11c2ae479` + the **Build-345 scope** (see below) — Working tree clean.
-  Before that `786aae15a` (docs), `c42a67d07` (Build-341 scope), `11c2ae479` (its
-  `LINUX_VERSION_CODE` revert).
+- **Local**: `main` @ **`11bc62c9a`** (the **Build-345 scope**) — Working tree clean.
+  Before that `417b5f88d` (docs), `11c2ae479` (the Build-341 `LINUX_VERSION_CODE` revert),
+  `786aae15a` (docs), `c42a67d07` (the Build-341 scope itself).
 - **GitHub**: CI builds on every push to `main` (release) and `miui/test` (artifacts only);
   latest release `v4.14.369-badazz-build344` (2026-10-02). Release names come from
   `github.run_number`, so **the Build-341 scope shipped as `build344`**: `build341` and
@@ -759,7 +759,9 @@ bff0adc79 Build 313: link/PHY state + DEVT diagnostics (no behavior change)
 
 Note: **Build 331 (`524ca3253`) was released but never flashed** — testing jumped from 330 to 332.
 
-k6a_gov history: `11c2ae479` LINUX_VERSION_CODE revert, `c42a67d07` v1.5.0 module + hash_state, `341f6f5b0`
+k6a_gov history: `11bc62c9a` Build 345 K1-K7 + D (real git hash, fail-safe hash check, Gold-cap
+readback, `gold_mask`, battery latch, fixed dwell, BW change-detect, zone cache, schedutil
+default), `11c2ae479` LINUX_VERSION_CODE revert, `c42a67d07` v1.5.0 module + hash_state, `341f6f5b0`
 v1.4.0 cap/BW release + escalation + validation, `81d69ae` v1.3.1 ticks
 fix, `d4835b6` deadlock, `53bb809` v1.3.1 hardening, `967c134` v1.3.0 BW floors + profile 5,
 `dfcb96b` v1.2.1, `602a281` `CONFIG_K6A_GOV=y`.
