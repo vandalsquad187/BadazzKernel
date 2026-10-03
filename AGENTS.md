@@ -4,18 +4,21 @@
 - **Repo**: `vandalsquad187/BadazzKernel` branch `main`
 - **Kernel**: `4.14.369` — `K6A_GOV v1.5.0` **as a loadable module** (`CONFIG_K6A_GOV=m`),
   `LOCALVERSION=-BadazzKernel-sweet-v1.3.2`
-- **Local**: `main` @ **`11bc62c9a`** (the **Build-345 scope**) — Working tree clean.
-  Before that `417b5f88d` (docs), `11c2ae479` (the Build-341 `LINUX_VERSION_CODE` revert),
-  `786aae15a` (docs), `c42a67d07` (the Build-341 scope itself).
+- **Local**: `main` @ **`699eee6e8`** (docs, on top of `11bc62c9a`, the **Build-345 scope**) —
+  Working tree clean. Before that `417b5f88d` (docs), `11c2ae479` (the Build-341
+  `LINUX_VERSION_CODE` revert), `786aae15a` (docs), `c42a67d07` (the Build-341 scope itself).
 - **GitHub**: CI builds on every push to `main` (release) and `miui/test` (artifacts only);
-  latest release `v4.14.369-badazz-build344` (2026-10-02). Release names come from
-  `github.run_number`, so **the Build-341 scope shipped as `build344`**: `build341` and
-  `build342` are older **docs-only** builds that do *not* contain the module conversion, and run
-  343 is the one that failed. The **next** push becomes **`build345`** — that is the single
-  flash the Build-345 scope is waiting for. The user is **running build344** (flashed
-  2026-10-02) together with **k6a-ctl v1.3.2** — post-flash verification of *that* pair
-  **passed**, see *After the flash* below.
-  **337/338/339 are also docs-only** (their binary equals Build 336).
+  latest release **`v4.14.369-badazz-build346`** (2026-10-03, run `37108292063`, asset
+  `Badazz-kernel-sweet-v4.14.369-build346.zip` 19 326 097 B). Release names come from
+  `github.run_number`, so **the Build-345 scope shipped as `build346`**: run 345 was already
+  consumed by the docs-only push `417b5f88d` two days earlier. Same reason `build341`/`build342`
+  are docs-only and run 343 failed — the scope name and the release number are never guaranteed
+  to match, so **always read the number off `gh release list` / `build-info.txt`
+  (`BUILD_NUMBER`, `COMMIT_SHA`), never off the marker**. Earlier: `build345` = docs-only,
+  `build344` = the Build-341 scope, **337/338/339 are also docs-only** (their binary equals
+  Build 336).
+- **The user is running `build346`** (flashed 2026-10-03) together with **k6a-ctl v1.3.2** —
+  post-flash verification of *that* pair **passed**, see *After the flash* below.
 - **KSU-Next Submodule**: `b100bd28` (`v3.3.0-95-gb100bd28`, dev-4.14-prctl-fix, UAPIv4)
   - `KernelSU-Next/kernel/Makefile:10` has `-DKSU_VERSION=33300`, **but that is only the
     non-git fallback**. The real value comes from `kernel/Kbuild:112` →
@@ -46,9 +49,10 @@
   k6a-ctl **v1.3.1**. Finding 2 (`LINUX_VERSION_CODE`) was measured, **tried, and reverted** —
   it broke CI, see its section. Finding 3 (sysfs denied to the governor thread) was surfaced by
   that very flash and fixed by a `sepolicy.rule`, verified after a reboot. Nothing outstanding.
-- **Build-345 scope (pending, one flash)** — K1–K7 + D, see its own section below. Verified
-  locally by compiling `drivers/thermal/` with the in-tree config (`k6a_gov.o`,
-  `k6a_features.o`, zero warnings) before pushing; CI is the real gate.
+- **Build-345 scope (flashed as `build346` 2026-10-03, passed)** — K1–K7 + D, see its own
+  section below. Verified locally by compiling `drivers/thermal/` with the in-tree config
+  (`k6a_gov.o`, `k6a_features.o`, zero warnings) before pushing; CI was the real gate (green,
+  run `37108292063`); the post-flash checklist then passed on device.
 - **User speaks German**; device reports go out in German
 
 ## Repo & Docs Layout
@@ -409,7 +413,7 @@ fails with a bogus "file not found".
 
 ## k6a_gov v1.5.0
 
-### Build 345 scope (K1–K7 + D) — pending one flash
+### Build 345 scope (K1–K7 + D) — flashed as `build346` 2026-10-03, passed
 The governor version stays **1.5.0** (`K6A_GOV_VERSION` untouched: there is no
 `GOV_KO_VER` migration window left to spend, and vermagic already locks the `.ko` to the
 build). The build identity now comes from the **git hash**, not from the version string.
@@ -476,6 +480,68 @@ build here, so the single-file shortcut does not work):
 ```bash
 make ARCH=arm64 stackp-name= -o scripts -o vdso_prepare KCFLAGS=-fintegrated-as -k drivers/thermal/
 ```
+
+### After the flash — build346 (passed 2026-10-03)
+
+Release `v4.14.369-badazz-build346`, `build-info.txt` → `BUILD_NUMBER=346`,
+`COMMIT_SHA=699eee6e897a48db5610843fc30c2705906a2d69` (the docs commit `699eee6e8` on top of the
+scope), vermagic `4.14.369-openela-rc1-BadazzKernel-sweet-v1.3.2-build346`, `k6a_gov.ko` 48 488 B.
+`strings` on the shipped `.ko` **and** on `Image.gz` contain `699eee6e` and **no `full-synergy`**
+— the `subdir-ccflags-y` hash flag reached both compilation units (D).
+
+```
+$ /system/bin/su -c 'dmesg | grep Build345'
+[15.351586] Build345: gold cluster cpu 6 related=6-7 freqs=13
+[15.353100] Build345: k6a_gov v1.5.0 loaded (legacy=1 profile=1 freq_init=deferred)
+[15.354503] Build345: build hash verified (699eee6e) retries=0
+[15.354544] Build345: OFF -> GAMING
+[15.354565] Build345: bw floors gpubw=0 llcc=0 state=1
+[76.764117] Build345: gold cap 1708800 Hz state=2 policy_max=1708800
+[76.764142] Build345: bw floors gpubw=4000 llcc=0 state=2
+[78.816317] Build345: gold cap 0 Hz state=1 policy_max=2304000
+[89.595209] Build345: gold cap 1209600 Hz state=3 policy_max=1209600
+[89.595245] Build345: bw floors gpubw=3000 llcc=4000 state=3
+
+$ /system/bin/su -c 'cat /sys/kernel/k6a_gov/status'
+version=1.5.0 state=gaming legacy_mode=1 hash_verified=1 hash_state=1 build_hash=699eee6e
+batt_latched=0 gold_max=0 gold_max_tbl=2304000 policy_max=2304000 state_age_ms=332938
+hist=15354:72:off>gaming,76764:83:gaming>cd_l2,78816:73:cd_l2>gaming,85472:85:gaming>cd_l2,
+     87528:73:cd_l2>gaming,89595:89:gaming>cd_l3,91640:69:cd_l3>cd_l2,93688:71:cd_l2>gaming, …
+
+$ /system/bin/su -c 'cat /sys/kernel/k6a_features/git_hash'   → 699eee6e
+$ /system/bin/su -c 'grep -E "^(version|versionCode)=" /data/adb/modules/k6a-ctl/module.prop'
+version=1.3.2  versionCode=132                                  (controller pid 3935 running)
+policy0 gov=schedutil max=1804800    policy6 gov=schedutil max=2304000
+```
+
+| Check | Expected | Read |
+|---|---|---|
+| D — `build_hash` == `git_hash` | the real 8-char SHA, never `full-synergy` | `699eee6e` == `699eee6e` ✅ (+ dmesg `build hash verified (699eee6e) retries=0`) |
+| Fail-safe arm | `legacy_mode=1`, `hash_state=1`, **no** `hash mismatch` line | `legacy_mode=1 hash_state=1`, 0× `hash mismatch` ✅ |
+| K1 — gold cap applied | `gold cap … policy_max=…` equal, no retry lines | `1708800/1708800`, `1209600/1209600`, `0/2304000`; **0×** `not applied` / `release stuck` ✅ |
+| K1/K5 — sampling | 70 samples @1 s: `policy_max == scaling_max_freq`, `gold_max=0` in GAMING | **70/70 match, 0 mismatch** ✅ (the window stayed in `gaming`; the capped side is covered by the K1 dmesg lines above) |
+| K2 — gold cluster | a real mask, CPU 0 excluded | `gold cluster cpu 6 related=6-7 freqs=13` (gold = cpu6/7, `-1` guard would have logged) ✅ |
+| K4 — dwell | de-escalation always `hysteresis_normal` (2 s), escalation immediate | every `cd_*>gaming` / `cd_l3>cd_l2` follows its entry at **+2.0 s** (76.7→78.8, 85.5→87.5, 89.6→91.6, 93.7→95.5); `state_age_ms=332938` ≫ 2000 ✅ |
+| K5 — BW change-detect | one line pair per transition, nothing per tick | exactly 2 lines per state change; **0×** `Build345: set_bw … not reflected` ✅ |
+| K3 — battery guard | `guard=1`, `temp_thresh=45`, `batt=39.5 °C` → `batt_latched=0` | as read, counter `throttle_events=4` only from CPU CD entries ✅ |
+| K6 — temp source | `temp_src=1`, `temp_valid=1`, idle 75 °C | `75` °C, inside/below the 74–87 °C build344 baseline ✅ |
+| K7 — boot default | `schedutil`, not `performance` | `p0`/`p6` both `schedutil` (with k6a-ctl v1.3.2 also forcing it, so this is *not* independent proof — see the caveat below) ⚠️ |
+| k6a-ctl | v1.3.2 still installed | `version=1.3.2` / `versionCode=132`, controller pid 3935 ✅ |
+
+**Two caveats, both read-only findings, neither a defect of this build:**
+
+1. **Never use `/proc/config.gz` as config evidence on this device.** It reports
+   `CONFIG_LOCALVERSION="-perf"` and `CONFIG_CPU_FREQ_DEFAULT_GOV_PERFORMANCE=y`, which cannot
+   belong to the running kernel: the boot banner is built from `LOCALVERSION` and says
+   `4.14.369-openela-rc1-BadazzKernel-sweet-v1.3.2-build346`. It is part of the SUSFS identity
+   spoof (same source as `uname`/`/proc/version`, see *On-device Capture*). **K7's proof is
+   therefore `arch/arm64/configs/sweet_defconfig`** (`DEFAULT_GOV_SCHEDUTIL=y`,
+   `PERFORMANCE is not set`, re-checked with `make sweet_defconfig && make olddefconfig`) plus
+   the fact that CI builds from exactly that defconfig.
+2. `uname -a`, `/proc/version` and `/proc/sys/kernel/osrelease` report
+   `6.12.0-android16-6.12-perf-g1d01cd293` (SUSFS, patches `init_uts_ns`). The only trustworthy
+   build proof in a live shell is `dmesg | head -2` (`Linux version 4.14.369-…-build346`) plus the
+   `Build345:` markers.
 
 ### Location
 - `drivers/thermal/k6a_gov/k6a_gov.c` (1284 lines, `CONFIG_K6A_GOV=m`) — v1.4.0 `341f6f5b0`,
@@ -761,7 +827,8 @@ Note: **Build 331 (`524ca3253`) was released but never flashed** — testing jum
 
 k6a_gov history: `11bc62c9a` Build 345 K1-K7 + D (real git hash, fail-safe hash check, Gold-cap
 readback, `gold_mask`, battery latch, fixed dwell, BW change-detect, zone cache, schedutil
-default), `11c2ae479` LINUX_VERSION_CODE revert, `c42a67d07` v1.5.0 module + hash_state, `341f6f5b0`
+default), `699eee6e8` docs (pins that hash + the post-flash record; **shipped as `build346`**),
+`11c2ae479` LINUX_VERSION_CODE revert, `c42a67d07` v1.5.0 module + hash_state, `341f6f5b0`
 v1.4.0 cap/BW release + escalation + validation, `81d69ae` v1.3.1 ticks
 fix, `d4835b6` deadlock, `53bb809` v1.3.1 hardening, `967c134` v1.3.0 BW floors + profile 5,
 `dfcb96b` v1.2.1, `602a281` `CONFIG_K6A_GOV=y`.
