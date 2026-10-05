@@ -413,6 +413,50 @@ fails with a bogus "file not found".
 
 ## k6a_gov v1.5.0
 
+### Build 347 scope — robust temperature signal, anti-thrash dwell, profile clobber fix
+
+The governor version stays **1.5.0**. Everything in this scope is verifiable **without a
+gamepad**: `sha256sum` on 8 cores forces CD transitions, `status` readbacks prove the rest.
+The fps rounds stay a separate, later acceptance step.
+
+Measured on build346 **before** any code was written (2026-10-05):
+
+| Evidence | Reading |
+|---|---|
+| idle Gold zones | 74.1 / 74.5 / **82.8** / 78.7 °C → `max()` spread **6.2 K**, median 76.6 |
+| `cd_recover` | `83`, i.e. **above** the idle peak of 82.8 — CD_L2 could barely recover |
+| CD time, identical thresholds | T5 **13.2 %** vs T7 **58.2 %** (only *which* core was hottest differs) |
+| thrash | `hist` re-entered CD **764 ms** after the previous recovery; `throttle_events=2807` in 21.7 h |
+| dwell arithmetic | every de-escalation lands at exactly +2048 ms = `hysteresis_normal` |
+| sysfs bound | `hysteresis_store` rejected `fast > 1000`, so a sane entry dwell was **unexpressible** |
+| F18 trigger is live | `bin/k6a-controller:145` → `gov_write "profile" "$idx"` on every mode switch and on auto_badazz |
+| vendor engine | `thermal_message/sconfig` 0 → 13 mid-round while `state=gaming`; k6a could not see it |
+
+- **Robust temperature.** `read_temp()` collects the four Gold zones, returns the **2nd-highest**
+  for the state decision and keeps the **peak** in `temp_peak`. `state_machine()` now triggers the
+  L4 emergency on `max(temp_peak, t)` only — one core at `cd_l4_temp` still caps immediately, so
+  the strongest throttle keeps the old `max` semantics while L2/L3 decide on the cluster.
+- **L3 never waits.** The GAMING branch enters `CD_L3` without a dwell as soon as
+  `t >= cd_l3_temp`. Since `t` is the 2nd-highest, that means *two* Gold zones at 89 °C — a
+  cluster condition, not a single-core spike. This is what makes the longer L2 dwell safe.
+- **Entry dwell 500 → 3000 ms.** `hysteresis_store` lifts the `fast` bound 1000 → 5000 (both
+  fields now 1..5000) and the init default becomes 3000. It kills the 4–6 s enter/leave cycles.
+- **Profile no longer clobbers user thresholds.** A `cd_thresholds` write sets
+  `thresholds_user`, after which `profile_store` only records the name and logs
+  `Build347: profile=N keeps user thresholds …`. `-` releases them and restores the profile
+  table (skipped for `custom`, whose table is all zeros and would otherwise disarm the machine).
+  `thresholds_source=user|profile` in `status` makes the winner explicit.
+- **Deadband warning.** `l2t - rec < 4` logs a warning — a 3 K band is narrower than the
+  measured 6.2 K sensor spread.
+- **Vendor thermal visible.** `read_one_node()` (`filp_open`/`kernel_read`, same pattern as
+  `verify_build_hash`, polled every 64 ticks) exports `vendor_sconfig=` and `vendor_cpu_limits=`
+  from `/sys/class/thermal/thermal_message/{sconfig,cpu_limits}`. No new SELinux grant is needed:
+  k6a-ctl's `sepolicy.rule` already grants `kernel → sysfs {dir search read open}` /
+  `{file read open getattr}` generically.
+
+Marker: **`Build347:`** (the modified `Build345:` L4 line and `Build340:` custom-profile line
+were re-marked so `dmesg | grep Build347` covers the whole scope).
+
 ### Build 345 scope (K1–K7 + D) — flashed as `build346` 2026-10-03, passed
 The governor version stays **1.5.0** (`K6A_GOV_VERSION` untouched: there is no
 `GOV_KO_VER` migration window left to spend, and vermagic already locks the `.ko` to the
@@ -573,19 +617,27 @@ policy0 gov=schedutil max=1804800    policy6 gov=schedutil max=2304000
   are left alone; dmesg only ever holds the current build anyway.
 
 ### Features
-- State Machine: OFF→GAMING→CD_L2/L3/L4, an **entry dwell** before GAMING gives way to CD_L2/L3
-  and **immediate escalation** L2→L3, L2→L4, L3→L4 (`Build345: escalate …`, counted in
-  `throttle_events`); only recovery is dwell-gated — `hysteresis_fast` on the way in,
-  `hysteresis_normal` on the way out (Build 345 dropped the per-tick `delta >= 5` ternary that
-  picked the dwell from a noise-flipping difference). Three zero
-  thresholds (reachable from sysfs) short-circuit the whole switch instead of pinning `CD_L4`
-  at `t >= 0`.
-- Temp: max over 4 Gold zones `cpu-1-0..3-usr`, then `cpu-0-0-usr` → `xo-therm` → `soc-therm` →
-  `thermal_zone0`; zone **pointers are cached** since Build 345 (K6), so a tick costs five
+- State Machine: OFF→GAMING→CD_L2/L3/L4, an **entry dwell** before GAMING gives way to CD_L2,
+  but **no dwell at all** once the cluster already sits at `cd_l3_temp`
+  (`Build347: enter CD_L3 … without dwell`) and **immediate escalation** L2→L3, L2→L4
+  (`Build345: escalate …`) plus the peak-triggered L4 (`Build347: escalate -> L4 … (peak)`),
+  all counted in `throttle_events`; only recovery is dwell-gated — `hysteresis_fast` on the way
+  in (default **3000 ms** since Build 347, store bound now 1..5000), `hysteresis_normal` on the
+  way out (Build 345 dropped the per-tick `delta >= 5` ternary that picked the dwell from a
+  noise-flipping difference). Three zero thresholds (reachable from sysfs) short-circuit the
+  whole switch instead of pinning `CD_L4` at `t >= 0`.
+- Temp: the **2nd-highest of the 4 Gold zones** `cpu-1-0..3-usr` drives every state decision,
+  the **peak is kept in `temp_peak` and arms the L4 emergency only** (Build 347); fallbacks
+  `cpu-0-0-usr` → `xo-therm` → `soc-therm` → `thermal_zone0` set both values identically.
+  Zone **pointers are cached** since Build 345 (K6), so a tick costs five
   `thermal_zone_get_temp()` calls instead of nine lookups + reads. Failure returns 0 and clears
   `temp_valid` → `state_machine()` and the battery
   guard are skipped and the state is held (`Build340: no temperature source, holding state %u`).
   v1.3.1 returned a hard-coded `40` and throttled on fake data. `temp_src` says which zone answered.
+  Why 2nd-highest: at idle the four Gold zones were measured at 74.1/74.5/**82.8**/78.7 °C, a
+  6.2 K spread that sits *inside* the `86` entry / `83` recover band — so `max()` keyed CD off
+  whichever core happened to be hottest, could barely recover, and made two runs with identical
+  thresholds differ by 13 % vs 58 % CD time.
 - CPU: `find_gold_cpu()` returns the highest-`cpuinfo.max_freq` policy **without CPU 0**, or -1
   (Build 345; the old `?: 6` fallback could name a CPU outside the gold cluster), `clamp_freq`
   order-independent, `enforce_max_freq()` tracks `gov->enforced_max`, **re-reads the policy to
@@ -613,11 +665,24 @@ policy0 gov=schedutil max=1804800    policy6 gov=schedutil max=2304000
 - Sysfs validation: `cd_thresholds` gold caps all-or-none zero + non-increasing (`clamp_freq()`
   maps a requested 0 to the **lowest** available frequency, i.e. the opposite of "no cap"),
   `gpu_caps` all-or-none zero + non-increasing + ≤2 000 000 000, `bw_floors` each ≤30000,
-  `hysteresis` 1..1000 / 1..5000, `poll_ms` 100..5000, `battery_guard_temp` 35..60
+  `hysteresis` 1..**5000** / 1..5000 (the `fast` cap was 1000 until Build 347, which made a
+  sane entry dwell unexpressible), `poll_ms` 100..5000, `battery_guard_temp` 35..60
+- `cd_thresholds`: a 7-value write marks the values **user-owned** (`thresholds_source=user`);
+  from then on `profile_store` only changes the profile *name* and logs
+  `Build347: profile=N keeps user thresholds …` instead of clobbering them — k6a-ctl's
+  `gov_write "profile"` (`bin/k6a-controller:145`, auto_badazz @85 °C and every mode switch)
+  used to silently replace a tuned config mid-round. Writing a bare `-` releases them again and
+  restores the profile table unless the profile is `custom`. A `cd_recover` band narrower than
+  4 K logs a warning (the Gold zone spread runs wider than that).
 - Sysfs: `enable/profile/status/hysteresis/cd_thresholds/gpu_caps/bw_floors/battery_guard/
   battery_guard_temp/poll_ms/legacy/game_pid`
 - Status keys added in v1.4.0: `policy_max` (live `policy->max`, proves the cap is applied),
-  `state_age_ms`, `temp_src`, `temp_valid`
+  `state_age_ms`, `temp_src`, `temp_valid`; in Build 347: `temp_peak`,
+  `thresholds_source` (`user`|`profile`), `vendor_sconfig`, `vendor_cpu_limits` (the vendor
+  `mi_thermald` engine, polled every 64 ticks via `filp_open`/`kernel_read` on
+  `/sys/class/thermal/thermal_message/{sconfig,cpu_limits}` — k6a was blind to it while
+  `sconfig` jumped 0→13 mid-round; the read needs no new SELinux grant because k6a-ctl's
+  `sepolicy.rule` already grants `kernel → sysfs` read/open/getattr generically)
 - `game_pid` is stored and echoed in `status` only — the kernel never acts on it
 - Hardening: `get_cd_max_freq` lock-free (caller holds lock), `cool_cur`/`status_show` locked,
   `freq_init_worker` mutex, ticks fix

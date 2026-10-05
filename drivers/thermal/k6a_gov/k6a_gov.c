@@ -44,10 +44,14 @@ struct k6a_gov {
     struct mutex lock;
     enum k6a_state state;
     u32 temp_celsius;
+    u32 temp_peak;
     u8 temp_src;
     bool temp_valid;
     bool temp_warned;
     u32 profile;
+    bool thresholds_user;
+    char vendor_sconfig[16];
+    char vendor_cpu_limits[64];
     pid_t game_pid;
     u64 ticks;
     struct task_struct *kthread;
@@ -333,47 +337,60 @@ static int read_cached_temp(struct thermal_zone_device **slot, const char *name)
     return t / 1000;
 }
 
+/* KB8: 2nd-highest of the 4 Gold zones (cpu-1-0..3-usr) for the state
+ * decision, the peak stays in temp_peak and arms the L4 emergency only. */
 static int read_temp(void) {
-    int i, t, max_t = 0;
+    int i, t, max_t = 0, second_t = 0;
 
     gov->temp_valid = false;
     gov->temp_src = K6A_TSRC_NONE;
+    gov->temp_peak = 0;
 
     for (i = 0; i < 4; i++) {
         char name[16];
         snprintf(name, sizeof(name), "cpu-1-%d-usr", i);
         t = read_cached_temp(&gov->tz_gold[i], name);
-        if (t > max_t) max_t = t;
+        if (t > max_t) {
+            second_t = max_t;
+            max_t = t;
+        } else if (t > second_t) {
+            second_t = t;
+        }
     }
 
     if (max_t) {
         gov->temp_valid = true;
         gov->temp_src = K6A_TSRC_GOLD;
-        return max_t;
+        gov->temp_peak = max_t;
+        return second_t ? second_t : max_t;
     }
 
     t = read_cached_temp(&gov->tz_silver, "cpu-0-0-usr");
     if (t) {
         gov->temp_valid = true;
         gov->temp_src = K6A_TSRC_SILVER;
+        gov->temp_peak = t;
         return t;
     }
     t = read_cached_temp(&gov->tz_xo, "xo-therm");
     if (t) {
         gov->temp_valid = true;
         gov->temp_src = K6A_TSRC_XO;
+        gov->temp_peak = t;
         return t;
     }
     t = read_cached_temp(&gov->tz_soc, "soc-therm");
     if (t) {
         gov->temp_valid = true;
         gov->temp_src = K6A_TSRC_SOC;
+        gov->temp_peak = t;
         return t;
     }
     t = read_cached_temp(&gov->tz_zone0, "thermal_zone0");
     if (t) {
         gov->temp_valid = true;
         gov->temp_src = K6A_TSRC_ZONE0;
+        gov->temp_peak = t;
         return t;
     }
     return 0;
@@ -403,14 +420,16 @@ static void set_state_locked(enum k6a_state ns) {
 
 /* ── State Machine ───────────────────────────────────────────────── */
 /* Escalation first (safety), always immediate. De-escalation is always
- * gated by hysteresis_normal; entering CD_* from GAMING needs
- * hysteresis_fast sustained. The old per-tick delta chose the dwell and
- * made a ~770 ms noise period flip between fast and normal. */
+ * gated by hysteresis_normal; entering CD_L2 from GAMING needs
+ * hysteresis_fast sustained, entering CD_L3 from GAMING never waits.
+ * The old per-tick delta chose the dwell and made a ~770 ms noise
+ * period flip between fast and normal. */
 static void state_machine(void) {
     u64 now = ktime_to_ms(ktime_get());
     u32 dwell_in = gov->hysteresis_fast;
     u32 dwell_out = gov->hysteresis_normal;
     u32 t = gov->temp_celsius;
+    u32 tp = gov->temp_peak ? gov->temp_peak : t;
 
     if (gov->state == K6A_OFF && gov->enabled &&
         gov->profile != K6A_PROFILE_OFF) {
@@ -421,10 +440,10 @@ static void state_machine(void) {
     if (!gov->cd_l2_temp || !gov->cd_l3_temp || !gov->cd_l4_temp)
         goto done;
 
-    if (gov->state < K6A_CD_L4 && t >= gov->cd_l4_temp) {
+    if (gov->state < K6A_CD_L4 && tp >= gov->cd_l4_temp) {
         set_state_locked(K6A_CD_L4);
         gov->throttle_events++;
-        pr_warn("Build345: escalate -> L4 @%u\n", t);
+        pr_warn("Build347: escalate -> L4 @%u (peak)\n", tp);
         goto done;
     }
     if (gov->state == K6A_CD_L2 && t >= gov->cd_l3_temp) {
@@ -449,11 +468,17 @@ static void state_machine(void) {
             set_state_locked(K6A_GAMING);
         break;
     case K6A_GAMING:
+        if (t >= gov->cd_l3_temp) {
+            set_state_locked(K6A_CD_L3);
+            gov->throttle_events++;
+            pr_warn("Build347: enter CD_L3 @%u without dwell\n", t);
+            break;
+        }
         if (t >= gov->cd_l2_temp) {
             if (!gov->entry_since) {
                 gov->entry_since = now;
             } else if ((now - gov->entry_since) >= dwell_in) {
-                set_state_locked(t >= gov->cd_l3_temp ? K6A_CD_L3 : K6A_CD_L2);
+                set_state_locked(K6A_CD_L2);
                 gov->throttle_events++;
             }
         } else {
@@ -675,6 +700,41 @@ static int verify_build_hash(void) {
     return 1;
 }
 
+static void read_one_node(const char *path, char *dst, size_t cap) {
+    struct file *filp;
+    char buf[64];
+    loff_t pos = 0;
+    int len, j;
+
+    filp = filp_open(path, O_RDONLY, 0);
+    if (IS_ERR(filp)) {
+        snprintf(dst, cap, "na");
+        return;
+    }
+    len = kernel_read(filp, buf, sizeof(buf) - 1, &pos);
+    filp_close(filp, NULL);
+    if (len <= 0) {
+        snprintf(dst, cap, "none");
+        return;
+    }
+    buf[len] = '\0';
+    while (len && (buf[len - 1] == '\n' || buf[len - 1] == '\r' ||
+                   buf[len - 1] == ' ' || buf[len - 1] == '\t'))
+        len--;
+    buf[len] = '\0';
+    for (j = 0; j < len; j++)
+        if (buf[j] == '\n' || buf[j] == '\r' || buf[j] == ' ' || buf[j] == '\t')
+            buf[j] = ',';
+    snprintf(dst, cap, "%s", len ? buf : "none");
+}
+
+static void read_vendor_nodes(void) {
+    read_one_node("/sys/class/thermal/thermal_message/sconfig",
+                  gov->vendor_sconfig, sizeof(gov->vendor_sconfig));
+    read_one_node("/sys/class/thermal/thermal_message/cpu_limits",
+                  gov->vendor_cpu_limits, sizeof(gov->vendor_cpu_limits));
+}
+
 static int gov_thread(void *data) {
     while (!kthread_should_stop()) {
         int t;
@@ -721,6 +781,8 @@ static int gov_thread(void *data) {
                 gov->temp_warned = true;
                 pr_warn("Build340: no temperature source, holding state %u\n", gov->state);
             }
+            if (!(gov->ticks & 63))
+                read_vendor_nodes();
             apply_limits();
         }
         gov->ticks++;
@@ -786,6 +848,28 @@ static ssize_t profile_show(struct kobject *k, struct kobj_attribute *a, char *b
     mutex_unlock(&gov->lock);
     return sprintf(b, "%s\n", n[p]);
 }
+static void apply_profile_locked(unsigned int p) {
+    const struct k6a_profile_def *d = &profiles[p];
+
+    gov->cd_l2_temp=d->cd_l2_temp;
+    gov->cd_l3_temp=d->cd_l3_temp;
+    gov->cd_l4_temp=d->cd_l4_temp;
+    gov->cd_recover=d->cd_recover;
+    gov->cd_l2_gold_max=d->cd_l2_gold_max;
+    gov->cd_l3_gold_max=d->cd_l3_gold_max;
+    gov->cd_l4_gold_max=d->cd_l4_gold_max;
+    gov->cd_l2_gpu_max=d->cd_l2_gpu_max;
+    gov->cd_l3_gpu_max=d->cd_l3_gpu_max;
+    gov->cd_l4_gpu_max=d->cd_l4_gpu_max;
+    gov->cd_l2_bw_gpubw=d->cd_l2_bw_gpubw;
+    gov->cd_l3_bw_gpubw=d->cd_l3_bw_gpubw;
+    gov->cd_l4_bw_gpubw=d->cd_l4_bw_gpubw;
+    gov->cd_l2_bw_llcc=d->cd_l2_bw_llcc;
+    gov->cd_l3_bw_llcc=d->cd_l3_bw_llcc;
+    gov->cd_l4_bw_llcc=d->cd_l4_bw_llcc;
+    clamp_cd_freqs();
+}
+
 static ssize_t profile_store(struct kobject *k, struct kobj_attribute *a, const char *b, size_t c) {
     unsigned long v;
     if (kstrtoul(b, 10, &v)) return -EINVAL;
@@ -793,25 +877,11 @@ static ssize_t profile_store(struct kobject *k, struct kobj_attribute *a, const 
     mutex_lock(&gov->lock);
     gov->profile = v;
     if (v == K6A_PROFILE_CUSTOM) {
-        pr_info("Build340: profile=custom keeps current thresholds\n");
+        pr_info("Build347: profile=custom keeps current thresholds\n");
+    } else if (gov->thresholds_user) {
+        pr_info("Build347: profile=%lu keeps user thresholds, write '-' to cd_thresholds to release\n", v);
     } else {
-        gov->cd_l2_temp=profiles[v].cd_l2_temp;
-        gov->cd_l3_temp=profiles[v].cd_l3_temp;
-        gov->cd_l4_temp=profiles[v].cd_l4_temp;
-        gov->cd_recover=profiles[v].cd_recover;
-        gov->cd_l2_gold_max=profiles[v].cd_l2_gold_max;
-        gov->cd_l3_gold_max=profiles[v].cd_l3_gold_max;
-        gov->cd_l4_gold_max=profiles[v].cd_l4_gold_max;
-        gov->cd_l2_gpu_max=profiles[v].cd_l2_gpu_max;
-        gov->cd_l3_gpu_max=profiles[v].cd_l3_gpu_max;
-        gov->cd_l4_gpu_max=profiles[v].cd_l4_gpu_max;
-        gov->cd_l2_bw_gpubw=profiles[v].cd_l2_bw_gpubw;
-        gov->cd_l3_bw_gpubw=profiles[v].cd_l3_bw_gpubw;
-        gov->cd_l4_bw_gpubw=profiles[v].cd_l4_bw_gpubw;
-        gov->cd_l2_bw_llcc=profiles[v].cd_l2_bw_llcc;
-        gov->cd_l3_bw_llcc=profiles[v].cd_l3_bw_llcc;
-        gov->cd_l4_bw_llcc=profiles[v].cd_l4_bw_llcc;
-        clamp_cd_freqs();
+        apply_profile_locked(v);
     }
     gov->entry_since = 0;
     mutex_unlock(&gov->lock);
@@ -824,6 +894,9 @@ static ssize_t status_show(struct kobject *k, struct kobj_attribute *a, char *b)
     u32 temp, profile, legacy, enabled, gold_num, gold_max, gold_max_tbl, ticks;
     u32 policy_max, temp_src, temp_valid;
     u32 batt_latched;
+    u32 temp_peak, thresholds_user;
+    char vendor_sconfig[sizeof(gov->vendor_sconfig)];
+    char vendor_cpu_limits[sizeof(gov->vendor_cpu_limits)];
     u64 throttle_events, state_age_ms;
     u32 gpu_caps[3], gpu_last_idx;
     u32 bw_floors_gpubw[3], bw_floors_llcc[3];
@@ -846,6 +919,10 @@ static ssize_t status_show(struct kobject *k, struct kobj_attribute *a, char *b)
     temp_src = gov->temp_src;
     temp_valid = gov->temp_valid;
     batt_latched = gov->batt_latched;
+    temp_peak = gov->temp_peak;
+    thresholds_user = gov->thresholds_user;
+    memcpy(vendor_sconfig, gov->vendor_sconfig, sizeof(vendor_sconfig));
+    memcpy(vendor_cpu_limits, gov->vendor_cpu_limits, sizeof(vendor_cpu_limits));
     state_age_ms = ktime_to_ms(ktime_get()) - gov->state_ts;
     {
         int gcpu = find_gold_cpu();
@@ -932,6 +1009,16 @@ static ssize_t status_show(struct kobject *k, struct kobj_attribute *a, char *b)
         "build_hash=%s\n",
         hash_state == K6A_HASH_OK, hash_state, K6A_BUILD_HASH);
 
+    len += scnprintf(b + len, PAGE_SIZE - len,
+        "temp_peak=%u\n"
+        "thresholds_source=%s\n"
+        "vendor_sconfig=%s\n"
+        "vendor_cpu_limits=%s\n",
+        temp_peak,
+        thresholds_user ? "user" : "profile",
+        vendor_sconfig,
+        vendor_cpu_limits);
+
     /* KB7: throttle history, oldest first */
     len += scnprintf(b + len, PAGE_SIZE - len, "hist=");
     for (i = 0; i < hist_len && len < PAGE_SIZE - 48; i++) {
@@ -996,7 +1083,7 @@ static ssize_t hysteresis_show(struct kobject *k, struct kobj_attribute *a, char
 static ssize_t hysteresis_store(struct kobject *k, struct kobj_attribute *a, const char *b, size_t c) {
     u32 fast, normal;
     if (sscanf(b, "%u %u", &fast, &normal) != 2) return -EINVAL;
-    if (fast < 1 || fast > 1000 || normal < 1 || normal > 5000) return -EINVAL;
+    if (fast < 1 || fast > 5000 || normal < 1 || normal > 5000) return -EINVAL;
     mutex_lock(&gov->lock);
     gov->hysteresis_fast = fast;
     gov->hysteresis_normal = normal;
@@ -1065,6 +1152,21 @@ static ssize_t cd_thresholds_show(struct kobject *k, struct kobj_attribute *a, c
 }
 static ssize_t cd_thresholds_store(struct kobject *k, struct kobj_attribute *a, const char *b, size_t c) {
     u32 l2t,l3t,l4t,rec,l2g,l3g,l4g;
+
+    if (c && b[0] == '-') {
+        mutex_lock(&gov->lock);
+        gov->thresholds_user = false;
+        if (gov->profile != K6A_PROFILE_CUSTOM &&
+            gov->profile <= K6A_PROFILE_MAX && profiles[gov->profile].cd_l4_temp) {
+            apply_profile_locked(gov->profile);
+            pr_info("Build347: user thresholds released, profile defaults restored\n");
+        } else {
+            pr_info("Build347: user thresholds released, current values kept\n");
+        }
+        gov->entry_since = 0;
+        mutex_unlock(&gov->lock);
+        return c;
+    }
     if (sscanf(b, "%u %u %u %u %u %u %u",
                &l2t,&l3t,&l4t,&rec,&l2g,&l3g,&l4g) != 7) return -EINVAL;
     if (l2t < 40 || l2t > 110 || l3t < 45 || l3t > 110 ||
@@ -1075,12 +1177,18 @@ static ssize_t cd_thresholds_store(struct kobject *k, struct kobj_attribute *a, 
         return -EINVAL;
     if (l2g < l3g || l3g < l4g)
         return -EINVAL;
+    if (l2t - rec < 4)
+        pr_warn("Build347: cd_recover band only %u K (%u -> %u), gold zone spread runs wider than that\n",
+                l2t - rec, rec, l2t);
     mutex_lock(&gov->lock);
     gov->cd_l2_temp=l2t; gov->cd_l3_temp=l3t; gov->cd_l4_temp=l4t; gov->cd_recover=rec;
     gov->cd_l2_gold_max=l2g; gov->cd_l3_gold_max=l3g; gov->cd_l4_gold_max=l4g;
+    gov->thresholds_user = true;
     clamp_cd_freqs();
     gov->entry_since = 0;
     mutex_unlock(&gov->lock);
+    pr_info("Build347: user thresholds %u %u %u %u, profile switches no longer overwrite\n",
+            l2t, l3t, l4t, rec);
     return c;
 }
 
@@ -1177,7 +1285,7 @@ static int __init k6a_gov_init(void) {
     mutex_init(&gov->lock);
 
     gov->legacy_mode = legacy_mode;
-    gov->hysteresis_fast = 500;
+    gov->hysteresis_fast = 3000;
     gov->hysteresis_normal = 2000;
     gov->battery_guard_temp = 45;
     gov->poll_ms = K6A_GOV_KTHREAD_SLEEP_MS;
