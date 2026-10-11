@@ -413,7 +413,7 @@ fails with a bogus "file not found".
 
 ## k6a_gov v1.5.0
 
-### Build 347 scope — robust temperature signal, anti-thrash dwell, profile clobber fix
+### Build 347 scope — robust temperature signal, anti-thrash dwell, profile clobber fix — flashed as `build348` 2026-10-05, passed
 
 The governor version stays **1.5.0**. Everything in this scope is verifiable **without a
 gamepad**: `sha256sum` on 8 cores forces CD transitions, `status` readbacks prove the rest.
@@ -456,6 +456,74 @@ Measured on build346 **before** any code was written (2026-10-05):
 
 Marker: **`Build347:`** (the modified `Build345:` L4 line and `Build340:` custom-profile line
 were re-marked so `dmesg | grep Build347` covers the whole scope).
+
+### After the flash — build348 (passed 2026-10-05)
+
+Release `Badazz-kernel v4.14.369-badazz-build348`, `build-info.txt` → `BUILD_NUMBER=348`,
+`COMMIT_SHA=c0504a8fd943fdebe31afe0c1d02f40fcf71dac8`, vermagic
+`4.14.369-openela-rc1-BadazzKernel-sweet-v1.3.2-build348`, `k6a_gov.ko` **51 760 B**
+(48 488 B on build346).
+
+**Flash route — first time from Android instead of recovery.** The zip is stock AK3:
+`META-INF/com/google/android/update-binary` is the real entry point. It unzips the release into
+`$AKHOME`, runs `setup_bb` (installs `tools/busybox` into `$AKHOME/bin`), exports
+`PATH="$AKHOME/tools:$AKHOME/bin:$PATH"` (that is where `magiskboot` comes from — invoking
+`anykernel.sh` directly fails with `magiskboot: inaccessible or not found`), then runs
+`ash anykernel.sh`. Two things matter:
+
+- **`OUTFD` must be a regular file, never a pipe.** `ui_print` does
+  `>> /proc/self/fd/$OUTFD`; on a pipe that returns `ENXIO` → `can't create /proc/self/fd/1`.
+  So redirect stdout to a log file and pass `1` as the OUTFD argument.
+- **Under Android `BOOTMODE=true`** (zygote running) `setup_env` returns immediately — no
+  `mount_all`/`umount_all` juggling touches the live system.
+
+```bash
+# backups: 128 MB boot + 32 MB dtbo, md5-verified, also copied to /sdcard/Download/
+dd if=/dev/block/bootdevice/by-name/boot of=/data/local/tmp/boot-build346.img bs=1048576
+dd if=/dev/block/bootdevice/by-name/dtbo of=/data/local/tmp/dtbo-build346.img bs=1048576
+adb push Badazz-kernel-sweet-v4.14.369-build348.zip /data/local/tmp/build348.zip
+adb push ak3/ /data/local/tmp/ak3 && adb shell 'chmod -R 755 /data/local/tmp/ak3'
+# the flash itself (AKHOME must be set: its default /tmp is not writable here)
+adb shell 'export AKHOME=/data/local/tmp/ak3real; mkdir -p $AKHOME;
+  sh /data/local/tmp/ak3/META-INF/com/google/android/update-binary 1 1 \
+     /data/local/tmp/build348.zip > /data/local/tmp/flash348.log 2>&1'
+```
+
+**Prove it non-destructively first (dry run).** Copy the AK3 tree, patch only the two
+`dd … of=$BLOCK` lines in `tools/ak3-core.sh` to point at a file, **and turn the
+`dd if=/dev/zero of=$BLOCK` line into `:`** — it has no `count`, so against a file it would fill
+the disk forever (against a block device it stops at ENOSPC, which is why the real run is fine).
+Drop `dtbo.img` and `k6a_gov.ko` from the dry zip so `flash_generic` and the `.ko` copy skip,
+zip the tree, run `update-binary` against that zip, and unpack the resulting
+`boot-new-dry.img` — it must carry the new vermagic. Afterwards `md5sum` the real partitions
+against the backups. Do **not** point `block=` at a file: `setup_ak` only resolves `/dev/*`
+paths and otherwise aborts with `Unable to determine … partition`. `update-binary` finishes with
+`do.cleanup=1` → it deletes `$AKHOME`, so read the output file from *outside* `$AKHOME`.
+
+| Check | Result |
+|---|---|
+| `dmesg` | `Linux version …-build348`, `k6a_features: … git_hash=c0504a8f`, f2fs `build346 → build348`, **0×** `Oops`/`BUG`/`panic` |
+| boot partition | `md5 025d43f6f2a1b266c6200aab5ae7f07a` = byte-identical to the dry-run repack, unpacks to `…-build348` |
+| dtbo | partition prefix md5 = shipped `dtbo.img` (content unchanged, no dts change) |
+| module | `hash_verified=1 hash_state=1 build_hash=c0504a8f`, `legacy_mode=1` (keep enforcing) |
+| new status keys | `temp_peak=`, `thresholds_source=`, `vendor_sconfig=`, `vendor_cpu_limits=` all present; `vendor_sconfig=0` == `cat /sys/class/thermal/thermal_message/sconfig` |
+| `hysteresis` init | `fast=3000 normal=2000` — the new default survives, k6a-ctl does not overwrite it |
+| bound | `echo "4000 2000" > hysteresis` → rc=0 (previously rejected above 1000). Write format is **positional `"fast normal"`**; `fast=…` or a single value → rc=1. Restore with `echo "3000 2000"` |
+| temp signal | paired samples: `temp_peak` tracks the **max** of the four Gold zones, `temp` the **2nd-highest** (status is up to `poll_ms=250` stale, so sample both in one shell). `echo 25 > poll_ms` does **not** take — it stays 250 |
+| CD_L3 no dwell | `Build347: enter CD_L3 @86 without dwell` under 8× `sha256sum /dev/zero`; `policy_max` 2304000 → 1209600 → back to 2304000, de-escalations still exactly +2048 ms |
+| deadband | `cd_thresholds 86 89 91 85` → `Build347: cd_recover band only 1 K (85 -> 86), gold zone spread runs wider than that` |
+| F18 | `echo 1 > profile` → rc=0, thresholds untouched, `thresholds_source=user`, `Build347: profile=1 keeps user thresholds, write '-' to cd_thresholds to release`; `echo -` → `83 86 90 78` + `Build347: user thresholds released, profile defaults restored` |
+| `profile` store | takes the **index**, not the name: `OFF=0 GAMING=1 BATTERY=2 BADAZZ=3 CUSTOM=4 SAFE=5`; `echo gaming` → rc=1 |
+| k6a-ctl gate | `sh bin/check_module.sh <k6a-ctl repo>` → `GATE OK — 0 warn(s)`. Passing the kernel repo or `/data/adb/modules/k6a-ctl` fails — the gate expects the repo layout (`bin/`, `config/`, `webroot/`) |
+| dmesg markers | `Build347:` ×8 on the edited lines; untouched lines keep `Build345:`/`Build340:` — markers mean *authoring build*, the load banner therefore still reads `Build345: k6a_gov v1.5.0 loaded` |
+
+End state of the round: `profile=custom`, `cd_thresholds=86 89 91 83 1708800 1209600 1094400`,
+`thresholds_source=user`, `hysteresis fast=3000 normal=2000`, `poll_ms=250`.
+**`thresholds_user` resets to `false` on every reboot** (source back to `profile`, thresholds back
+to the profile table `83 86 90 78`) and k6a-ctl never writes `cd_thresholds`, so the write has to
+be repeated after each boot.
+
+Not yet done: the T8 fps round (needs the user).
 
 ### Build 345 scope (K1–K7 + D) — flashed as `build346` 2026-10-03, passed
 The governor version stays **1.5.0** (`K6A_GOV_VERSION` untouched: there is no
