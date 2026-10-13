@@ -1269,6 +1269,187 @@ active — it is a degradation, never a brick.
 - Submodule `KernelSU-Next` @ `b100bd28` (`v3.3.0-95-gb100bd28`, runtime `KSU_VERSION=38309`, UAPIv4)
 - `git submodule update --init --recursive` required for fresh clone
 
+## CODM-Fps-Messmethodik (r24–r40, gemessen 2026-10-11/12)
+
+Ziel ist **„gesicherte 60 fps"** — entscheidend sind die Täler, nicht der Mittelwert.
+Auswertung: `~/tmp/cmp6.py` (Varianz), `cmp7.py` (Regression), `cmp9.py` (Tal-Analyse).
+Alle Läufe auf `build348`, gleiche Karte, Lüfter aus, Sampler `fps_samp2.sh`,
+Filter `t0+120 s` (`SKIP=120`, **keine** fps-Schwelle).
+
+### Varianz der laufgleichen Messung — 4× identisch
+
+| Run | AkkuTemp | Ø fps | Täler <40 fps | tp-Start |
+|---|---|---|---|---|
+| r33 | 21,9 °C | **65,8** | 0 | 53 °C |
+| r35 | 26,1 °C | **61,8** | 1 | 54 °C |
+| r36 | 27,5 °C | **62,3** | 3 | 52 °C |
+| r37 | 29,4 °C | **60,3** | 8 | 56 °C |
+
+Ø 62,54 · **s = 2,36 fps** · Spannweite 5,6 fps · 95 %-Band 57,9…67,2
+
+### Haupttreiber: Akkutemperatur (nicht Streuung)
+
+```
+fps = 81,22 − 0,71 · AkkuTemp_C        r = −0,96   r² = 0,926
+```
+
+**−0,71 fps pro Grad Akkutemperatur.** Nach Temperatur-Korrektur sinkt die
+Streuung von **s = 2,36 auf s = 0,64 fps** (3,7×). Tälerzahl steigt
+monoton mit der Starttemperatur (0→1→3→8).
+
+**Messbarkeitsgrenze (80 % Power, α = 0,05, zwei Gruppen):**
+
+| Aufbau | n=4 | n=6 |
+|---|---|---|
+| ohne Starttemperatur-Kontrolle | **4,7 fps** | 3,8 fps |
+| mit Starttemperatur-Kontrolle | **1,3 fps** | 1,0 fps |
+
+### DDR-Overclock: kein Effekt nachweisbar
+
+`r34` (min_freq 6881 erzwungen, 264/264 Samples) = **60,1 fps** → −2,4 fps zum
+Kontrollmittel = **1,0 σ → innerhalb der Varianz**. Fairster Paarvergleich bei
+gleicher Temperatur: r34 (26,0 °C) 60,1 vs. r35 (26,1 °C) 61,8 → **−1,66 fps**,
+unterhalb der Nachweisgrenze. DDR lag ohnehin bei 89–96 % am Deckel.
+
+**Ableitung:** ohne Starttemperatur-Kontrolle ist die Methode **unfähig, DDR-OC
+zu bewerten** — sie löst nur Effekte ≥ ~5 fps auf. Vor jeder weiteren
+A/B-Aussage muss die Starttemperatur fixiert werden.
+
+### Was die Täler sind — und was nicht
+
+Tal-Fenster (10 s, <45 fps, n=19) gegen Hoch-Fenster (n=44):
+
+| Größe | Tal | Hoch | Befund |
+|---|---|---|---|
+| `th` (Throttle-Ticks) | 0 | 0 | **kein CPU-Throttle** |
+| `ql` (cpu_limits) | leer | leer | **Thermal-Framework greift nicht** |
+| `p6` / `pm` | 1708800 | 1708800 | Kappe unverändert |
+| `f6` | 1 632 000 (min) | 1 698 327 | Kappe fast durchgehend gehalten |
+| `gb` (GPU busy) | 50 % | 71 % | **GPU unterfordert** |
+| `gc` (GPU-Takt) | 360 MHz | 497 MHz | GPU-Governor rampet nicht hoch |
+| `psi` (/proc/pressure/cpu) | 37,6 | 29,9 | **+26 % CPU-Druck** |
+
+Die GPU bekommt keinen Feed — der Stall liegt **vor** der GPU, bei
+CPU-Queue/Scheduler oder seitenständig im Spiel. Tiefster Einzelwert
+r36 510 s = **7,2 fps** bei `gb=52 %`, `gpuclk=355 MHz`.
+
+⚠️ **`qx` ist kumulativ** (`utime+stime` des `app.shanwan.gamepad`-Pinnern)
+und damit reines Zeitartefakt — Täler liegen später im Lauf. **Nicht
+auswerten.**
+
+### Verbindliche Methode ab dem nächsten Lauf
+
+1. **Starttemperatur-Gate:** AkkuTemp ≤ 23 °C **und** `thermal_zone26` ≤ 52 °C
+   erst dann CODM freigeben. Lang-Cooldown, `r26arm.sh` muss das prüfen.
+2. **≥ 3–4 Läufe pro Bedingung**, nie Einzelläufe — Einzelunterschiede
+   < 4,7 fps sind ohne Temperaturkontrolle nichts wert.
+3. **Ladungszustand protokollieren** (Charging/Discharging) — Wärmequelle.
+4. Stabilität über **Tälerzahl** bewerten, nicht nur über Ø.
+
+### Gated Läufe (r39, r40) — das Gate hilft NICHT
+
+Mit `arm.sh` (Gate: AkkuTemp ≤ 23,5 °C **und** zone26 ≤ 52 °C, danach sofortiger
+Spielstart) entstanden drei **saubere** Kontrollläufe gleicher Behandlung
+(`nice-10+trips93-96-99-90+NOFAN+p6cap1708`, build348, gleiche Karte, Lüfter aus):
+
+| Run | bt-Start | Ø fps | med | Täler | n |
+|---|---|---|---|---|---|
+| r33 | 21,9 °C | **65,84** | 62,0 | **0** | 207 |
+| r39 | 23,6 °C | 62,56 | 58,3 | 2 | 177 |
+| r40 | 23,0 °C | 61,31 | 59,0 | **6** | 179 |
+
+Ø 63,24 · **s = 2,34 fps** · Spannweite 4,53
+
+**s = 2,34 ist praktisch identisch mit dem unkontrollierten Wert (2,36).** Das
+Temperatur-Gate senkt die Lauf-zu-Lauf-Streuung **nicht**; Akkutemperatur war nie
+der Haupttreiber. Daraus folgt: **MDE ≈ 4,6 fps** (n=4/4 gepaart) — jede
+Mikro-Optimierung (Pinner, `cdt`, Taktkurven, DDR) liegt unterhalb der
+Nachweisgrenze und ist mit diesem Aufwand **nicht beweisbar**.
+
+Das Rauschen ist zudem **nicht** eine gleichmäßige Absenkung, sondern
+**sporadische Stalls**: r33/r39/r40 hatten 0/2/6 Täler, ohne Korrelation zur
+Starttemperatur (23,0 °C → 6 Täler, 23,6 °C → 2).
+
+### Stall-Ursache: k6a_gov im CD_L2 (gemessen 2026-10-12)
+
+Live-Auslesung von `/sys/kernel/k6a_gov/status` nach r40:
+
+```
+state=cd_l2  temp=77  policy_max=1708800  state_age_ms=728061
+gpu_caps=800000000 565000000 430000000
+bw_floor_llcc=0 4000 3000
+batt_latched=1
+hist=…94:gaming>cd_l2, 87:cd_l2>gaming, 96:gaming>cd_l3, … 77:gaming>cd_l2
+```
+
+Der Governor **oszilliert während der Runde dauerhaft** zwischen `GAMING` und
+`CD_L2` (Schwellen 93/96/99/90). Das hat drei Konsequenzen:
+
+1. **Die gemessene Kappe von 1708800 Hz ist nicht nur unser `p6cap1708`** —
+   `k6a_gov` setzt in CD_L2 **unabhängig** denselben Wert (`cd_l2_gold_max`).
+   Aus den Logs allein ist die Quelle **nicht unterscheidbar**.
+2. **In CD_L2 wird zusätzlich die GPU auf 565 MHz gedeckelt** (`gpu_caps[1]`),
+   in GAMING frei bis 800 MHz. Die schnellen Einzelwerte der Runden erreichen
+   **bis 147 fps bei 800 MHz** — nur im Zustand GAMING möglich.
+3. `batt_latched=1` (Battery-Guard, Schwelle 45 °C) hält CD_L2 bis 5 K unter
+   der Schwelle fest. **Während der Runden war der Akku jedoch ≤ 36 °C** —
+   der Guard ist dort **nicht** der Auslöser, sondern erst beim Laden.
+
+**Aber: der GPU-Deckel ist ein Symptom, nicht die Ursache.** Während der Stalls
+messet die GPU **140–355 MHz bei ~50 % Auslastung** — sie ist *idle*, nicht
+gedeckelt. Das Spiel submitted keine Arbeit. Ein höherer `cd_l2_gpu_max` würde
+daran nichts ändern (deshalb bewusst **nicht** in build350).
+
+Was die Runden wirklich trennt, ist die **Zustandsverteilung**: ob die CPU
+während der Runde die 93 °C erreicht (→ CD_L2, GPU 565 MHz) oder nicht
+(→ GAMING, GPU 800 MHz). Das ist **thermisch**, nicht konfigurierbar.
+
+### Offene Frage: Lüfter — jetzt die stärkste Hypothese
+
+`r32` (gaming-sched, **mit** Lüfter, AkkuTemp 25,9 °C) = **67,5 fps, 0 Täler**
+— bester Lauf der Serie, trotz wärmerem Start als r33.
+„Lüfter entbehrlich" wurde ursprünglich nur auf Δ −1,7 fps im **Mittelwert**
+geprüft (r32→r33). Die Täler-Verteilung wurde nie verglichen.
+
+Nach dem CD_L2-Befund ist die Hypothese **deutlich gestärkt**: Ein Lüfter hält
+die Gold-Zonen unter 93 °C → der Governor bleibt in GAMING → die GPU behält
+800 MHz → keine Stalls. **Offen und jetzt priorisiert:** Lüfter als eigene
+Bedingung testen, bewertet über **Tälerzahl + s**, nicht über Ø.
+
+### Verbleibende Messlücke
+
+`io_samp.sh` (Begleit-Sampler, unabhängig von `fps_samp2.sh`) zeichnet seit r40
+zusätzlich `/proc/pressure/{io,memory,cpu}`, Block-I/O-Deltas, `pgmajfault`,
+GPU-Busy/-Takt, DDR-Bandbreite **und den k6a_gov-Status pro Sekunde**
+(`kstate ktemp kpeak kpm kth kbl ksage`, 18 Spalten gesamt) auf. Damit ist die
+Zuordnung **Stall ↔ k6a-Zustand** im nächsten Lauf direkt möglich — kein
+Kernel-Change nötig.
+
+⚠️ **Falle**: `io_samp.sh` muss wie `fps_samp2.sh` auf den COD-Start **warten**
+(`fgnow`-Schleife). Ein beim Arming gestarteter Sampler ist nach dem Gate
+(1000+ s Wartezeit) längst abgelaufen — das kostete r40 seine io-Spur.
+
+## Build 350 Scope (Hygiene, 2026-10-12)
+
+Bewusst **kein** funktionaler Kernel-Eingriff: es gibt für die Stalls keinen
+belegbaren Config-Defekt (siehe Stall-Ursache oben). Scope:
+
+| Änderung | Datei | Begründung |
+|---|---|---|
+| Tote `thermal_floor`-Sysfs entfernt (105 Z.) | `drivers/gpu/msm/kgsl_pwrctrl.c` | Schnittstelle `/sys/kernel/k6a_gpu_thermal/thermal_floor/{temp_low,temp_high,levels}` hatte **0 Konsumenten** im Tree — Schreiben dorthin tat nichts. Tuner-Falle. Der echte GPU-Cap-Pfad ist ausschließlich `kgsl_k6a_set_max_level_idx`. Bonus: entfernt einen vorbestehenden clang-only Fehler (`device_initcall`). |
+| `CONFIG_TASK_XACCT=n`, `CONFIG_TASK_IO_ACCOUNTING=n` | `sweet_defconfig` | Rest-Accounting nach build349 (`TASK_DELAY_ACCT` aus). `/proc/uid_stat` ist auf modernem Android tot; `/proc/pid/io` (BatteryStats-IO) geht verloren. `TASKSTATS` bleibt an. Nichts `select`et die Optionen. |
+| `CONFIG_KSM=n` | `sweet_defconfig` | `ksmd` scannt dauerhaft (`KSM_RUN_MERGE` ist 4.14-Default) — Hintergrund-CPU ohne Messgewinn. Nichts `select`et/`depends on` KSM; Verbraucher sind `#ifdef`-geschützt. |
+
+Nicht angefasst (bewusst): `HZ_1000`, `PREEMPT`, `NO_HZ_IDLE`, `PSI`,
+`KPROBES`, IO-Scheduler/`SCSI_MQ_DEFAULT`/`BFQ`/`BLK_WBT`, `MEMCG`, `THP`,
+Governor-Wechsel, ZRAM-Writeback, `IKCONFIG_PROC` (SUSFS-Ziel), `PERF_EVENTS`,
+und `cd_l2_gpu_max` (kein belegter Nutzen, siehe oben).
+
+Syntax-Check (pristine-verglichen, clang 21.1.8): Pristine 1 Warnung + 1 Fehler
+(`device_initcall`), geändert 1 Warnung (identisch, Zeile 1970) + **0 Fehler**.
+Nach `sweet_defconfig` + `olddefconfig` bleiben alle drei Optionen draußen;
+`PSI=y K6A_GOV=m KSU=y TASKSTATS=y` unverändert.
+
 ## Working Agreements
 
 - **No code comments** — rationale lives in the commit body and in `pr_info` markers.
