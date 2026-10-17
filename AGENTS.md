@@ -1339,12 +1339,22 @@ auswerten.**
 
 ### Verbindliche Methode ab dem nächsten Lauf
 
-1. **Starttemperatur-Gate:** AkkuTemp ≤ 23 °C **und** `thermal_zone26` ≤ 52 °C
-   erst dann CODM freigeben. Lang-Cooldown, `r26arm.sh` muss das prüfen.
-2. **≥ 3–4 Läufe pro Bedingung**, nie Einzelläufe — Einzelunterschiede
-   < 4,7 fps sind ohne Temperaturkontrolle nichts wert.
-3. **Ladungszustand protokollieren** (Charging/Discharging) — Wärmequelle.
-4. Stabilität über **Tälerzahl** bewerten, nicht nur über Ø.
+1. **Ausschließlich Discharging.** Kabel ziehen, dann starten. r43 (Charging
+   11 %) 58,6 fps gegen r44 (Discharging) 79,9 fps bei sonst identischen
+   Settings — das ist der größte Konfound, kein Merkposten.
+2. **Kein Starttemperatur-Gate.** Das Gate senkt die Streuung nicht (s = 2,34
+   gemanagt vs 2,36 frei, r33/r39/r40) und kostet nur Wartezeit. Start-`bt`
+   und `zone26` protokollieren, fertig.
+3. **Auswertung über `validate.py`:** `med180` (Median Fenster rel. 180–570 s,
+   v>0-Filter gegen Surface-Resets) + `p60` (%≥60) + Tälerzahl. Das
+   180–570-Fenster schlitzt die frühen Drop-in-Täler (120–160 s) ab, die
+   r41/r42/r43/r45 zeigen und r44 nie — Roh-Ø vergleicht Match-Fußabdruck,
+   nicht Behandlung.
+4. **Nur Rundenfenster 0–600 s** der io-Spur auswerten; danach verfälscht die
+   eigene Analyselast (Termux läuft auf dem Gerät) die Thermik.
+5. **≥ 3 Läufe pro Bedingung**, nie Einzelpaare — selbst die Robustmetrik
+   streute r44↔r45 um 5,2 fps bei identischen Settings. Effekte unter ~5 fps
+   brauchen mehr Läufe oder konsistente Block-/Tälermuster.
 
 ### Gated Läufe (r39, r40) — das Gate hilft NICHT
 
@@ -1370,64 +1380,65 @@ Das Rauschen ist zudem **nicht** eine gleichmäßige Absenkung, sondern
 **sporadische Stalls**: r33/r39/r40 hatten 0/2/6 Täler, ohne Korrelation zur
 Starttemperatur (23,0 °C → 6 Täler, 23,6 °C → 2).
 
-### Stall-Ursache: k6a_gov im CD_L2 (gemessen 2026-10-12)
+### Stall-Ursache: spielseitig — CD_L2 war ein Nachrunden-Artefakt (r41–r45, 2026-10-17)
 
-Live-Auslesung von `/sys/kernel/k6a_gov/status` nach r40:
+Die Live-Auslesung nach r40 (`state=cd_l2`, `batt_latched=1`, `hist`-Alter 728 s) war
+**kein Runden-Zustand**, sondern zeigt den Nachrunden-Lade- und Befehlszustand: Termux
+läuft **auf dem Gerät**, unsere eigene Auswertungs-Last hebt `zone26` nach der Runde auf
+~94 °C. Gemessen in den Runden selbst (rel. 0–600 s) gilt — `k6a_gov` bleibt **in allen
+fünf Läufen zu 100 % in `GAMING`**:
 
-```
-state=cd_l2  temp=77  policy_max=1708800  state_age_ms=728061
-gpu_caps=800000000 565000000 430000000
-bw_floor_llcc=0 4000 3000
-batt_latched=1
-hist=…94:gaming>cd_l2, 87:cd_l2>gaming, 96:gaming>cd_l3, … 77:gaming>cd_l2
-```
+| Run | Bedingung | k6a-Zustand (Runde) | fps Ø | Täler |
+|---|---|---|---|---|
+| r41 | Kappe, kein Lüfter, Discharging | **gaming 133/133** | 64,2 | 13 |
+| r42 | Kappe, Lüfter, Discharging | **gaming 152/152** | 60,6 | 8 |
+| r43 | Volle Freq., Lüfter, **Charging 11 %** | **gaming 290/290** | 58,6 | 29 |
+| r44 | Volle Freq., Lüfter, Discharging | **gaming 354/354** | **79,9** | **0** |
+| r45 | Volle Freq., Lüfter, Discharging | **gaming 416/416** | 59,7 (63,0 bereinigt) | 35 |
 
-Der Governor **oszilliert während der Runde dauerhaft** zwischen `GAMING` und
-`CD_L2` (Schwellen 93/96/99/90). Das hat drei Konsequenzen:
+Das einzige `cd_l2`-Ereignis der Serie (r45, rel. 638–889 s) liegt **komplett nach dem
+600-s-Fenster**. **Regel: nur das Runden-Fenster 0–600 s auswerten.**
 
-1. **Die gemessene Kappe von 1708800 Hz ist nicht nur unser `p6cap1708`** —
-   `k6a_gov` setzt in CD_L2 **unabhängig** denselben Wert (`cd_l2_gold_max`).
-   Aus den Logs allein ist die Quelle **nicht unterscheidbar**.
-2. **In CD_L2 wird zusätzlich die GPU auf 565 MHz gedeckelt** (`gpu_caps[1]`),
-   in GAMING frei bis 800 MHz. Die schnellen Einzelwerte der Runden erreichen
-   **bis 147 fps bei 800 MHz** — nur im Zustand GAMING möglich.
-3. `batt_latched=1` (Battery-Guard, Schwelle 45 °C) hält CD_L2 bis 5 K unter
-   der Schwelle fest. **Während der Runden war der Akku jedoch ≤ 36 °C** —
-   der Guard ist dort **nicht** der Auslöser, sondern erst beim Laden.
+Drei Bedingungsvergleiche mit jeweils genau einer geänderten Variable:
 
-**Aber: der GPU-Deckel ist ein Symptom, nicht die Ursache.** Während der Stalls
-messet die GPU **140–355 MHz bei ~50 % Auslastung** — sie ist *idle*, nicht
-gedeckelt. Das Spiel submitted keine Arbeit. Ein höherer `cd_l2_gpu_max` würde
-daran nichts ändern (deshalb bewusst **nicht** in build350).
+| Vergleich | ΔØ fps | Befund |
+|---|---|---|
+| Charging → Discharging (r43→r44) | **+21,3** | Einzelpaar, eindeutige Richtung: **Laden während der Runde ist der größte Konfound.** |
+| kein Lüfter → Lüfter (r41→r42) | −3,7 (−5 Täler) | **Lüfter-Hypothese tot.** SoC-Temp praktisch identisch (78,2/83 vs 79,5/85 °C) — der Lüfter kühlt nur den Akku (−6,7 °C), der nie engpass war. r32 (67,5/0) war ein Glückslauf. |
+| Kappe 1708800 → 2304000 (r42→r44/r45) | r44 +19,4 · r45 −0,8 | **unbestätigt.** r44 ist der Ausreißer (0 Täler, 91 % ≥60); der Kontrolllauf r45 unter **identischen** Settings liefert das gekappte Niveau (59,7). **Entscheidung: Kappe bleibt 1708800.** |
 
-Was die Runden wirklich trennt, ist die **Zustandsverteilung**: ob die CPU
-während der Runde die 93 °C erreicht (→ CD_L2, GPU 565 MHz) oder nicht
-(→ GAMING, GPU 800 MHz). Das ist **thermisch**, nicht konfigurierbar.
+Wo die Kappe real wirkt: **Temperatur und Schwellenabstand** —
+ktemp Ø 74,9–79,5 °C gekappt vs 81,2–86,7 °C ungekappt (max 94 °C in r45), also
+7–12 K Abstand zur 93 °C-Schwelle gespart, ohne messbaren Median-Gewinn
+(med 180–570: 65,2/56,0 gekappt vs 65,0/69,5/74,7 ungekappt — innerhalb der
+Lauf-zu-Lauf-Streuung).
 
-### Offene Frage: Lüfter — jetzt die stärkste Hypothese
+**Täler-Anatomie (bleibt: spielseitig).** Die GPU ist in den Stalls **nicht idled**,
+sondern bei 50–75 % busy — sie bekommt zu wenig Arbeit. r45s 34 Täler entfallen ohne
+jede Korrelation zu `cd_l2` (0/34 innerhalb ±3 s). Die frühen Täler bei 120–160 s
+(Drop-in) tauchen in r41/r42/r43/r45 auf, in r44 nie — Match-Fußabdruck statt
+Behandlungseffekt. k6a braucht für CD_L2 t≥93 °C **durchgehend 3000 ms** (`entry_since`
+wird bei jedem Unterschreiten zurückgesetzt) — bei 24 erneuten ≥93-Beobachtungen in
+r45 reichte das nie: beabsichtigte Anti-Thrash-Hysterese, kein Bug.
 
-`r32` (gaming-sched, **mit** Lüfter, AkkuTemp 25,9 °C) = **67,5 fps, 0 Täler**
-— bester Lauf der Serie, trotz wärmerem Start als r33.
-„Lüfter entbehrlich" wurde ursprünglich nur auf Δ −1,7 fps im **Mittelwert**
-geprüft (r32→r33). Die Täler-Verteilung wurde nie verglichen.
+### Mess-Werkzeuge und ihre Fallen (r40–r45)
 
-Nach dem CD_L2-Befund ist die Hypothese **deutlich gestärkt**: Ein Lüfter hält
-die Gold-Zonen unter 93 °C → der Governor bleibt in GAMING → die GPU behält
-800 MHz → keine Stalls. **Offen und jetzt priorisiert:** Lüfter als eigene
-Bedingung testen, bewertet über **Tälerzahl + s**, nicht über Ø.
+`io_samp.sh` zeichnet PSI, Block-I/O-Deltas, `pgmajfault`, GPU-Busy/-Takt,
+DDR-Bandbreite **und den k6a_gov-Status pro Iteration** mit
+(`kstate ktemp kpeak kpm kth kbl ksage`, 18 Spalten). Für r41–r45 lief damit die
+Zuordnung Stall ↔ Zustand direkt.
 
-### Verbleibende Messlücke
+⚠️ Drei Fallen, erst deutlich an r44/r45 gemessen:
 
-`io_samp.sh` (Begleit-Sampler, unabhängig von `fps_samp2.sh`) zeichnet seit r40
-zusätzlich `/proc/pressure/{io,memory,cpu}`, Block-I/O-Deltas, `pgmajfault`,
-GPU-Busy/-Takt, DDR-Bandbreite **und den k6a_gov-Status pro Sekunde**
-(`kstate ktemp kpeak kpm kth kbl ksage`, 18 Spalten gesamt) auf. Damit ist die
-Zuordnung **Stall ↔ k6a-Zustand** im nächsten Lauf direkt möglich — kein
-Kernel-Change nötig.
-
-⚠️ **Falle**: `io_samp.sh` muss wie `fps_samp2.sh` auf den COD-Start **warten**
-(`fgnow`-Schleife). Ein beim Arming gestarteter Sampler ist nach dem Gate
-(1000+ s Wartezeit) längst abgelaufen — das kostete r40 seine io-Spur.
+1. **Kadenz ist NICHT 1 s.** Der Status-Read (`timeout 2` + restliche Pipeline)
+   macht pro Iteration real **1,4–2,1 s** — die `t`-Spalte ist Timestamp, keine
+   Linien-Nummer. Deltas per Nearest-Match zuordnen, nicht per Zeilenindex.
+2. **Frame-Zähler kann zurückgesetzt werden.** r43 meldet `min 0,0 fps`, r45
+   `min −530,8 fps` — in beiden Fällen wurde die SurfaceView des Spiels neu
+   erstellt (Spiel-/Surface-Recreation). **Alle `v∉(0,∞)`-Intervalle vor Auswerten
+   verwerfen** (macht `validate.py` seit dem selbst).
+3. **Nachrunden-Samples sind vergiftet.** Die letzte ~1/3 der io-Spur kann
+   Nachrunden-Werte enthalten (Analyselast). **Nur rel. 0–600 s bewerten.**
 
 ## Build 350 Scope (Hygiene, 2026-10-12)
 
@@ -1448,7 +1459,33 @@ und `cd_l2_gpu_max` (kein belegter Nutzen, siehe oben).
 Syntax-Check (pristine-verglichen, clang 21.1.8): Pristine 1 Warnung + 1 Fehler
 (`device_initcall`), geändert 1 Warnung (identisch, Zeile 1970) + **0 Fehler**.
 Nach `sweet_defconfig` + `olddefconfig` bleiben alle drei Optionen draußen;
-`PSI=y K6A_GOV=m KSU=y TASKSTATS=y` unverändert.
+  `PSI=y K6A_GOV=m KSU=y TASKSTATS=y` unverändert.
+
+## Build 351 Scope (bw_apply-Bugfix, 2026-10-17)
+
+Externer Code-Review (§1–§4) wurde vollständig verifiziert; umgesetzt nur der
+einzige belegte funktionale Defekt — ein Einzeiler:
+
+| Änderung | Datei | Begründung |
+|---|---|---|
+| `bw_apply`: `if (!k6a_devfreq_get_bw(...) && mn != want)` → `if (k6a_devfreq_get_bw(...) \|\| mn != want)` | `drivers/thermal/k6a_gov/k6a_gov.c` | Vorher wurde die Korrektur **übersprungen, wenn der Read-Back fehlschlug** — exakt in der Situation, in der der tatsächliche Wert vom Soll abweichen kann. Mit `\|\|` wird bei Read-Fehler **oder** abweichendem Wert jederzeit re-applied. Marker `Build351:` auf den gezeigten Zeilen; `K6A_GOV_VERSION` bleibt 1.5.0. |
+
+Nicht umgesetzt (bewusst, mit Begründung im Review-Diskurs):
+- CI-Hygiene (UAPIv2-Doppel-Trigger, `LOCALVERSION`-sed, Trigger-Branches) —
+  verifiziert, aber ohne Kernel-Funktion; als nachgelagerter
+  P1-Hygiene-Punkt notiert.
+- `thresholds_user`-Persistenz (§2, Reset bei `insmod`) — Designfrage,
+  separat zu entwerfen; `k6a-ctl` bleibt bis dahin der Setter.
+- `CONFIG_ENERGY_MODEL` (§5) — ohne Beleg, dass eine nicht existierende
+  Energie-zu-Takt-Zuordnung die Stalls ändert; bleibt offen.
+
+Auswertungswerkzeug (nicht Repo-Inhalt): `~/tmp/validate.py` implementiert die
+Robustmetrik aus „Verbindliche Methode" oben — `med180` + `p60`, v>0-Filter,
+Fenster 180–570 s; verifiziert an r29–r45.
+
+Syntax-Check (pristine-verglichen, clang 21.1.8, beide Dateien mit
+`-DK6A_GIT_HASH/-DK6A_BUILD_HASH` versorgt — ohne diesen Define bricht der
+Header mit `#error`): **beide rc=0, 0 Fehler, 0 Warnungen.**
 
 ## Working Agreements
 

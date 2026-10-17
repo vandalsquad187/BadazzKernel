@@ -569,8 +569,8 @@ static void bw_apply(const char *name, u32 want, u32 *last, bool *changed) {
         pr_err_ratelimited("Build345: set_bw %s=%u failed\n", name, want);
         return;
     }
-    if (!k6a_devfreq_get_bw(name, &cur, &mn, &mx) && mn != want) {
-        pr_err_ratelimited("Build345: set_bw %s=%u not reflected (min=%u)\n",
+    if (k6a_devfreq_get_bw(name, &cur, &mn, &mx) || mn != want) {
+        pr_err_ratelimited("Build351: set_bw %s=%u not reflected (min=%u)\n",
                            name, want, mn);
         return;
     }
