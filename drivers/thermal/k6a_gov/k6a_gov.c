@@ -23,7 +23,7 @@ extern int kgsl_k6a_set_max_level_idx(unsigned int level);
 extern int k6a_devfreq_get_bw(const char *name, u32 *cur, u32 *min, u32 *max);
 extern int k6a_devfreq_set_bw(const char *name, u32 min, u32 max);
 
-#define K6A_GOV_VERSION       "1.5.0"
+#define K6A_GOV_VERSION       "1.5.1"
 #define K6A_GOV_KTHREAD_SLEEP_MS   250
 #define K6A_GOV_MAX_FREQS     32
 #define K6A_HIST_N            16
@@ -119,7 +119,7 @@ struct k6a_profile_def {
 
 static const struct k6a_profile_def profiles[] = {
     [K6A_PROFILE_OFF]        = { 0,0,0,0,   0,0,0,   0,0,0,   0,0,0,   0,0,0 },
-    [K6A_PROFILE_GAMING]     = { 83,86,90,78,   1708800,1209600,1094400,
+    [K6A_PROFILE_GAMING]     = { 96,99,102,93,   1708800,1209600,1094400,
                                  800000000,565000000,430000000,
                                  4000,3000,1500,   0,4000,3000 },
     [K6A_PROFILE_BATTERY]    = { 70,75,80,65,   1400000,1200000,1000000,

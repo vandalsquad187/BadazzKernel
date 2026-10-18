@@ -1410,8 +1410,8 @@ Drei Bedingungsvergleiche mit jeweils genau einer geänderten Variable:
 Wo die Kappe real wirkt: **Temperatur und Schwellenabstand** —
 ktemp Ø 74,9–79,5 °C gekappt vs 81,2–86,7 °C ungekappt (max 94 °C in r45), also
 7–12 K Abstand zur 93 °C-Schwelle gespart, ohne messbaren Median-Gewinn
-(med 180–570: 65,2/56,0 gekappt vs 65,0/69,5/74,7 ungekappt — innerhalb der
-Lauf-zu-Lauf-Streuung).
+(med 180–570: 64,4/55,0 gekappt (r41/r42) vs 65,2/75,7/69,2 ungekappt
+(r43/r44/r45) — innerhalb der Lauf-zu-Lauf-Streuung).
 
 **Täler-Anatomie (bleibt: spielseitig).** Die GPU ist in den Stalls **nicht idled**,
 sondern bei 50–75 % busy — sie bekommt zu wenig Arbeit. r45s 34 Täler entfallen ohne
@@ -1486,6 +1486,47 @@ Fenster 180–570 s; verifiziert an r29–r45.
 Syntax-Check (pristine-verglichen, clang 21.1.8, beide Dateien mit
 `-DK6A_GIT_HASH/-DK6A_BUILD_HASH` versorgt — ohne diesen Define bricht der
 Header mit `#error`): **beide rc=0, 0 Fehler, 0 Warnungen.**
+
+## Build 352 Scope (GAMING-Schwellen 96/99/102, CI-Hygiene, 2026-10-18)
+
+Vorgeschichte (r46–r54, alle `build351`, NOFAN, Discharging, eine Runde
+pro Messung über `arm.sh`): Re-Baseline gekappt r46/r47/r48 → med180
+62,5/58,3/63,0 (Ø 61,3, s≈2,47 ≙ 348er-Cluster 2,25) = **build351
+verhaltensidentisch zu build348**. Block I Kappe AUS (stock thresholds
+93/96/99/90) r49/r50/r51 (UC-A/B/C) → med180 60,5/66,5/62,0 (Ø 63,0),
+SoC max **95 °C** in allen drei, k6a eskaliert selbst in `cd_l2`
+(20–39 % der Samples, p6 fällt auf 1708800) — „Kappe aus" ist in vivo
+nur halb aus, der Governor reimplementiert die Kappe über die Schwellen.
+Block II: ein `sysfs`-Write `echo "96 99 102 93 1708800 1555200
+1324800" > /sys/kernel/k6a_gov/cd_thresholds` (Kappe bleibt AUS),
+r52/r53/r54 (TH-A/B/C) → med180 **70,2/74,5/77,0** (Ø 73,9), Täler **0**,
+k6a **100 % gaming**, p6 **100 % auf 2304000**, tp max identische 95 °C.
+Der FPS-Gewinn (+10 bis +13 med180, konsistent in 3 Läufen) kommt
+ausschließlich daher, dass die Runde `gaming` nie verlässt — die alte
+93-°C-Schwelle (l2) war die eigentliche Bremse, nicht die p6cap-Kappe.
+r44 (75,7) ist damit entschlüsselt: erster „TH-artiger" Lauf, in dem das
+CD-Fenster nie antrat.
+
+| Änderung | Datei | Begründung |
+|---|---|---|
+| GAMING-Profil `cd_l2_temp,cd_l3_temp,cd_l4_temp,cd_recover` `83,86,90,78` → **`96,99,102,93`** | `drivers/thermal/k6a_gov/k6a_gov.c` (profiles[]) | Bloßes heben der l2-Schwelle von 93 auf 96 hält k6a die ganze Runde in `gaming` (r52–r54: Krone aus 3× 100 % `gaming`, 0 Täler). Gold-Caps der l-Schwellen (1708800/…) unverändert — sie werden nun schlicht nie scharf. `K6A_GOV_VERSION` 1.5.0 → **1.5.1**. |
+| Trigger-Branches `[main, 23.2, ksu-next-fix-100]` → `[main]` | `.github/workflows/build-kernel.yml` | `23.2`/`ksu-next-fix-100` sind tote Test-Branches; Doppel-Builds/Release-Rennen. |
+| `LOCALVERSION`-sed robuster: `sed -E 's/^CONFIG_LOCALVERSION=.*/…buildNNN"/'` + `grep -qF buildNNN`-Verifizierung (fehl → `::error::`) | `.github/workflows/build-kernel.yml` | Vorher schlugen beide sed-Steps stumm fehl (`\|\| true`), wenn `olddefconfig` die Zeile schon verändert hatte; Verify erst durch Hint-`grep`. |
+| `main.yml` (Legacy-Telegram-Build) mit `if: github.ref == 'refs/heads/main'` versehen | `.github/workflows/main.yml` | Jobs gegen Arbeits-Branches feuern sonst bei jedem Push (UAPIv2-Doppeltrigger-Befund Z246/264). |
+
+k6a-ctl bleibt Persistenz-Layer: `/data/adb/modules/k6a-ctl/config/
+settings.conf` schreibt `cd_thresholds=…` beim Boot — bisher `93 96 99
+90…`. Die new GAMING-Defaults greifen nur, wenn der ctl-Write entfällt
+oder auf die selben Werte gesetzt wird; **ctl-Config wird separat
+angereicht** (auf Gerät: `96 99 102 93 1708800 1555200 1324800`).
+
+Nicht umgesetzt: `thresholds_user`-Persistenz im Kernel (Designfrage,
+k6a-ctl bleibt der Setter), `CONFIG_ENERGY_MODEL` (unbelegt), CI-
+Doppeltrigger der UAPIv2-Sektion (siehe oben, nun mit `main`-Gate).
+
+Syntax-Check (pristine-verglichen, clang 21.1.8, beide Dateien mit
+`-DK6A_GIT_HASH/-DK6A_BUILD_HASH` versorgt): **beide rc=0, 0 Fehler,
+0 Warnungen.**
 
 ## Working Agreements
 
