@@ -1528,6 +1528,25 @@ Syntax-Check (pristine-verglichen, clang 21.1.8, beide Dateien mit
 `-DK6A_GIT_HASH/-DK6A_BUILD_HASH` versorgt): **beide rc=0, 0 Fehler,
 0 Warnungen.**
 
+## Build 353 Scope (Exit-BW-Floor-Fix, cool_set-Clamp, 2026-10-18)
+
+Anlass: externe Strukturanalyse von `main @ 8adaa6a0f` (Build 352) meldete
+4 Befunde; 3 verifiziert, 1 veraltet.
+
+| Befund der Analyse | Verifizierung | Status |
+|---|---|---|
+| 1. `k6a_gov_exit` gibt BW-Floors nicht frei (`k6a_gov.c:~1370` — `kgsl_k6a_set_max_level_idx(0)` + `apply_policy()` ja, aber kein `reset_bw_floors()`; auf rmmod (Version-Lock-Pfad von k6a-ctl) bleiben `gpubw`/`cpu-llcc-ddr-bw` gelatcht) | **bestätigt** — gleicher Bug-Typ wie v1.3.1 „Cap wird nie freigegeben", nur Exit-Achse | **Fix umgesetzt:** `reset_bw_floors();` vor `cancel_delayed_work_sync()` |
+| 2. k6a-ctl schreibt alte Schwellen `93 96 99 90` beim Boot und überschreibt die neuen Kernel-Defaults | **veraltet** — seit k6a-ctl v1.4.1 (`0d6dece`) ist `settings.conf` auf `96 99 102 93 …` und der Boot-Write idempotent; auf Gerät live verifiziert (`cd_thresholds=96 99 102 93`, `thresholds_source=user`, einziger Boot-Write in service.log) | keiner |
+| 3. `cool_set` akzeptiert Zustand 0 (OFF) — `k6a_gov.c:804` clamp nur Obergrenze (`s > K6A_CD_L4`); ein Thermal-Core-Write von 0 hat keinen legitimen Absender (k6a-ctl nutzt `enable=0`, der einzige OFF-Pfad mit voller Freigabe), würde aber Schutz stilllegen | **bestätigt** — `enum k6a_state { K6A_OFF=0, … }`, kein legitimer `cool=0`-Schreiber im ctl | **Fix umgesetzt:** `if (s < K6A_GAMING) s = K6A_GAMING;` — OFF nur noch via `enable=0` |
+| 4. Kleinigkeiten (sprintf Tätigkeit in status_show ohne PAGE_SIZE-Check, l2t-rec-Deadband-Warnung feuert nur auf sysfs-Pfad, `poll_ms`-Read in msleep ohne Lock) | notiert, alles benign/kosmetisch; das 3-K-Band (96−93) ist die AGENTS.md-dokumentierte bewusste Abweichung | keine Aktion |
+
+Änderungen: `k6a_gov_exit` + `cool_set` (jeweils 1 Zeile, `Build353:`-Marker
+im Kommentar), `K6A_GOV_VERSION` **1.5.1 → 1.5.2** (k6a-ctl `kver_ok`
+akzeptiert `1.5.*`, Gate bleibt grün; distinguierbar für Volume-Lock).
+
+Syntax-Check (clang 21.1.8, Rezept aus Local Build Notes,
+`-DK6A_GIT_HASH/-DK6A_BUILD_HASH`): **rc=0, 0 Fehler, 0 Warnungen.**
+
 ## Working Agreements
 
 - **No code comments** — rationale lives in the commit body and in `pr_info` markers.

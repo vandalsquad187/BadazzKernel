@@ -23,7 +23,7 @@ extern int kgsl_k6a_set_max_level_idx(unsigned int level);
 extern int k6a_devfreq_get_bw(const char *name, u32 *cur, u32 *min, u32 *max);
 extern int k6a_devfreq_set_bw(const char *name, u32 min, u32 max);
 
-#define K6A_GOV_VERSION       "1.5.1"
+#define K6A_GOV_VERSION       "1.5.2"
 #define K6A_GOV_KTHREAD_SLEEP_MS   250
 #define K6A_GOV_MAX_FREQS     32
 #define K6A_HIST_N            16
@@ -804,6 +804,7 @@ static int cool_cur(struct thermal_cooling_device *c, unsigned long *s) {
 static int cool_set(struct thermal_cooling_device *c, unsigned long s) {
     if (!gov) return -EINVAL;
     if (s > K6A_CD_L4) s = K6A_CD_L4;   /* thermal-core kann mehr fordern */
+    if (s < K6A_GAMING) s = K6A_GAMING; /* Build353: OFF via cooling nicht erlaubt — Schutz kann nicht stillgelegt werden; enable=0 ist der einzige legale OFF-Pfad (mit voller Freigabe) */
     mutex_lock(&gov->lock);
     set_state_locked((enum k6a_state)s);
     mutex_unlock(&gov->lock);
@@ -1373,6 +1374,7 @@ static void __exit k6a_gov_exit(void) {
     gov->enforced_max = 0;
     apply_policy();
     kgsl_k6a_set_max_level_idx(0);   /* GPU-Cap freigeben */
+    reset_bw_floors();               /* Build353: Exit-BW-Floor-Fix — Floors freigeben (war gelatcht, wie v1.3.1-Cap-Befund) */
     cancel_delayed_work_sync(&gov->freq_init_work);
     if (gov->kthread) kthread_stop(gov->kthread);
     if (gov->cooling_dev && !IS_ERR(gov->cooling_dev))
