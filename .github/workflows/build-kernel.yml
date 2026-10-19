@@ -266,7 +266,7 @@ jobs:
       - name: Upload flashable ZIP (fuer Release-Job)
         uses: actions/upload-artifact@v4
         with:
-          name: Badazz-kernel-sweet-v${{ steps.kernel_ver.outputs.short }}-build${{ github.run_number }}
+          name: Badazz-kernel-sweet-v${{ steps.kernel_ver.outputs.short }}-build${{ github.run_number }}${{ matrix.variant }}
           path: Badazz-kernel-sweet-*.zip
 
 
@@ -314,21 +314,26 @@ jobs:
           path: dist
           merge-multiple: true
 
+      - name: Release-Body vorbereiten
+        run: |
+          {
+            echo "**Badazz-kernel** für sweet (sweetin / sweet_k6a)"
+            echo
+            echo "- **Basis:** ${{ steps.ver.outputs.short }}-openela-rc1-perf"
+            echo "- **Root:** KernelSU-Next (UAPIv2)"
+            echo "- **Manager:** KernelSU-Next Manager APK installieren"
+            echo "- **2 Builds pro Push:** \`-aosp.zip\` (Stock/HOS/LOS) und \`-miui.zip\` (MIUI: stock-USB-Profil)"
+            echo
+            echo "**Changelog:**"
+            git log --oneline HEAD~10..HEAD 2>/dev/null | grep -v 'skip ci' | head -10
+            echo
+            echo "**Flashbar via OrangeFox / TWRP** — einfach das passende ZIP flashen."
+          } > body.md
+
       - name: Create Release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: v${{ steps.ver.outputs.short }}-badazz-build${{ github.run_number }}
           name: "Badazz-kernel v${{ steps.ver.outputs.short }}-badazz-build${{ github.run_number }}"
-          body: |
-            **Badazz-kernel** für sweet (sweetin / sweet_k6a)
-
-            - **Basis:** ${{ steps.ver.outputs.short }}-openela-rc1-perf
-            - **Root:** KernelSU-Next (UAPIv2)
-            - **Manager:** KernelSU-Next Manager APK installieren
-            - **2 Builds pro Push:** `-aosp.zip` (Stock/HOS/LOS) und `-miui.zip` (MIUI: stock-USB-Profil)
-
-            **Changelog:**
-            $(git log --oneline HEAD~10..HEAD 2>/dev/null | grep -v 'skip ci' | head -10)
-
-            **Flashbar via OrangeFox / TWRP** — einfach das passende ZIP flashen.
+          body_path: body.md
           files: dist/Badazz-kernel-sweet-*.zip
