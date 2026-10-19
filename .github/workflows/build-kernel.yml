@@ -43,11 +43,12 @@ jobs:
       # -------------------------------------------------------
       # Schritt 1: Repo auschecken
       # -------------------------------------------------------
-      - name: Checkout source
+      - name: Checkout source (${{ matrix.variant }})
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
           submodules: true
+          ref: ${{ matrix.ref }}
 
       # -------------------------------------------------------
       # Schritt 1b: miui-Branch auto-resync mit main (-X ours)
