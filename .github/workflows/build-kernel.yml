@@ -29,6 +29,7 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
+      workflows: write
     strategy:
       matrix:
         include:
@@ -66,7 +67,7 @@ jobs:
             echo "Branch bereits aktuell — kein merge/push noetig"
           else
             git merge -X ours --no-edit -m "Merge origin/main into miui/test [skip ci] (X-ours auto)" origin/main || { echo "::error::Merge-Konflikt — manueller merge noetig"; exit 1; }
-            git push origin HEAD:refs/heads/miui/test
+            git push origin HEAD:refs/heads/miui/test || echo "::warning::resync-push fehlgeschlagen — branch bleibt alt (build laeuft trotzdem mit gemergtem baum)"
           fi
 
       # -------------------------------------------------------
