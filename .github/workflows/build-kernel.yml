@@ -235,7 +235,7 @@ jobs:
           VERSION="${{ steps.kernel_ver.outputs.short }}"
           KSU_VER="${{ steps.ksu_ver.outputs.version }}"
           VARIANT="${{ matrix.variant }}"
-          SUFFIX="-${VARIANT}
+          SUFFIX="-${VARIANT}"
 
           cp arch/arm64/boot/Image.gz anykernel/
           cp arch/arm64/boot/dtb.img anykernel/
@@ -257,7 +257,7 @@ jobs:
           EOF
 
           cd anykernel
-          zip -r9 ../Badazz-kernel-sweet-v${VERSION}-build${{ github.run_number }}.zip * \
+          zip -r9 ../Badazz-kernel-sweet-v${VERSION}-build${{ github.run_number }}${SUFFIX}.zip * \
             -x ".git/*" "README.md"
 
       # -------------------------------------------------------
