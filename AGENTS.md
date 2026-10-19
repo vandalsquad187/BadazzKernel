@@ -1,58 +1,44 @@
 # Kernel Build Status
 
 ## Current State
-- **Repo**: `vandalsquad187/BadazzKernel` branch `main`
-- **Kernel**: `4.14.369` — `K6A_GOV v1.5.0` **as a loadable module** (`CONFIG_K6A_GOV=m`),
-  `LOCALVERSION=-BadazzKernel-sweet-v1.3.2`
-- **Local**: `main` @ **`699eee6e8`** (docs, on top of `11bc62c9a`, the **Build-345 scope**) —
-  Working tree clean. Before that `417b5f88d` (docs), `11c2ae479` (the Build-341
-  `LINUX_VERSION_CODE` revert), `786aae15a` (docs), `c42a67d07` (the Build-341 scope itself).
-- **GitHub**: CI builds on every push to `main` (release) and `miui/test` (artifacts only);
-  latest release **`v4.14.369-badazz-build346`** (2026-10-03, run `37108292063`, asset
-  `Badazz-kernel-sweet-v4.14.369-build346.zip` 19 326 097 B). Release names come from
-  `github.run_number`, so **the Build-345 scope shipped as `build346`**: run 345 was already
-  consumed by the docs-only push `417b5f88d` two days earlier. Same reason `build341`/`build342`
-  are docs-only and run 343 failed — the scope name and the release number are never guaranteed
-  to match, so **always read the number off `gh release list` / `build-info.txt`
-  (`BUILD_NUMBER`, `COMMIT_SHA`), never off the marker**. Earlier: `build345` = docs-only,
-  `build344` = the Build-341 scope, **337/338/339 are also docs-only** (their binary equals
-  Build 336).
-- **The user is running `build346`** (flashed 2026-10-03) together with **k6a-ctl v1.3.2** —
-  post-flash verification of *that* pair **passed**, see *After the flash* below.
+- **Repo**: `vandalsquad187/BadazzKernel` branch `main` @ **`fc0e5e821`** (Build 353 scope,
+  2026-10-18) — Working tree clean, gepusht. Davor `8adaa6a0f` (Build 352 scope:
+  GAMING-Schwellen 96/99/102/93 + CI-Hygiene, **geflasht & verifiziert**), `eb64498e7`
+  (Build 351 scope: bw_apply-`||mn!=want`-Fix), davor Build-350-Hygiene/Build-348-Chainer.
+- **Kernel**: `4.14.369` — **K6A_GOV v1.5.2 als Modul** (`CONFIG_K6A_GOV=m`; `LOCALVERSION=
+  -BadazzKernel-sweet-v1.3.2-build$RUN`). Build 353 = `k6a_gov_exit`-BW-Floor-Fix +
+  `cool_set`-OFF-Clamp, Syntax-Check rc=0/0/0; Timestamp: CI run `39156974548` in_progress
+  beim Verfassen (Release-Nummer folgt der `run_number`-Konvention).
+- **GitHub-Releases**: `v4.14.369-badazz-build352` (run `39094802789` success, geflasht
+  2026-10-18, Boot-Verifikation grün: `k6a_gov 1.5.1`, `cd_thresholds=96 99 102 93 …`,
+  `thresholds_source=user`, ctl-Bootwrite idempotent). Build 351 (bw_apply-Fix) = Release
+  `build351`. **Name≠Scope-Regel bleibt**: nur `gh release list` + `build-info.txt
+  (`BUILD_NUMBER`/`COMMIT_SHA`) zählen.
+- **Gerät (sweet, MIUI 13 V816.0.13.0)**: Kernel **build352** (1.5.1, ko aus Fallback
+  `/data/adb/k6a_gov.ko` — nach dem frischen Modul-Flash fehlt `MODDIR/k6a_gov.ko`,
+  `_load_gov` findet den Fallback (SHA `68187683`); beim build353-Kernel-Zip-Flash wird
+  der Fallback automatisch auf 1.5.2 aktualisiert — MODDIR-Ko nicht nachbauen).
+  Dazu **k6a-ctl v1.4.3** (on-device, 6 Dateien gesynced mit `.bak-v142`-Backups): letzte
+  Releases `v1.4.3` (Gold-Cap-UI-Toggle + `thermal_protect` wirksam), `v1.4.2`
+  (`silver_cap_gaming`/`gpu_cap_gaming`), `v1.4.1` (Schwellen 96/99/102/93 + idempotenter
+  Bootwrite, löste die „Config-Drift"-Behauptung der externen Strukturanalyse), `v1.4.0`.
+- **Sampler-Bestand auf Gerät**: `fps_samp2.sh` = **capped-Variante** (kein `echo 2304000 >
+  policy6/scaling_max_freq` mehr — Original unter `fps_samp2_uncap.bak`, r55-Befund);
+  `sf_probe.sh` v2 (pro Snapshot layer-fresh, schreibt eigenes `sf_probe.log`);
+  `arm.sh` mit 1560-s-Fenstern (Backups `arm.sh.bak-10min`). **Nie `fps_samp2.sh stop`
+  aufrufen** — „stop" ist `DUR`, laufende Instanz trunciert `fps.log` (r59a zerstört).
+- **CODM-Messstand (r50–r59, alle build351/352, eine Runde pro Messung, gleiche Karte)**:
+  Schwellen 96/99/102/93 sind der **+10…+13-med180-Hebel** (r52–r54 Ø 73,9 vs UC Ø 63,0);
+  **Lüfter** hält die Spätrunde (r56 late-med 69,6 vs r57 45,6, bt 32 vs 41,7 °C —
+  Kollaps = SoC-eigener CPU-Droop ab bt≈38 °C, k6a bleibt 100 % gaming); Trip95→98 °C
+  verschlechtert (r58: med180 63,8, bt 45,2 °C, k6a 17 % cd_l2) — **Trips bleiben auf
+  95** (Daemon-Pinning ist nicht sysfs-schraubbar); Gold-Cap-End-to-End-Test r59b:
+  `p6=1708800 in 412/412 Samples` (capped-Sampler-Modus + ctl aktiv). Details im
+  Abschnitt *Post-352-Messsituation*.
 - **KSU-Next Submodule**: `b100bd28` (`v3.3.0-95-gb100bd28`, dev-4.14-prctl-fix, UAPIv4)
-  - `KernelSU-Next/kernel/Makefile:10` has `-DKSU_VERSION=33300`, **but that is only the
-    non-git fallback**. The real value comes from `kernel/Kbuild:112` →
-    `KSU_VERSION = 35000 + KSU_GIT_VERSION`, so the **running kernel reports `38309`** and
-    `uapi=4`. Do not "fix" this — see below.
-  - Why base 35000: submodule commit `045e4fb6` changed 30000 → 35000 because the **spoofed
-    Manager sets `MINIMAL_SUPPORTED_KERNEL = 34634`**. With the old base the kernel would report
-    `30000 + 3309 = 33309`, which is below 34634 and makes the manager show "update required".
-    Verified on device 2026-10-02: `KernelSU: ksu GET_INFO: version=38309 uapi=4 flags=0x0` —
-    clears the floor, and `uapi=4` matches ksud's `uapi: 4`.
-- **Installed KSU userspace (2026-10-02)** — **not** the pin older notes mention:
-  - ksud `/data/adb/ksud` → `ksud 3.4.0-19-g2b31f718 (uapi: 4)`, from
-    KernelSU-Next CI run [`36750739326`](https://github.com/KernelSU-Next/KernelSU-Next/actions/runs/36750739326)
-    (head `2b31f718`, *manager: Check secure screen lock when enabling App lock*, success).
-  - Manager: `versionName=v3.4.0-19-g2b31f718-spoofed`, installed 2026-10-02 08:11.
-    **The spoofed build has a randomised applicationId — currently `gojcms.hgelex.jabkht`.**
-    `pm list packages | grep ksu` therefore finds **nothing**; look it up by `versionName` via
-    `dumpsys package <pkg> | grep versionName`, or hunt the newest entry in `ls -1td /data/app/*/*`.
-  - `kernel/Makefile:10`'s `33300` and any doc quoting it as "the version" are stale.
-- **Open blockers**: none. All four USB faults are closed. Fault 4 (whole-SoC reset on USB-C
-  attach) **closed in Build 336 and verified on device** — `USB_STATE=CONFIGURED`, no oops.
-  Fault 2 (OTG host) **no longer reproduces on Build 336** (stick enumerates, `usb-storage` +
-  vold mount work). Fault 3 (charger `APSD=OCP` rerun loop) **closed 2026-10-02** by a 500 s
-  capture on Build 338 — 0× `APSD=OCP` (see *USB Debugging*). Fault 1's storm stopped in
-  Build 320/331. **Build 340 governor fixes landed, flashed and accepted 2026-10-02**;
-  **k6a-ctl v1.2.0 flashed the same day**. **Build-341 scope flashed as `build344` and accepted
-  2026-10-03** — `CONFIG_K6A_GOV=m` + the version lock + finding 1 of *Build 341 scope*, with
-  k6a-ctl **v1.3.1**. Finding 2 (`LINUX_VERSION_CODE`) was measured, **tried, and reverted** —
-  it broke CI, see its section. Finding 3 (sysfs denied to the governor thread) was surfaced by
-  that very flash and fixed by a `sepolicy.rule`, verified after a reboot. Nothing outstanding.
-- **Build-345 scope (flashed as `build346` 2026-10-03, passed)** — K1–K7 + D, see its own
-  section below. Verified locally by compiling `drivers/thermal/` with the in-tree config
-  (`k6a_gov.o`, `k6a_features.o`, zero warnings) before pushing; CI was the real gate (green,
-  run `37108292063`); the post-flash checklist then passed on device.
+  - Runtime meldet `38309`/`uapi=4` (Kbuild-Basis 35000, Manager-Floor 34634) — nicht
+    „fixen", siehe KSU-Section.
+- **USB-Faults**: alle vier geschlossen (Build 336/338/348-Kette).
 - **User speaks German**; device reports go out in German
 
 ## Repo & Docs Layout
@@ -1546,6 +1532,47 @@ akzeptiert `1.5.*`, Gate bleibt grün; distinguierbar für Volume-Lock).
 
 Syntax-Check (clang 21.1.8, Rezept aus Local Build Notes,
 `-DK6A_GIT_HASH/-DK6A_BUILD_HASH`): **rc=0, 0 Fehler, 0 Warnungen.**
+
+## Post-352-Messsituation (Thermik, Deckel, FAN — r50–r59, 2026-10-18)
+
+Alle Runden: gleiche Karte, Discharging, `arm.sh`-Gate (1560-s-Fenster, med180
+via `validate.py`, Minute-Buckets + late-med 600–Ende separat; build351/352-Kernel,
+Schwellen wie angegeben, 1 Runde = 1 Messung).
+
+| Runde | Bedingung | med180 | late-med | bt max | k6a / p6-max |
+|---|---|---|---|---|---|
+| r50/r51 | uncapped, stock-Schwellen | 66,5 / 62,0 | — | — | k6a ctx: 20–39 % `cd_l2` |
+| r52–r54 | uncapped, **96/99/102/93** | 70,2 / 74,5 / 77,0 (Ø 73,9) | — | — | **100 % gaming**, p6 100 % @2304 |
+| r55 | „K-A" (Kappe vermutet) | 65,2 | — | — | **eigl. uncapped** — Sampler-uncap-Write (hp_stop `echo 2304000 > p6/scaling_max_freq`) hebt die ctl-Kappe lautlos auf |
+| r56 | **FAN**, uncapped | **82,5 (Best)** | **69,6** | 32,3 °C | 100 % gaming |
+| r57 | **NoFan**, uncapped | 72,0 | **45,6** | 41,7 °C | 100 % gaming; **Kollaps min 11→**: f6 2,30→2,25 GHz, bt>38 °C |
+| r58 | NoFan, Trip95→**98 °C** | 63,8 ↓↓ | 38,6 ↓ | **45,2 °C ↑** | 17 % `cd_l2` (p6@1708800) — **TripWrite blieb 98 stehen, Pinning trotzdem ≤95,7** |
+| r59b/r59c | **FAN, Gold-Cap 1708800** (capped-Sampler) | **fehlt** (SF `frame=` friert ein — `lay`-Counter statisch; sf_probe v1 bricht nach ~5 s ab) | — | 28,7 / 30,1 °C | **p6=1708800 in 412/412** — Cap end-to-end für erste Zeit schwarz auf weiß |
+
+Befunde aus dieser Serie:
+1. **Die 96-°C-l2-Schwelle ist der FPS-Hebel** (r52–r54 vs r50/r51), nicht die Gold-Kappe.
+2. **Lüfter = die NoFan-Alternative**: SoC-CPU-Droop ab bt≈38 °C ist der Kollaps-Mechanismus
+   (nicht k6a-CD, nicht Trip-Pinning); TRIP98 macht es schlimmer (Akkuhebel). Trips bleiben
+   auf 95 — Daemon-Pinning ist **nicht per sysfs-Trip schraubbar** (Write bleibt, Pin bleibt).
+3. **Gold-Cap end-to-end klappt seit v1.4.3/capped-Sampler** (r59b: 100 % @1708800, dt.
+   Cap-Enforcement bestätigt); med180-Zahl der FAN+Cap-Zelle fehlt → **r59d** (gleiche
+   Bedingung, `sf_probe.sh` **v2** pro-Snapshot-layer-fresh) ist noch offen, um den
+   Gold-Cap-Vergleich mit Zahlen (u. a. r56 82,5 UNCAPPED) abzuschließen.
+4. Instrumente: `fps.log`-`lay`-Frame-Counter friert seit >r59a ein (SF `--latency` /
+   BLAST) — **fps-Quelle ist `sf_probe.log`** (Timestamps). `sflat_all`-Fragmente ≈60 fps
+  -Avg über 306 frames (r59b), med180≈60 – **indikativ, nicht normierbar** (n-per-Window-
+   Festival). Die Datensätze r59a (abgebrochen/truncated, „Runde nie geführt") und r59b/c
+   bleiben ohne med180-Zahl — Messung gilt als **nicht referenzierbar**.
+
+Messmethode-Änderungen:
+- `fps_samp2.sh` (Gerät) = capped-Variante; `fps_samp2_uncap.bak` = Original. Sobald ein
+  Gold-Cap-uncapped-R Durchlauf gewünscht ist, Rückkehr über `cp fps_samp2_uncap.bak
+  fps_samp2.sh` **vor** dem Arm — **nie während des Samplings**.
+- `sf_probe.sh` v2 (Gerät): `fg=COD` → pro Snapshot Layername frisch bestimmen + `--latency
+  <LM>` mit `lmlen/rc/rows`-Markern → robust gegen zerstörte SurfaceView-Layernamen.
+- **NIEMALS** `sh fps_samp2.sh …` manuell aufrufen („stop" = `DUR`-Argument!): trunciert
+  `fps.log` (r59a-Befund). Stop via `kill -INT <pid>` (Trap → `hp_cont` sauber), im Zweifel
+  `arm.sh`-Neustart, oder `pgrep -f fps_samp2 && kill -INT`.
 
 ## Working Agreements
 
