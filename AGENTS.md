@@ -54,15 +54,26 @@
 
 ## CI (`build-kernel.yml`)
 
-- Trigger: push to `main` (release) / `miui/test` (artifact only) / `workflow_dispatch`
-- Toolchain: distro `gcc-aarch64-linux-gnu` + `gcc-arm-linux-gnueabihf` (GCC, **not** clang), ccache
-- Steps: `make sweet_defconfig` → inject `CONFIG_LOCALVERSION=…-build${run_number}` → `olddefconfig`
+- Trigger: push to `main` (full dual-build + release) / `miui/**` (artifact only, no release) / `workflow_dispatch`
+- **Dual-Build (seit 2026-10-19): 2 Builds pro Push** — Matrix:
+  - `aosp` → ref `main` — für Stock/HOS/AOSP-ROMs (custom-USB-Profil aktiv)
+  - `miui` → ref `miui/test` — für MIUI/HyperOS (stock-USB-Profil via `sweet_miui.config`-Merge + Branch-Reverts)
+- **miui auto-resync**: der miui-Job merkt `origin/main` mit `git merge -X ours --no-edit` in
+  `miui/test` und pusht zurück (Merge-Commit-Message enthält `[skip ci]`, damit keine
+  Trigger-Kaskade entsteht). Konflikte in den stock-blockierten USB-Dateien folgen
+  dem MIUI-Profil; unkollidierte main-Änderungen fließen normal ein. Harte Merge-Fails
+  brechen den Job sichtbar (manueller merge erforderlich).
+- ccache-Keys pro Variante (`-aosp` / `-miui`) — untereinander nicht verdrängend.
+- Config-Pfad: `make sweet_defconfig` (aosp) / `merge_config.sh sweet_defconfig sweet_miui.config`
+  (miui) → inject `CONFIG_LOCALVERSION=…-build${run_number}-${variant}` → `olddefconfig`
   → validate required configs (`KSU`, `KSU_SUSFS`, `KSU_TAMPER_SYSCALL_TABLE`, `K6A_GOV`,
   `NFC_NQ_PN80T`, `PHY_QCOM_QUSB2`) → `make Image.gz dtb.img dtbo.img`
   → verify `CONFIG_PHY_QCOM_QUSB2` survived + `phy-qcom-qusb2.o` was built
-  → copy into `anykernel/` + `build-info.txt` → zip `Badazz-kernel-sweet-v${VERSION}-build${run_number}.zip`
-  → release `v${VERSION}-badazz-build${run_number}`
-- Build time ~13–17 min; `gh run list` / `gh run watch <id>` to follow
+  → zips `Badazz-kernel-sweet-v${VERSION}-build${run_number}-aosp.zip` / `…-miui.zip`
+  (inkl. `build-info.txt` mit `VARIANT=`) → beide als artifacts
+- **Release** (sepa. Job `needs: [build]`, nur auf `main`): EIN Release
+  `v${VERSION}-badazz-build${run_number}` mit **beiden zips** angehängt.
+- Build time ~13–17 min warm (einmalig ~25–35 min cold für miui-ccache); `gh run list` / `gh run watch <id>` to follow
 
 ## USB Debugging (Build 300–336)
 

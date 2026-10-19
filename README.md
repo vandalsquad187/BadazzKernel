@@ -131,8 +131,14 @@ cp arch/arm64/boot/Image.gz arch/arm64/boot/dtb.img arch/arm64/boot/dtbo.img any
 cd anykernel && zip -r9 ../BadazzKernel-sweet-k6a-gov-v1.3.2.zip . -x "*.git*"
 ```
 
-CI builds automatically on every push to `main` (release with build number) and to `miui/test` (artifacts only).
-Runtime ~13–17 min: `gh run list` / `gh run watch <id>`.
+CI builds automatically on every push to `main`: **two builds per push** —
+`…-buildXX-aosp.zip` (Stock/HOS/AOSP — custom-USB profile) and
+`…-buildXX-miui.zip` (MIUI/HyperOS — stock-USB profile, via `sweet_miui.config`
+plus branch reverts). Both land in **one Release**. The `miui` build auto-resyncs
+`miui/test` with `main` using `merge -X ours` (MIUI stock-USB blockade wins
+conflicts; non-conflicting main changes flow in normally, merge commit is
+`[skip ci]` to avoid trigger cascades). Pushes to `miui/**` only produce artifacts
+(no release). Runtime ~13–17 min warm; `gh run list` / `gh run watch <id>`.
 
 ---
 
