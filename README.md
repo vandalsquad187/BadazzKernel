@@ -105,7 +105,8 @@ exactly what makes this trap invisible.
 
 ## Installation
 
-1. Download **Release** from [GitHub Releases](https://github.com/vandalsquad187/BadazzKernel/releases) (`Badazz-kernel-sweet-v4.14.369-buildXX.zip` or `-miui.zip` for HyperOS)
+1. Download **Release** from [GitHub Releases](https://github.com/vandalsquad187/BadazzKernel/releases) —
+   two zips per release: `…-buildXX-aosp.zip` (Stock/HOS/AOSP) and `…-buildXX-miui.zip` (HyperOS)
 2. Flash ZIP via **OrangeFox / TWRP** (AnyKernel3). The zip also copies **`k6a_gov.ko`** to
    `/data/adb/k6a_gov.ko` (`/` is dm-verity read-only, so the module cannot live in `/system`).
    Do **not** use `ksud module install` for upgrades — `su -c` here runs with `CapBnd=0` and it
