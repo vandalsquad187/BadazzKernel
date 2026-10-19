@@ -352,6 +352,15 @@ static void smblib_notify_extcon_props(struct smb_charger *chg, int id)
 
 static void smblib_notify_device_mode(struct smb_charger *chg, bool enable)
 {
+	/*
+	 * Build 320: this is the only gate between APSD and
+	 * extcon_set_state_sync(EXTCON_USB) -> dwc3_msm_vbus_notifier().
+	 * smblib_handle_apsd_done() only calls it for SDP/CDP/FLOAT, so
+	 * DCP/OCP chargers never reach the dwc3 core - seeing no
+	 * vbus_notifier line next to an APSD line is expected, not a bug.
+	 */
+	pr_info("Build320: notify_device_mode extcon_usb=%d\n", enable);
+
 	if (enable)
 		smblib_notify_extcon_props(chg, EXTCON_USB);
 
@@ -7329,6 +7338,7 @@ irqreturn_t usb_plugin_irq_handler(int irq, void *data)
 	struct smb_irq_data *irq_data = data;
 	struct smb_charger *chg = irq_data->parent_data;
 
+	pr_info("Build333: usbplug_irq enter\n");
 	if (chg->pd_hard_reset)
 		smblib_usb_plugin_hard_reset_locked(chg);
 	else
@@ -8005,6 +8015,8 @@ static void smblib_handle_apsd_done(struct smb_charger *chg, bool rising)
 	case SDP_CHARGER_BIT:
 	case CDP_CHARGER_BIT:
 	case FLOAT_CHARGER_BIT:
+		pr_info("Build320: apsd=%s -> will notify dwc3 (SDP/CDP/FLOAT)\n",
+			apsd_result->name);
 		if (chg->use_extcon) {
 			if (!chg->dcin_uusb_over_gpio_en) {
 				smblib_notify_device_mode(chg, true);
@@ -8016,6 +8028,8 @@ static void smblib_handle_apsd_done(struct smb_charger *chg, bool rising)
 		break;
 	case OCP_CHARGER_BIT:
 	case DCP_CHARGER_BIT:
+		pr_info("Build320: apsd=%s -> no dwc3 notification (expected)\n",
+			apsd_result->name);
 		break;
 	default:
 		break;
@@ -8540,6 +8554,7 @@ irqreturn_t typec_or_rid_detection_change_irq_handler(int irq, void *data)
 	struct smb_irq_data *irq_data = data;
 	struct smb_charger *chg = irq_data->parent_data;
 
+	pr_info("Build333: rid_irq enter conn=%d\n", chg->connector_type);
 	smblib_dbg(chg, PR_INTERRUPT, "IRQ: %s\n", irq_data->name);
 
 	if (chg->connector_type == POWER_SUPPLY_CONNECTOR_MICRO_USB) {
@@ -8586,13 +8601,17 @@ irqreturn_t typec_state_change_irq_handler(int irq, void *data)
 	int typec_mode;
 	static bool rara = false;
 
+	pr_info("Build333: typec_irq enter conn=%d\n", chg->connector_type);
 	if (chg->connector_type == POWER_SUPPLY_CONNECTOR_MICRO_USB) {
 		smblib_dbg(chg, PR_INTERRUPT,
 				"Ignoring for micro USB\n");
 		return IRQ_HANDLED;
 	}
 
+	pr_info("Build332: typec_irq get_mode enter\n");
 	typec_mode = smblib_get_prop_typec_mode(chg);
+	pr_info("Build332: typec_irq mode=%d old=%d sink_src=%d\n",
+		typec_mode, chg->typec_mode, chg->sink_src_mode);
 
 	if (gpio_is_valid(chg->uart_en_gpio)) {
 		if (typec_mode == POWER_SUPPLY_TYPEC_SINK_AUDIO_ADAPTER)
@@ -8609,6 +8628,7 @@ irqreturn_t typec_state_change_irq_handler(int irq, void *data)
 	smblib_dbg(chg, PR_OEM, "IRQ: cc-state-change; Type-C %s detected\n",
 				smblib_typec_mode_name[chg->typec_mode]);
 
+	pr_info("Build332: typec_irq pre-notify mode=%d\n", chg->typec_mode);
 	power_supply_changed(chg->usb_psy);
 	if (chg->dual_role)
 		dual_role_instance_changed(chg->dual_role);
@@ -8625,6 +8645,7 @@ irqreturn_t typec_state_change_irq_handler(int irq, void *data)
 		}
 	}
 
+	pr_info("Build332: typec_irq done mode=%d\n", chg->typec_mode);
 	return IRQ_HANDLED;
 }
 
@@ -8667,6 +8688,7 @@ irqreturn_t typec_attach_detach_irq_handler(int irq, void *data)
 	bool attached = false;
 	int rc;
 
+	pr_info("Build333: attach_irq enter\n");
 	smblib_dbg(chg, PR_INTERRUPT, "IRQ: %s\n", irq_data->name);
 
 	rc = smblib_read(chg, TYPE_C_STATE_MACHINE_STATUS_REG, &stat);

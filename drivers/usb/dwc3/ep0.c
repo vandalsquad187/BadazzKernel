@@ -86,17 +86,24 @@ static int dwc3_ep0_start_trans(struct dwc3_ep *dep)
 
 	dwc = dep->dwc;
 
+	dev_err(dwc->dev, "Build327: ep0_start_trans enter flags=%x state=%u\n",
+		dep->flags, dwc->ep0state);
+
 	memset(&params, 0, sizeof(params));
 	params.param0 = upper_32_bits(dwc->ep0_trb_addr);
 	params.param1 = lower_32_bits(dwc->ep0_trb_addr);
 
 	ret = dwc3_send_gadget_ep_cmd(dep, DWC3_DEPCMD_STARTTRANSFER, &params);
+	dev_err(dwc->dev, "Build327: ep0_start_trans ret=%d\n", ret);
 	if (ret < 0)
 		return ret;
 
 	dep->flags |= DWC3_EP_BUSY;
 	dep->resource_index = dwc3_gadget_ep_get_transfer_index(dep);
 	dwc->ep0_next_event = DWC3_EP0_COMPLETE;
+
+	dev_err(dwc->dev, "Build328: ep0_start_trans ok flags=%x ridx=%u\n",
+		dep->flags, dep->resource_index);
 
 	return 0;
 }
@@ -253,15 +260,48 @@ out:
 void dwc3_ep0_stall_and_restart(struct dwc3 *dwc)
 {
 	struct dwc3_ep		*dep;
+	u32			dale;
+	u32			flags;
+
+	/*
+	 * Build 321: only claim the endpoints are enabled when the
+	 * hardware agrees. This runs from __dwc3_gadget_ep0_set_halt()
+	 * (f_fs __ffs_ep0_stall(), set_wedge) and from the EP0 error paths,
+	 * i.e. also while the gadget is stopped - DALEPENA=0,
+	 * softconnect=0 - where the unconditionally written
+	 * DWC3_EP_ENABLED used to poison dep->flags. The next
+	 * __dwc3_gadget_start() then skipped DEPSTARTCFG/DEPXFERCFG and the
+	 * DALEPENA write entirely, EP0 stayed disabled in hardware and the
+	 * first STARTTRANSFER came back as DEPEVT_TRANSFER_NO_RESOURCE
+	 * (WARN at dwc3_ep0_out_start, no EP0 SETUP TRB, host reset storm).
+	 *
+	 * Observed Build 320: both eps[0] and eps[1] read flags=1 with
+	 * DALEPENA=00000000 at the start at t=3578, which no other code
+	 * path can produce (the only other writer of both halves is
+	 * __dwc3_gadget_ep_enable(), and it sets DALEPENA in the same step).
+	 */
+	dale = dwc3_readl(dwc->regs, DWC3_DALEPENA);
+	flags = (dale & (DWC3_DALEPENA_EP(0) | DWC3_DALEPENA_EP(1))) ==
+		(DWC3_DALEPENA_EP(0) | DWC3_DALEPENA_EP(1)) ?
+		DWC3_EP_ENABLED : 0;
+
+	if (!flags)
+		dev_err(dwc->dev,
+			"Build321: stall_and_restart with EP0 disabled DALEPENA=%08x softconnect=%d connected=%d ep0state=%d\n",
+			dale, dwc->softconnect, dwc->connected, dwc->ep0state);
+
+	dev_err(dwc->dev,
+		"Build327: stall_restart flags=%x DALEPENA=%08x softconn=%d conn=%d state=%u\n",
+		flags, dale, dwc->softconnect, dwc->connected, dwc->ep0state);
 
 	/* reinitialize physical ep1 */
 	dep = dwc->eps[1];
-	dep->flags = DWC3_EP_ENABLED;
+	dep->flags = flags;
 
 	/* stall is always issued on EP0 */
 	dep = dwc->eps[0];
 	__dwc3_gadget_ep_set_halt(dep, 1, false);
-	dep->flags = DWC3_EP_ENABLED;
+	dep->flags = flags;
 	dwc->delayed_status = false;
 
 	if (!list_empty(&dep->pending_list)) {
@@ -275,7 +315,10 @@ void dwc3_ep0_stall_and_restart(struct dwc3 *dwc)
 	}
 
 	dwc->ep0state = EP0_SETUP_PHASE;
-	dwc3_ep0_out_start(dwc);
+	if (flags)
+		dwc3_ep0_out_start(dwc);
+	else
+		complete(&dwc->ep0_in_setup);
 }
 
 int __dwc3_gadget_ep0_set_halt(struct usb_ep *ep, int value)
@@ -307,6 +350,9 @@ void dwc3_ep0_out_start(struct dwc3 *dwc)
 {
 	struct dwc3_ep			*dep;
 	int				ret;
+
+	dev_err(dwc->dev, "Build327: ep0_out_start softconn=%d connected=%d state=%u\n",
+		dwc->softconnect, dwc->connected, dwc->ep0state);
 
 	complete(&dwc->ep0_in_setup);
 
@@ -703,6 +749,9 @@ static int dwc3_ep0_set_config(struct dwc3 *dwc, struct usb_ctrlrequest *ctrl)
 
 	cfg = le16_to_cpu(ctrl->wValue);
 
+	dev_err(dwc->dev, "Build327: ep0_set_config cfg=%u state=%d conn=%d\n",
+		cfg, state, dwc->connected);
+
 	switch (state) {
 	case USB_STATE_DEFAULT:
 		return -EINVAL;
@@ -949,12 +998,19 @@ static void dwc3_ep0_inspect_setup(struct dwc3 *dwc,
 	 * Restart USB gadget if such delayed SETUP packet is inspected.
 	 */
 	if (!dwc->connected) {
+		dev_err(dwc->dev, "Setup_restart: SETUP while !connected\n");
 		dbg_event(0x0, "Setup_restart", 0);
 		dwc3_notify_event(dwc, DWC3_CONTROLLER_RESTART_USB_SESSION, 0);
 		return;
 	}
 
 	trace_dwc3_ctrl_req(ctrl);
+
+	dev_err(dwc->dev,
+		"Build327: SETUP %02x %02x val=%04x idx=%04x len=%04x conn=%d state=%u\n",
+		ctrl->bRequestType, ctrl->bRequest, le16_to_cpu(ctrl->wValue),
+		le16_to_cpu(ctrl->wIndex), le16_to_cpu(ctrl->wLength),
+		dwc->connected, dwc->ep0state);
 
 	len = le16_to_cpu(ctrl->wLength);
 	if (!len) {
@@ -975,6 +1031,9 @@ static void dwc3_ep0_inspect_setup(struct dwc3 *dwc,
 
 	if (ret == USB_GADGET_DELAYED_STATUS)
 		dwc->delayed_status = true;
+
+	dev_err(dwc->dev, "Build327: SETUP done req=%02x ret=%d delayed=%d\n",
+		ctrl->bRequest, ret, dwc->delayed_status);
 
 out:
 	/*
@@ -1061,6 +1120,9 @@ static void dwc3_ep0_complete_status(struct dwc3 *dwc,
 	struct dwc3_trb		*trb;
 	u32			status;
 
+	dev_err(dwc->dev, "Build328: complete_status state=%u\n",
+		dwc->ep0state);
+
 	dep = dwc->eps[0];
 	trb = dwc->ep0_trb;
 
@@ -1098,6 +1160,9 @@ static void dwc3_ep0_xfer_complete(struct dwc3 *dwc,
 			const struct dwc3_event_depevt *event)
 {
 	struct dwc3_ep		*dep = dwc->eps[event->endpoint_number];
+
+	dev_err(dwc->dev, "Build327: ep0_xfer_complete state=%u status=%u\n",
+		dwc->ep0state, event->status);
 
 	dep->flags &= ~DWC3_EP_BUSY;
 	dep->resource_index = 0;
@@ -1228,6 +1293,7 @@ static void __dwc3_ep0_do_control_status(struct dwc3 *dwc, struct dwc3_ep *dep)
 	int ret;
 
 	ret = dwc3_ep0_start_control_status(dep);
+	dev_err(dwc->dev, "Build328: do_control_status ret=%d\n", ret);
 	if (WARN_ON_ONCE(ret))
 		dbg_event(dep->number, "ECTRLSTATUS", ret);
 }
@@ -1275,6 +1341,9 @@ static void dwc3_ep0_xfernotready(struct dwc3 *dwc,
 
 	epnum = event->endpoint_number;
 	dep = dwc->eps[epnum];
+
+	dev_err(dwc->dev, "Build327: ep0_xfernotready status=%u ep=%u state=%u\n",
+		event->status, epnum, dwc->ep0state);
 
 	switch (event->status) {
 	case DEPEVT_STATUS_CONTROL_DATA:

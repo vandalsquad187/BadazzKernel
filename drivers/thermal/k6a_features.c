@@ -17,7 +17,9 @@
 #include <linux/slab.h>
 
 #define K6A_KERNEL_VERSION (LINUX_VERSION_CODE)
-#define K6A_GIT_HASH "full-synergy"
+#ifndef K6A_GIT_HASH
+#error "K6A_GIT_HASH missing - drivers/thermal/Makefile must pass subdir-ccflags-y"
+#endif
 
 struct k6a_feature_flags {
 	bool cpu_floor;
@@ -117,9 +119,10 @@ static int __init k6a_features_init(void)
 		return ret;
 	}
 
-	pr_info("k6a_features: initialized (cpu_floor=%d, gpu_floor=%d, msm_perf=%d, thermal_writable=%d, susfs=%d, version=%u)\n",
+	pr_info("k6a_features: initialized (cpu_floor=%d, gpu_floor=%d, msm_perf=%d, thermal_writable=%d, susfs=%d, version=%u, git_hash=%s)\n",
 		k6a_flags.cpu_floor, k6a_flags.gpu_floor, k6a_flags.msm_performance,
-		k6a_flags.thermal_writable, k6a_flags.susfs_active, k6a_flags.kernel_version);
+		k6a_flags.thermal_writable, k6a_flags.susfs_active, k6a_flags.kernel_version,
+		k6a_flags.git_hash);
 
 	return 0;
 }

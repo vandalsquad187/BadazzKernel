@@ -397,9 +397,14 @@ int dwc3_send_gadget_ep_cmd(struct dwc3_ep *dep, unsigned cmd,
 	u32			timeout = 5000;
 	u32			saved_config = 0;
 	u32			reg;
+	ktime_t			t0;
 
 	int			cmd_status = 0;
 	int			ret = -EINVAL;
+
+	if (dep->number <= 1)
+		dev_err(dwc->dev, "Build327: ep_cmd enter cmd=%08x speed=%u state=%u\n",
+			cmd, dwc->gadget.speed, dwc->ep0state);
 
 	/*
 	 * When operating in USB 2.0 speeds (HS/FS), if GUSB2PHYCFG.ENBLSLPM or
@@ -452,7 +457,13 @@ int dwc3_send_gadget_ep_cmd(struct dwc3_ep *dep, unsigned cmd,
 	else
 		cmd |= DWC3_DEPCMD_CMDACT;
 
+	t0 = ktime_get();
 	dwc3_writel(dep->regs, DWC3_DEPCMD, cmd);
+	if (dep->number <= 1)
+		dev_err(dwc->dev,
+			"Build327: ep_cmd wrote cmd=%08x u2phy=%08x saved=%08x\n",
+			cmd, dwc3_readl(dwc->regs, DWC3_GUSB2PHYCFG(0)),
+			saved_config);
 	do {
 		reg = dwc3_readl(dep->regs, DWC3_DEPCMD);
 		if (!(reg & DWC3_DEPCMD_CMDACT)) {
@@ -485,12 +496,51 @@ int dwc3_send_gadget_ep_cmd(struct dwc3_ep *dep, unsigned cmd,
 
 			break;
 		}
+		udelay(10);
 	} while (--timeout);
 
 	if (timeout == 0) {
+		u32 depcmd, par0, par1, par2, gctl, dctl, dsts, dcfg, dale,
+		    usb2phy, gsnps, gevten, devten, evsiz, evcnt;
+		int act, st;
+
 		ret = -ETIMEDOUT;
-		dev_err(dwc->dev, "%s command timeout for %s\n",
-			dwc3_gadget_ep_cmd_string(cmd), dep->name);
+		dev_err(dwc->dev,
+			"%s command timeout for %s (B315: waited %lld us, budget=5000x(read+10us))\n",
+			dwc3_gadget_ep_cmd_string(cmd), dep->name,
+			(long long)ktime_us_delta(ktime_get(), t0));
+
+		/* Build 307: dump command-interface state at timeout.
+		 * DEPCMD CMDACT stuck=1 → write landed but HW not completing
+		 * (clock/reset/command engine hung).
+		 * DEPCMD CMDACT=0 with ST=0 → write never landed (wrong
+		 * dep->regs / AXI issue) or already completed with 0.
+		 */
+		depcmd = dwc3_readl(dep->regs, DWC3_DEPCMD);
+		par0 = dwc3_readl(dep->regs, DWC3_DEPCMDPAR0);
+		par1 = dwc3_readl(dep->regs, DWC3_DEPCMDPAR1);
+		par2 = dwc3_readl(dep->regs, DWC3_DEPCMDPAR2);
+		gctl = dwc3_readl(dwc->regs, DWC3_GCTL);
+		dctl = dwc3_readl(dwc->regs, DWC3_DCTL);
+		dsts = dwc3_readl(dwc->regs, DWC3_DSTS);
+		dcfg = dwc3_readl(dwc->regs, DWC3_DCFG);
+		dale = dwc3_readl(dwc->regs, DWC3_DALEPENA);
+		usb2phy = dwc3_readl(dwc->regs, DWC3_GUSB2PHYCFG(0));
+		gsnps = dwc3_readl(dwc->regs, DWC3_GSNPSID);
+		gevten = dwc3_readl(dwc->regs, DWC3_GEVTEN);
+		devten = dwc3_readl(dwc->regs, DWC3_DEVTEN);
+		evsiz = dwc3_readl(dwc->regs, DWC3_GEVNTSIZ(0));
+		evcnt = dwc3_readl(dwc->regs, DWC3_GEVNTCOUNT(0));
+		act = !!(depcmd & DWC3_DEPCMD_CMDACT);
+		st = DWC3_DEPCMD_STATUS(depcmd);
+		dev_err(dwc->dev,
+			"ep cmd dump: dep=%s wcmd=%08x rcmd=%08x act=%d st=%d par0=%08x par1=%08x par2=%08x GCTL=%08x DCTL=%08x DSTS=%08x HLT=%u DCFG=%08x DALE=%08x U2PHY=%08x speed=%u rev=%08x GSNPS=%08x GEVTEN=%08x DEVTEN=%08x EVSIZ=%08x EVCNT=%08x ep_off=%lx\n",
+			dep->name, cmd, depcmd, act, st, par0, par1, par2,
+			gctl, dctl, dsts, !!(dsts & DWC3_DSTS_DEVCTRLHLT),
+			dcfg, dale, usb2phy, dwc->gadget.speed,
+			dwc->revision, gsnps, gevten, devten, evsiz, evcnt,
+			(unsigned long)dep->regs);
+
 		if (DWC3_DEPCMD_CMD(cmd) != DWC3_DEPCMD_ENDTRANSFER) {
 			dwc->ep_cmd_timeout_cnt++;
 			dwc3_notify_event(dwc,
@@ -502,6 +552,10 @@ int dwc3_send_gadget_ep_cmd(struct dwc3_ep *dep, unsigned cmd,
 	trace_dwc3_gadget_ep_cmd(dep, cmd, params, cmd_status);
 
 	if (ret == 0) {
+		/* Build 320: keep ep_cmd_timeout_cnt meaningful - it is a
+		 * consecutive-failure count, not a lifetime total. */
+		if (dwc->ep_cmd_timeout_cnt)
+			dwc->ep_cmd_timeout_cnt = 0;
 		switch (DWC3_DEPCMD_CMD(cmd)) {
 		case DWC3_DEPCMD_STARTTRANSFER:
 			dep->flags |= DWC3_EP_TRANSFER_STARTED;
@@ -520,6 +574,10 @@ int dwc3_send_gadget_ep_cmd(struct dwc3_ep *dep, unsigned cmd,
 		reg |= saved_config;
 		dwc3_writel(dwc->regs, DWC3_GUSB2PHYCFG(0), reg);
 	}
+
+	if (dep->number <= 1)
+		dev_err(dwc->dev, "Build327: ep_cmd done cmd=%08x ret=%d st=%d\n",
+			cmd, ret, cmd_status);
 
 	return ret;
 }
@@ -596,14 +654,16 @@ static void dwc3_free_trb_pool(struct dwc3_ep *dep)
 }
 
 static int dwc3_gadget_set_xfer_resource(struct dwc3 *dwc, struct dwc3_ep *dep);
+static int dwc3_gadget_assign_xfer_resources(struct dwc3 *dwc);
 
 /**
  * dwc3_gadget_start_config - configure ep resources
  * @dwc: pointer to our controller context structure
  * @dep: endpoint that is being enabled
  *
- * Issue a %DWC3_DEPCMD_DEPSTARTCFG command to @dep. After the command's
- * completion, it will set Transfer Resource for all available endpoints.
+ * Issue a %DWC3_DEPCMD_DEPSTARTCFG command to @dep. Transfer resources for
+ * all endpoints are assigned later by dwc3_gadget_assign_xfer_resources(),
+ * after ep0 SETEPCFG (Build 309 reorder).
  *
  * The assignment of transfer resources cannot perfectly follow the data book
  * due to the fact that the controller driver does not have all knowledge of the
@@ -635,7 +695,6 @@ static int dwc3_gadget_start_config(struct dwc3 *dwc, struct dwc3_ep *dep)
 {
 	struct dwc3_gadget_ep_cmd_params params;
 	u32			cmd;
-	int			i;
 	int			ret;
 
 	if (dep->number)
@@ -647,6 +706,14 @@ static int dwc3_gadget_start_config(struct dwc3 *dwc, struct dwc3_ep *dep)
 	ret = dwc3_send_gadget_ep_cmd(dep, cmd, &params);
 	if (ret)
 		return ret;
+
+	return 0;
+}
+
+static int dwc3_gadget_assign_xfer_resources(struct dwc3 *dwc)
+{
+	int			i;
+	int			ret;
 
 	for (i = 0; i < DWC3_ENDPOINTS_NUM; i++) {
 		struct dwc3_ep *dep = dwc->eps[i];
@@ -751,11 +818,19 @@ static int dwc3_gadget_set_ep_config(struct dwc3 *dwc, struct dwc3_ep *dep,
 
 static int dwc3_gadget_set_xfer_resource(struct dwc3 *dwc, struct dwc3_ep *dep)
 {
+	const struct usb_endpoint_descriptor *desc = dep->endpoint.desc;
 	struct dwc3_gadget_ep_cmd_params params;
 
 	memset(&params, 0x00, sizeof(params));
 
 	params.param0 = DWC3_DEPXFERCFG_NUM_XFER_RES(1);
+
+	dev_err(dwc->dev,
+			"pre-DEPXFERCFG %s num=%u dir=%u flags=%x maxp=%u rsc=%u p0=%08x p1=%08x p2=%08x\n",
+			dep->name, dep->number, dep->direction, dep->flags,
+			desc ? usb_endpoint_maxp(desc) : 0,
+			dep->resource_index, params.param0, params.param1,
+			params.param2);
 
 	return dwc3_send_gadget_ep_cmd(dep, DWC3_DEPCMD_SETTRANSFRESOURCE,
 			&params);
@@ -779,6 +854,44 @@ static int __dwc3_gadget_ep_enable(struct dwc3_ep *dep,
 	u32			reg;
 	int			ret;
 
+	/*
+	 * Build 321: reconcile the software flag with the hardware.
+	 *
+	 * Everything below (DEPSTARTCFG, DEPXFERCFG, DALEPENA, TRB ring,
+	 * wait_end_transfer) is guarded on dep->flags & DWC3_EP_ENABLED.
+	 * Two paths leave that flag set while DALEPENA has the endpoint
+	 * disabled:
+	 *
+	 *  - a DCTL.CSFTRST resets DALEPENA but nobody clears dep->flags;
+	 *  - dwc3_ep0_stall_and_restart() writes dep->flags = DWC3_EP_ENABLED
+	 *    unconditionally, which runs after a stop (softconnect=0, so its
+	 *    own dwc3_ep0_out_start() silently returns and no WARN shows up).
+	 *
+	 * With a stale flag the enable below degenerates to a plain
+	 * SETEPCFG: DEPSTARTCFG/xfer resources are never (re)programmed and
+	 * the DALEPENA bit is never set, yet set_ep_config() still returns 0.
+	 * EP0 then fails its first STARTTRANSFER with
+	 * DEPEVT_TRANSFER_NO_RESOURCE, dwc3_ep0_out_start() WARNs and the
+	 * EP0 SETUP TRB is never armed - the host resets the bus forever
+	 * instead of enumerating.
+	 *
+	 * Observed Build 320, second start of a boot (t=3578.628):
+	 *   "before SETEPCFG ep0out DALE=00000000 DCFG=000c0804 flags=1"
+	 * while the first start of the same boot had flags=0 and
+	 * DALE 0->1->3 and enumerated fine.
+	 *
+	 * Trust the hardware: if DALEPENA does not have this endpoint,
+	 * forget the flag so the full (stock reconnect) path runs again.
+	 */
+	reg = dwc3_readl(dwc->regs, DWC3_DALEPENA);
+	if ((dep->flags & DWC3_EP_ENABLED) &&
+			!(reg & DWC3_DALEPENA_EP(dep->number))) {
+		dev_err(dwc->dev,
+			"Build321: %s flagged enabled but DALEPENA=%08x flags=%x -> full re-enable\n",
+			dep->name, reg, dep->flags);
+		dep->flags = 0;
+	}
+
 	if (!(dep->flags & DWC3_EP_ENABLED)) {
 		ret = dwc3_gadget_resize_tx_fifos(dwc, dep);
 		if (ret)
@@ -792,15 +905,38 @@ static int __dwc3_gadget_ep_enable(struct dwc3_ep *dep,
 		}
 	}
 
+	dev_err(dwc->dev,
+			"before SETEPCFG %s DALE=%08x DCFG=%08x flags=%x modify=%d restore=%d\n",
+			dep->name,
+			dwc3_readl(dwc->regs, DWC3_DALEPENA),
+			dwc3_readl(dwc->regs, DWC3_DCFG),
+			dep->flags, modify, restore);
+
 	ret = dwc3_gadget_set_ep_config(dwc, dep, modify, restore);
 	if (ret) {
 		dev_err(dwc->dev, "set_ep_config() failed for %s\n", dep->name);
 		return ret;
 	}
 
+	dev_err(dwc->dev,
+			"after SETEPCFG %s DALE=%08x DCFG=%08x ret=%d\n",
+			dep->name,
+			dwc3_readl(dwc->regs, DWC3_DALEPENA),
+			dwc3_readl(dwc->regs, DWC3_DCFG), ret);
+
 	if (!(dep->flags & DWC3_EP_ENABLED)) {
 		struct dwc3_trb	*trb_st_hw;
 		struct dwc3_trb	*trb_link;
+
+		if (dep->number == 0) {
+			ret = dwc3_gadget_assign_xfer_resources(dwc);
+			if (ret) {
+				dev_err(dwc->dev,
+						"assign_xfer_resources() failed for %s\n",
+						dep->name);
+				return ret;
+			}
+		}
 
 		dep->type = usb_endpoint_type(desc);
 		dep->flags |= DWC3_EP_ENABLED;
@@ -2134,7 +2270,7 @@ static int dwc3_gadget_set_selfpowered(struct usb_gadget *g,
  * dwc3_device_core_soft_reset - Issues device core soft reset
  * @dwc: pointer to our context structure
  */
-static int dwc3_device_core_soft_reset(struct dwc3 *dwc)
+int dwc3_device_core_soft_reset(struct dwc3 *dwc)
 {
 	u32             reg;
 	int             retries = 10;
@@ -2159,17 +2295,133 @@ done:
 	/* phy sync delay as per data book */
 	msleep(50);
 
+	/*
+	 * Build 319: DCTL.CSFTRST returns the PHY interface registers to
+	 * their power-on defaults. Above revision 1.94A GUSB3PIPECTL.SUSPHY
+	 * reads back as 0 after a reset and the application has to set it
+	 * again -- see dwc3_phy_setup(), which only runs from
+	 * dwc3_core_init() during probe. dwc3_device_core_soft_reset() is
+	 * the one path that resets the core without ever re-applying that
+	 * configuration. Observed on-device: the first start after boot
+	 * shows U3PIPE=030e0002 (SUSPHY=1), every start after a soft
+	 * reset shows U3PIPE=030c0002 (SUSPHY=0).
+	 */
+	if (dwc->revision > DWC3_REVISION_194A)
+		dwc3_usb3_phy_suspend(dwc, true);
+
+	dev_err(dwc->dev,
+		"Build319: post-softreset DSTS=%08x U3PIPE=%08x U2PHY=%08x\n",
+		dwc3_readl(dwc->regs, DWC3_DSTS),
+		dwc3_readl(dwc->regs, DWC3_GUSB3PIPECTL(0)),
+		dwc3_readl(dwc->regs, DWC3_GUSB2PHYCFG(0)));
+
 	return 0;
 }
+EXPORT_SYMBOL_GPL(dwc3_device_core_soft_reset);
+
+/*
+ * Build 320: wait for a quiescent device core before the gadget is started.
+ *
+ * Across every log in this project dwc3_send_gadget_ep_cmd() completes
+ * if and only if DSTS.COREIDLE=1 and DSTS.USBLNKST != 3 (U3/Suspend).
+ * A core that a previous run_stop(0) left with COREIDLE=0/DEVCTRLHLT=0
+ * - the stop side only waits 20ms for the halt and there is no host to
+ * deliver an end-of-frame - never recovers by itself: the next start
+ * programs EP0, every SETEPCFG times out, RESTART_USB_SESSION fires and
+ * the whole gadget is torn down and restarted every ~2s.
+ *
+ * This runs from dwc3_otg_start_peripheral() on sm_work: process
+ * context, dwc->lock not held, so unlike the udelay loop in
+ * dwc3_gadget_run_stop() it may sleep and may issue a soft reset.
+ *
+ * Returns 0 when the core is quiescent, -EAGAIN when it is not after
+ * one device-core soft reset attempt. Callers must not treat -EAGAIN as
+ * fatal: the start is still attempted so that a genuine, unrelated
+ * failure stays visible, but it is reported as a marker first.
+ */
+int dwc3_gadget_ensure_quiescent(struct dwc3 *dwc)
+{
+	u32			dsts;
+	int			tries, waited;
+	bool			quiescent = false;
+	int			ret = 0;
+
+	for (tries = 0; tries < 2 && !quiescent; tries++) {
+		for (waited = 0; waited < 50; waited++) {
+			dsts = dwc3_readl(dwc->regs, DWC3_DSTS);
+			if ((dsts & DWC3_DSTS_COREIDLE) &&
+			    DWC3_DSTS_USBLNKST(dsts) != 0x3) {
+				quiescent = true;
+				break;
+			}
+			usleep_range(1000, 1100);
+		}
+
+		if (quiescent)
+			break;
+
+		dsts = dwc3_readl(dwc->regs, DWC3_DSTS);
+		dev_err(dwc->dev,
+			"Build320: attempt %d not quiescent after ~%dms DSTS=%08x COREIDLE=%u HLT=%u LNKST=%u\n",
+			tries + 1, waited, dsts,
+			!!(dsts & DWC3_DSTS_COREIDLE),
+			!!(dsts & DWC3_DSTS_DEVCTRLHLT),
+			DWC3_DSTS_USBLNKST(dsts));
+
+		ret = dwc3_device_core_soft_reset(dwc);
+		if (ret) {
+			dev_err(dwc->dev,
+				"Build320: device core soft reset failed ret=%d\n",
+				ret);
+			break;
+		}
+	}
+
+	dsts = dwc3_readl(dwc->regs, DWC3_DSTS);
+	dev_err(dwc->dev,
+		"Build320: quiescent=%d reset_ret=%d DSTS=%08x COREIDLE=%u HLT=%u LNKST=%u U3PIPE=%08x\n",
+		quiescent, ret, dsts,
+		!!(dsts & DWC3_DSTS_COREIDLE),
+		!!(dsts & DWC3_DSTS_DEVCTRLHLT),
+		DWC3_DSTS_USBLNKST(dsts),
+		dwc3_readl(dwc->regs, DWC3_GUSB3PIPECTL(0)));
+
+	return quiescent ? 0 : -EAGAIN;
+}
+EXPORT_SYMBOL_GPL(dwc3_gadget_ensure_quiescent);
 
 #define MIN_RUN_STOP_DELAY_MS 50
 
 static int dwc3_gadget_run_stop(struct dwc3 *dwc, int is_on, int suspend)
 {
 	u32			reg, reg1;
-	u32			timeout = 1500;
+	u32			dsts;
+	u32			timeout = 2000;
+	int			ret;
 
 	dbg_event(0xFF, "run_stop", is_on);
+
+	/*
+	 * Build 320: give up instead of hammering a wedged core.
+	 *
+	 * A start that fails in __dwc3_gadget_start() leaves DEVTEN=0 and
+	 * DALEPENA=0; the endpoint command that then times out raises
+	 * RESTART_USB_SESSION, sm_work tears the gadget down and starts it
+	 * again, and the same failure repeats every ~2s until the cable is
+	 * unplugged. After three consecutive failed starts in one connect
+	 * session the core is not coming back on its own - skip the start
+	 * entirely so no endpoint command is issued and the restart storm
+	 * stops. The streak is cleared by a successful start and by a real
+	 * (cable) disconnect, see dwc3_otg_start_peripheral().
+	 */
+	if (is_on && dwc->start_fail_streak >= 3) {
+		dev_err(dwc->dev,
+			"Build320: giving up after %u consecutive start failures - skipping start\n",
+			dwc->start_fail_streak);
+		dbg_event(0xFF, "STARTGIVEUP", dwc->start_fail_streak);
+		return -ETIMEDOUT;
+	}
+
 	reg = dwc3_readl(dwc->regs, DWC3_DCTL);
 	if (is_on) {
 		if (dwc->revision <= DWC3_REVISION_187A) {
@@ -2180,8 +2432,87 @@ static int dwc3_gadget_run_stop(struct dwc3 *dwc, int is_on, int suspend)
 		if (dwc->revision >= DWC3_REVISION_194A)
 			reg &= ~DWC3_DCTL_KEEP_CONNECT;
 
+		dev_err(dwc->dev,
+			"Build313 PRESTART: DCTL=%08x DSTS=%08x GCTL=%08x DCFG=%08x mspd=%d hws=%u\n",
+			dwc3_readl(dwc->regs, DWC3_DCTL),
+			dwc3_readl(dwc->regs, DWC3_DSTS),
+			dwc3_readl(dwc->regs, DWC3_GCTL),
+			dwc3_readl(dwc->regs, DWC3_DCFG),
+			dwc->maximum_speed,
+			dwc->max_hw_supp_speed);
+
+		/*
+		 * Build 319: every dwc3 endpoint command issued through
+		 * dwc3_send_gadget_ep_cmd() must be issued while the device
+		 * core is quiescent, otherwise it never completes. Across
+		 * all builds and all logs in this project:
+		 *
+		 *   DSTS.COREIDLE=1 and LNKST!=3 ->  9/9  commands OK
+		 *   DSTS.COREIDLE=0              -> 692/692 timeout
+		 *   DSTS.COREIDLE=1 and LNKST=3  ->   1/1  timeout
+		 *
+		 * LNKST=3 is U3/Suspend: a host that never issues a bus
+		 * reset leaves the link suspended and the next SETEPCFG
+		 * hangs. Nothing in dwc3 waits for either condition today.
+		 * Wait a bounded time for COREIDLE (callers hold
+		 * dwc->lock, so udelay only -- same 20ms budget as the
+		 * RUN_STOP poll below) and report a start into a
+		 * non-quiescent or suspended link explicitly, instead of
+		 * letting it surface as a bare ep-cmd timeout.
+		 */
+		{
+			int idle = 2000;
+
+			do {
+				dsts = dwc3_readl(dwc->regs, DWC3_DSTS);
+				if ((dsts & DWC3_DSTS_COREIDLE) &&
+				    DWC3_DSTS_USBLNKST(dsts) != 0x3)
+					break;
+				udelay(10);
+			} while (--idle);
+
+			if (!(dsts & DWC3_DSTS_COREIDLE) ||
+			    DWC3_DSTS_USBLNKST(dsts) == 0x3)
+				dev_err(dwc->dev,
+					"Build319: prestart not quiescent DSTS=%08x COREIDLE=%u HLT=%u LNKST=%u SPD=%u\n",
+					dsts,
+					!!(dsts & DWC3_DSTS_COREIDLE),
+					!!(dsts & DWC3_DSTS_DEVCTRLHLT),
+					DWC3_DSTS_USBLNKST(dsts),
+					dsts & DWC3_DSTS_CONNECTSPD);
+		}
+
 		dwc3_event_buffers_setup(dwc);
-		__dwc3_gadget_start(dwc);
+		ret = __dwc3_gadget_start(dwc);
+		if (ret) {
+			dev_err(dwc->dev,
+				"Build313 STARTFAIL: ret=%d DCTL=%08x DSTS=%08x GCTL=%08x DCFG=%08x\n",
+				ret,
+				dwc3_readl(dwc->regs, DWC3_DCTL),
+				dwc3_readl(dwc->regs, DWC3_DSTS),
+				dwc3_readl(dwc->regs, DWC3_GCTL),
+				dwc3_readl(dwc->regs, DWC3_DCFG));
+			/*
+			 * Build 317-A: do NOT bail out here.
+			 *
+			 * Aborting skipped the DCFG speed write, DCTL_RUN_STOP and
+			 * pullups_connected (old Build 311 path), so the core stayed
+			 * RS=0 / pullups=0 and usb_gadget_connect() became a no-op.
+			 * memeDo never checked this return value either.
+			 *
+			 * The failure itself stays visible: __dwc3_gadget_start()
+			 * still stops before dwc3_gadget_enable_irq(), so DEVTEN
+			 * remains 0 and the CMDACT timeout keeps being reported.
+			 * Return value of this function is decided by the DSTS
+			 * poll below.
+			 */
+			dwc->start_fail_streak++;
+			dev_err(dwc->dev,
+				"Build320: start_fail_streak=%u/3\n",
+				dwc->start_fail_streak);
+		} else {
+			dwc->start_fail_streak = 0;
+		}
 
 		reg1 = dwc3_readl(dwc->regs, DWC3_DCFG);
 		reg1 &= ~(DWC3_DCFG_SPEED_MASK);
@@ -2243,14 +2574,27 @@ static int dwc3_gadget_run_stop(struct dwc3 *dwc, int is_on, int suspend)
 		dwc3_notify_event(dwc, DWC3_GSI_EVT_BUF_CLEAR, 0);
 	}
 
+	/*
+	 * Build 312: 1500 tight readl iterations finished in ~100-500us —
+	 * shorter than one HS frame (1ms). After RUN_STOP=0 the core only
+	 * halts at end of frame, so stop ALWAYS timed out (22/22 in B311),
+	 * left RS=0/HLT=0 and broke the next start. Busy-wait with udelay
+	 * (callers hold spinlock — no sleep), ~20ms worst case.
+	 */
 	do {
 		reg = dwc3_readl(dwc->regs, DWC3_DSTS);
 		reg &= DWC3_DSTS_DEVCTRLHLT;
-	} while (--timeout && !(!is_on ^ !reg));
+		if (is_on ? !reg : reg)
+			break;
+		udelay(10);
+	} while (--timeout);
 
 	if (!timeout) {
-		dev_err(dwc->dev, "failed to %s controller\n",
-				is_on ? "start" : "stop");
+		dev_err(dwc->dev, "failed to %s controller DSTS=%08x DCTL=%08x GCTL=%08x\n",
+				is_on ? "start" : "stop",
+				dwc3_readl(dwc->regs, DWC3_DSTS),
+				dwc3_readl(dwc->regs, DWC3_DCTL),
+				dwc3_readl(dwc->regs, DWC3_GCTL));
 		if (is_on)
 			dbg_event(0xFF, "STARTTOUT", reg);
 		else
@@ -2260,6 +2604,12 @@ static int dwc3_gadget_run_stop(struct dwc3 *dwc, int is_on, int suspend)
 
 	return 0;
 }
+
+int dwc3_force_gadget_run_stop(struct dwc3 *dwc)
+{
+	return dwc3_gadget_run_stop(dwc, 1, false);
+}
+EXPORT_SYMBOL_GPL(dwc3_force_gadget_run_stop);
 
 static int dwc3_gadget_vbus_draw(struct usb_gadget *g, unsigned int mA)
 {
@@ -2381,6 +2731,8 @@ static void dwc3_gadget_enable_irq(struct dwc3 *dwc)
 		reg |= DWC3_DEVTEN_EOPFEN;
 
 	dwc3_writel(dwc->regs, DWC3_DEVTEN, reg);
+	dev_err(dwc->dev, "Build320: DEVTEN wrote=%08x read=%08x\n",
+		reg, dwc3_readl(dwc->regs, DWC3_DEVTEN));
 }
 
 void dwc3_gadget_disable_irq(struct dwc3 *dwc)
@@ -2690,6 +3042,7 @@ static int dwc3_gadget_restart_usb_session(struct usb_gadget *g)
 {
 	struct dwc3		*dwc = gadget_to_dwc(g);
 
+	dev_err(dwc->dev, "gadget_ops: restart_usb_session\n");
 	dbg_event(0xFF, "RestartUSBSession", 0);
 	return dwc3_notify_event(dwc, DWC3_CONTROLLER_RESTART_USB_SESSION, 0);
 }
@@ -3421,6 +3774,9 @@ static void dwc3_gadget_reset_interrupt(struct dwc3 *dwc)
 	reg &= ~(DWC3_DCFG_DEVADDR_MASK);
 	dwc3_writel(dwc->regs, DWC3_DCFG, reg);
 
+	dev_err(dwc->dev, "Build327: reset_done state=%u conn=%d softconn=%d\n",
+		dwc->ep0state, dwc->connected, dwc->softconnect);
+
 	dwc->gadget.speed = USB_SPEED_UNKNOWN;
 	dwc->link_state = DWC3_LINK_STATE_U0;
 	wake_up_interruptible(&dwc->wait_linkstate);
@@ -3555,6 +3911,9 @@ static void dwc3_gadget_conndone_interrupt(struct dwc3 *dwc)
 	}
 
 	dwc3_notify_event(dwc, DWC3_CONTROLLER_CONNDONE_EVENT, 0);
+
+	dev_err(dwc->dev, "Build327: conndone done speed=%u dsts=%08x\n",
+		dwc->gadget.speed, dwc3_readl(dwc->regs, DWC3_DSTS));
 
 	/*
 	 * Configure PHY via GUSB3PIPECTLn if required.
@@ -3768,14 +4127,20 @@ static void dwc3_gadget_interrupt(struct dwc3 *dwc,
 {
 	switch (event->type) {
 	case DWC3_DEVICE_EVENT_DISCONNECT:
+		dev_err(dwc->dev, "Build313: DEVT DISCONNECT info=%x\n",
+			event->event_info);
 		dwc3_gadget_disconnect_interrupt(dwc);
 		dwc->dbg_gadget_events.disconnect++;
 		break;
 	case DWC3_DEVICE_EVENT_RESET:
+		dev_err(dwc->dev, "Build313: DEVT RESET info=%x\n",
+			event->event_info);
 		dwc3_gadget_reset_interrupt(dwc);
 		dwc->dbg_gadget_events.reset++;
 		break;
 	case DWC3_DEVICE_EVENT_CONNECT_DONE:
+		dev_err(dwc->dev, "Build313: DEVT CONNECT_DONE info=%x\n",
+			event->event_info);
 		dwc3_gadget_conndone_interrupt(dwc);
 		dwc->dbg_gadget_events.connect++;
 		break;
@@ -3791,6 +4156,8 @@ static void dwc3_gadget_interrupt(struct dwc3 *dwc,
 		dwc3_gadget_hibernation_interrupt(dwc, event->event_info);
 		break;
 	case DWC3_DEVICE_EVENT_LINK_STATUS_CHANGE:
+		dev_err(dwc->dev, "Build313: DEVT LINK_STATUS_CHANGE info=%x\n",
+			event->event_info);
 		dwc3_gadget_linksts_change_interrupt(dwc, event->event_info);
 		dwc->dbg_gadget_events.link_status_change++;
 		break;
@@ -3814,6 +4181,8 @@ static void dwc3_gadget_interrupt(struct dwc3 *dwc,
 		dwc->dbg_gadget_events.sof++;
 		break;
 	case DWC3_DEVICE_EVENT_ERRATIC_ERROR:
+		dev_err(dwc->dev, "Build313: DEVT ERRATIC_ERROR info=%x\n",
+			event->event_info);
 		dbg_event(0xFF, "ERROR", dwc->retries_on_error);
 		dwc->dbg_gadget_events.erratic_error++;
 		dwc->err_evt_seen = true;
@@ -3835,9 +4204,14 @@ static void dwc3_process_event_entry(struct dwc3 *dwc,
 {
 	trace_dwc3_event(event->raw, dwc);
 
-	if (!event->type.is_devspec)
+	if (!event->type.is_devspec) {
+		if (event->depevt.endpoint_number <= 1)
+			dev_err(dwc->dev, "Build328: ev ep=%u ev=%u st=%u\n",
+				event->depevt.endpoint_number,
+				event->depevt.endpoint_event,
+				event->depevt.status);
 		dwc3_endpoint_interrupt(dwc, &event->depevt);
-	else if (event->type.type == DWC3_EVENT_TYPE_DEV)
+	} else if (event->type.type == DWC3_EVENT_TYPE_DEV)
 		dwc3_gadget_interrupt(dwc, &event->devt);
 	else
 		dev_err(dwc->dev, "UNKNOWN IRQ type %d\n", event->raw);
@@ -3889,6 +4263,9 @@ static irqreturn_t dwc3_process_event_buf(struct dwc3_event_buffer *evt)
 		left -= 4;
 	}
 
+	dev_err(dwc->dev, "Build328: evbuf loop done left=%d cnt=%u\n",
+		left, evt->count);
+
 	dwc->bh_handled_evt_cnt[dwc->irq_dbg_index] += (evt->count / 4);
 	evt->count = 0;
 	ret = IRQ_HANDLED;
@@ -3898,13 +4275,23 @@ static irqreturn_t dwc3_process_event_buf(struct dwc3_event_buffer *evt)
 	reg &= ~DWC3_GEVNTSIZ_INTMASK;
 	dwc3_writel(dwc->regs, DWC3_GEVNTSIZ(0), reg);
 
+	dev_err(dwc->dev, "Build328: evbuf unmask\n");
+	dev_err(dwc->dev, "Build329: unmask post imod=%u siz=0x%08x act=%d\n",
+		dwc->imod_interval, dwc3_readl(dwc->regs, DWC3_GEVNTSIZ(0)),
+		pm_runtime_active(dwc->dev));
+
 	if (dwc->imod_interval) {
+		dev_err(dwc->dev, "Build329: imod pre cnt=0x%08x\n",
+			dwc3_readl(dwc->regs, DWC3_GEVNTCOUNT(0)));
 		dwc3_writel(dwc->regs, DWC3_GEVNTCOUNT(0), DWC3_GEVNTCOUNT_EHB);
 		dwc3_writel(dwc->regs, DWC3_DEV_IMOD(0), dwc->imod_interval);
+		dev_err(dwc->dev, "Build329: imod post siz=0x%08x\n",
+			dwc3_readl(dwc->regs, DWC3_GEVNTSIZ(0)));
 	}
 
 	/* Keep the clearing of DWC3_EVENT_PENDING at the end */
 	evt->flags &= ~DWC3_EVENT_PENDING;
+	dev_err(dwc->dev, "Build329: evbuf end ret=%d\n", ret);
 
 	return ret;
 }
@@ -3914,8 +4301,15 @@ void dwc3_bh_work(struct work_struct *w)
 	struct dwc3 *dwc = container_of(w, struct dwc3, bh_work);
 
 	pm_runtime_get_sync(dwc->dev);
+	dev_err(dwc->dev, "Build329: bh get act=%d usage=%d\n",
+		pm_runtime_active(dwc->dev),
+		atomic_read(&dwc->dev->power.usage_count));
 	dwc3_thread_interrupt(dwc->irq, dwc->ev_buf);
+	dev_err(dwc->dev, "Build329: bh thread done\n");
 	pm_runtime_put(dwc->dev);
+	dev_err(dwc->dev, "Build329: bh put act=%d usage=%d\n",
+		pm_runtime_active(dwc->dev),
+		atomic_read(&dwc->dev->power.usage_count));
 }
 
 static irqreturn_t dwc3_thread_interrupt(int irq, void *_evt)
@@ -3928,12 +4322,10 @@ static irqreturn_t dwc3_thread_interrupt(int irq, void *_evt)
 
 	start_time = ktime_get();
 
-	local_bh_disable();
 	spin_lock_irqsave(&dwc->lock, flags);
 	dwc->bh_handled_evt_cnt[dwc->irq_dbg_index] = 0;
 	ret = dwc3_process_event_buf(evt);
 	spin_unlock_irqrestore(&dwc->lock, flags);
-	local_bh_enable();
 
 	dwc->bh_completion_time[dwc->irq_dbg_index] =
 		ktime_to_us(ktime_sub(ktime_get(), start_time));
@@ -4032,6 +4424,8 @@ irqreturn_t dwc3_interrupt(int irq, void *_dwc)
 
 	if (ret == IRQ_WAKE_THREAD)
 		queue_work(dwc->dwc_wq, &dwc->bh_work);
+
+	dev_err(dwc->dev, "Build329: irq ret=%d\n", ret);
 
 	return IRQ_HANDLED;
 }

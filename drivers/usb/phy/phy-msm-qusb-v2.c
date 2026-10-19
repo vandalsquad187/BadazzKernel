@@ -134,6 +134,7 @@ struct qusb_phy {
 
 	bool			cable_connected;
 	bool			suspended;
+	bool			clks_enabled;
 	bool			dpdm_enable;
 	bool			efuse_pll_bias;
 	bool			efuse_pll_bias_host;
@@ -174,6 +175,9 @@ static void qusb_phy_enable_clocks(struct qusb_phy *qphy, bool on)
 {
 	dev_dbg(qphy->phy.dev, "%s(): on:%d\n", __func__, on);
 
+	if (on == qphy->clks_enabled)
+		return;
+
 	if (on) {
 		clk_prepare_enable(qphy->ref_clk_src);
 		if (qphy->ref_clk)
@@ -191,6 +195,7 @@ static void qusb_phy_enable_clocks(struct qusb_phy *qphy, bool on)
 
 		clk_disable_unprepare(qphy->ref_clk_src);
 	}
+	qphy->clks_enabled = on;
 }
 
 static int qusb_phy_config_vdd(struct qusb_phy *qphy, int high)
@@ -216,8 +221,13 @@ static int qusb_phy_disable_power(struct qusb_phy *qphy)
 
 	mutex_lock(&qphy->lock);
 
-	dev_dbg(qphy->phy.dev, "%s:req to turn off regulators\n",
-			__func__);
+	dev_err(qphy->phy.dev,
+		"B314 power:off dpdm=%d vdd=%d vdda18=%d vdda33=%d susp=%d cable=%d\n",
+			qphy->dpdm_enable,
+			regulator_is_enabled(qphy->vdd),
+			regulator_is_enabled(qphy->vdda18),
+			regulator_is_enabled(qphy->vdda33),
+			qphy->suspended, qphy->cable_connected);
 
 	ret = regulator_disable(qphy->vdda33);
 	if (ret)
@@ -279,8 +289,13 @@ static int qusb_phy_enable_power(struct qusb_phy *qphy)
 
 	mutex_lock(&qphy->lock);
 
-	dev_dbg(qphy->phy.dev, "%s:req to turn on regulators\n",
-			__func__);
+	dev_err(qphy->phy.dev,
+		"B314 power:on dpdm=%d vdd=%d vdda18=%d vdda33=%d susp=%d cable=%d\n",
+			qphy->dpdm_enable,
+			regulator_is_enabled(qphy->vdd),
+			regulator_is_enabled(qphy->vdda18),
+			regulator_is_enabled(qphy->vdda33),
+			qphy->suspended, qphy->cable_connected);
 
 	ret = qusb_phy_config_vdd(qphy, true);
 	if (ret) {
@@ -585,6 +600,7 @@ static int qusb_phy_init(struct usb_phy *phy)
 	struct qusb_phy *qphy = container_of(phy, struct qusb_phy, phy);
 	int p_index;
 	u8 reg;
+	u8 pwr;
 
 	dev_dbg(phy->dev, "%s\n", __func__);
 
@@ -681,6 +697,13 @@ static int qusb_phy_init(struct usb_phy *phy)
 	usleep_range(150, 160);
 
 	reg = readb_relaxed(qphy->base + qphy->phy_reg[PLL_COMMON_STATUS_ONE]);
+	pwr = readb_relaxed(qphy->base + qphy->phy_reg[PWR_CTRL1]);
+	dev_err(phy->dev,
+		"B314 phy_init:PLL=%x PWR_CTRL1=%x POWR_DOWN=%d vdd=%d vdda18=%d vdda33=%d\n",
+			reg, pwr, !!(pwr & PWR_CTRL1_POWR_DOWN),
+			regulator_is_enabled(qphy->vdd),
+			regulator_is_enabled(qphy->vdda18),
+			regulator_is_enabled(qphy->vdda33));
 	dev_dbg(phy->dev, "QUSB2PHY_PLL_COMMON_STATUS_ONE:%x\n", reg);
 	if (!(reg & CORE_READY_STATUS)) {
 		dev_err(phy->dev, "QUSB PHY PLL LOCK fails:%x\n", reg);
@@ -725,9 +748,16 @@ static int qusb_phy_set_suspend(struct usb_phy *phy, int suspend)
 	struct qusb_phy *qphy = container_of(phy, struct qusb_phy, phy);
 	u32 linestate = 0, intr_mask = 0;
 
+	dev_err(phy->dev,
+		"B314 set_suspend:req=%d susp=%d cable=%d vdd=%d dpdm=%d\n",
+			suspend, qphy->suspended, qphy->cable_connected,
+			regulator_is_enabled(qphy->vdd), qphy->dpdm_enable);
+
 	if (qphy->suspended == suspend) {
-		dev_dbg(phy->dev, "%s: USB PHY is already suspended\n",
-			__func__);
+		dev_err(phy->dev,
+			"B314 set_suspend:EARLY-RETURN (no-op) req=%d susp=%d vdd=%d\n",
+			suspend, qphy->suspended,
+			regulator_is_enabled(qphy->vdd));
 		return 0;
 	}
 
@@ -817,6 +847,11 @@ static int qusb_phy_set_suspend(struct usb_phy *phy, int suspend)
 		qphy->suspended = false;
 	}
 
+	dev_err(phy->dev,
+		"B314 set_suspend:done req=%d susp=%d cable=%d vdd=%d dpdm=%d\n",
+			suspend, qphy->suspended, qphy->cable_connected,
+			regulator_is_enabled(qphy->vdd), qphy->dpdm_enable);
+
 	return 0;
 }
 
@@ -827,8 +862,10 @@ static int qusb_phy_notify_connect(struct usb_phy *phy,
 
 	qphy->cable_connected = true;
 
-	dev_dbg(phy->dev, "QUSB PHY: connect notification cable_connected=%d\n",
-							qphy->cable_connected);
+	dev_err(phy->dev, "B314 notify:CONNECT cable=%d susp=%d vdd=%d\n",
+							qphy->cable_connected,
+							qphy->suspended,
+					regulator_is_enabled(qphy->vdd));
 	return 0;
 }
 
@@ -839,8 +876,10 @@ static int qusb_phy_notify_disconnect(struct usb_phy *phy,
 
 	qphy->cable_connected = false;
 
-	dev_dbg(phy->dev, "QUSB PHY: connect notification cable_connected=%d\n",
-							qphy->cable_connected);
+	dev_err(phy->dev, "B314 notify:DISCONNECT cable=%d susp=%d vdd=%d\n",
+							qphy->cable_connected,
+							qphy->suspended,
+					regulator_is_enabled(qphy->vdd));
 	return 0;
 }
 
@@ -849,6 +888,9 @@ static int msm_qusb_phy_drive_dp_pulse(struct usb_phy *phy,
 {
 	struct qusb_phy *qphy = container_of(phy, struct qusb_phy, phy);
 	int ret;
+
+	dev_err(qphy->phy.dev, "B314 dp_pulse:enter dpdm=%d interval=%u\n",
+			qphy->dpdm_enable, interval_ms);
 
 	ret = qusb_phy_enable_power(qphy);
 	if (ret < 0) {
@@ -890,6 +932,10 @@ static int msm_qusb_phy_drive_dp_pulse(struct usb_phy *phy,
 
 	msleep(20);
 
+	dev_err(qphy->phy.dev,
+		"B314 dp_pulse:BEFORE power-off dpdm=%d (must be 0 or rails stay fake-on)\n",
+			qphy->dpdm_enable);
+
 	qusb_phy_enable_clocks(qphy, false);
 	ret = qusb_phy_disable_power(qphy);
 		if (ret < 0) {
@@ -905,8 +951,8 @@ static int qusb_phy_dpdm_regulator_enable(struct regulator_dev *rdev)
 	int ret = 0;
 	struct qusb_phy *qphy = rdev_get_drvdata(rdev);
 
-	dev_dbg(qphy->phy.dev, "%s dpdm_enable:%d\n",
-				__func__, qphy->dpdm_enable);
+	dev_err(qphy->phy.dev, "B314 dpdm_en:enter dpdm=%d\n",
+				qphy->dpdm_enable);
 
 	if (!qphy->dpdm_enable) {
 		ret = qusb_phy_enable_power(qphy);
@@ -917,6 +963,12 @@ static int qusb_phy_dpdm_regulator_enable(struct regulator_dev *rdev)
 		}
 		qphy->dpdm_enable = true;
 		qusb_phy_reset(qphy);
+		if (!qphy->suspended) {
+			qusb_phy_enable_clocks(qphy, true);
+			dev_err(qphy->phy.dev,
+				"Build324: dpdm_en: clocks on, re-init PHY after reset (dwc3 awake, no LPM resume pending)\n");
+			qusb_phy_init(&qphy->phy);
+		}
 	}
 
 	return ret;
@@ -927,8 +979,8 @@ static int qusb_phy_dpdm_regulator_disable(struct regulator_dev *rdev)
 	int ret = 0;
 	struct qusb_phy *qphy = rdev_get_drvdata(rdev);
 
-	dev_dbg(qphy->phy.dev, "%s dpdm_enable:%d\n",
-				__func__, qphy->dpdm_enable);
+	dev_err(qphy->phy.dev, "B314 dpdm_dis:enter dpdm=%d\n",
+				qphy->dpdm_enable);
 
 	if (qphy->dpdm_enable) {
 		ret = qusb_phy_disable_power(qphy);

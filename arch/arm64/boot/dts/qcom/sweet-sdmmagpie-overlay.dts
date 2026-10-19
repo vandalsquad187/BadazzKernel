@@ -28,20 +28,6 @@
 	qcom,board-id = <46 0>;
 };
 
-// pstore/ramoops backend for crash logs
-// IMPORTANT: Must be OUTSIDE &reserved_memory to avoid iomem conflict!
-// reserved-memory framework calls memblock_reserve() which registers the
-// region in iomem_resource tree. Then ramoops probe's request_mem_region()
-// for sub-regions (128KB console etc) fails with -ENOMEM because the
-// parent region is already claimed. Moving to root level avoids this.
-// NOTE: reg uses parent 2+2 cells, but *-size are plain u32 scalars (single cell)!
-/ {
-	ramoops@b0000000 {
-		compatible = "ramoops";
-		reg = <0x0 0xb0000000 0x0 0x400000>;
-		record-size = <0x20000>;
-		console-size = <0x20000>;
-		ftrace-size = <0x20000>;
-		pmsg-size = <0x20000>;
-	};
-};
+// pstore/ramoops: handled via cmdline 'ramoops_memreserve=4M' in ram.c
+// DO NOT add a reserved-memory node here - it conflicts with request_mem_region
+// DO NOT add a root-level node - DT overlay plugins can't create platform devices for it

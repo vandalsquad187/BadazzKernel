@@ -1038,7 +1038,7 @@ config SCHED_DEBUG
 
 config SCHED_INFO
 	bool
-	default n
+	default y
 
 config PANIC_ON_SCHED_BUG
 	bool "Panic on all bugs encountered by the scheduler"

@@ -67,3 +67,6 @@ obj-$(CONFIG_THERMAL_TSENS)	+= msm-tsens.o tsens2xxx.o tsens-dbg.o tsens-mtc.o t
 obj-$(CONFIG_K6A_FEATURE_FLAGS)	+= k6a_features.o
 
 obj-$(CONFIG_K6A_GOV)		+= k6a_gov/
+
+K6A_H := $(shell git -C $(srctree) rev-parse --short=8 HEAD 2>/dev/null || echo unknown)
+subdir-ccflags-y += -DK6A_GIT_HASH='"$(K6A_H)"' -DK6A_BUILD_HASH='"$(K6A_H)"'

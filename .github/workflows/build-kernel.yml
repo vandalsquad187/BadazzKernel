@@ -108,8 +108,9 @@ jobs:
             make sweet_defconfig
           fi
           # Build-Nummer in Kernel-Version einbetten (Identifikation per uname/dmesg)
-          sed -i 's/CONFIG_LOCALVERSION="-BadazzKernel-sweet-v1.3.2"/CONFIG_LOCALVERSION="-BadazzKernel-sweet-v1.3.2-build${{ github.run_number }}"/' .config || true
-          grep -E "^CONFIG_LOCALVERSION=" .config || true
+          sed -E -i 's/^CONFIG_LOCALVERSION=.*/CONFIG_LOCALVERSION="-BadazzKernel-sweet-v1.3.2-build${{ github.run_number }}"/' .config
+          grep -E "^CONFIG_LOCALVERSION=" .config
+          grep -qF 'build${{ github.run_number }}' .config || { echo "::error::LOCALVERSION patch failed"; exit 1; }
           sed -i 's/CONFIG_LLVM_POLLY=y/# CONFIG_LLVM_POLLY is not set/' .config
           grep -q 'CONFIG_CC_STACKPROTECTOR_STRONG=y' .config || \
             echo 'CONFIG_CC_STACKPROTECTOR_STRONG=y' >> .config
@@ -130,7 +131,7 @@ jobs:
             "CONFIG_KSU=y"
             "CONFIG_KSU_SUSFS=y"
             "CONFIG_KSU_TAMPER_SYSCALL_TABLE=y"
-            "CONFIG_K6A_GOV=y"
+            "CONFIG_K6A_GOV=m"
             "CONFIG_NFC_NQ_PN80T=y"
             "CONFIG_PHY_QCOM_QUSB2=y"
           )
@@ -167,9 +168,11 @@ jobs:
             JOBS=2
           fi
           make -j$JOBS Image.gz dtb.img dtbo.img
+          make -j$JOBS modules
 
       # -------------------------------------------------------
       # Schritt 7b: Post-Build Config verifizieren + QUSB2-Objekt prüfen
+      # + k6a_gov.ko prüfen
       # -------------------------------------------------------
       - name: Verify post-build config
         run: |
@@ -186,6 +189,17 @@ jobs:
             exit 1
           fi
           echo "::notice::QUSB2 verified in post-build config and objects"
+          echo "=== k6a_gov.ko check ==="
+          if ! grep -q "^CONFIG_K6A_GOV=m$" .config; then
+            echo "::error::CONFIG_K6A_GOV is not =m in post-build .config"
+            exit 1
+          fi
+          if [ ! -f drivers/thermal/k6a_gov/k6a_gov.ko ]; then
+            echo "::error::drivers/thermal/k6a_gov/k6a_gov.ko was not built"
+            exit 1
+          fi
+          ls -la drivers/thermal/k6a_gov/k6a_gov.ko
+          echo "::notice::k6a_gov.ko verified"
 
       # -------------------------------------------------------
       # Schritt 8: AnyKernel3-flashbares ZIP + Metadaten erstellen
@@ -200,6 +214,10 @@ jobs:
           cp arch/arm64/boot/Image.gz anykernel/
           cp arch/arm64/boot/dtb.img anykernel/
           cp arch/arm64/boot/dtbo.img anykernel/
+          cp drivers/thermal/k6a_gov/k6a_gov.ko anykernel/
+
+          K6A_GOV_VERSION=$(grep -aoE 'version=[0-9]+\.[0-9]+\.[0-9]+' drivers/thermal/k6a_gov/k6a_gov.ko | head -1 | sed 's/version=//')
+          [ -n "$K6A_GOV_VERSION" ] || K6A_GOV_VERSION=unknown
 
           # Build-Info für Debugging und User-Transparenz
           cat > anykernel/build-info.txt << EOF
