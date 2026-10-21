@@ -66,6 +66,10 @@ jobs:
             echo "Branch bereits aktuell — kein merge/push noetig"
           else
             git merge -X ours --no-edit -m "Merge origin/main into miui/test [skip ci] (X-ours auto)" origin/main || { echo "::error::Merge-Konflikt — manueller merge noetig"; exit 1; }
+            # merge aktualisiert nur den Gitlink-Entry — Submodul-Checkout neu materialisieren,
+            # sonst baut der miui-Leg noch den Kernel vom VORHERIGEN Run (build377-Befund)
+            git submodule sync --quiet
+            git submodule update --init --recursive --force
             # GITHUB_TOKEN darf .github/* nicht aendern — yml auf Branch-Stand bringen, damit der Push-Diff keine Workflow-Datei enthaelt
             git checkout HEAD~1 -- .github/workflows/ 2>/dev/null || true
             git commit --amend --no-edit --quiet 2>/dev/null || true
