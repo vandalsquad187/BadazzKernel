@@ -1,27 +1,23 @@
 # Kernel Build Status
 
 ## Current State
-- **Repo**: `vandalsquad187/BadazzKernel` branch `main` @ **`fc0e5e821`** (Build 353 scope,
-  2026-10-18) — Working tree clean, gepusht. Davor `8adaa6a0f` (Build 352 scope:
-  GAMING-Schwellen 96/99/102/93 + CI-Hygiene, **geflasht & verifiziert**), `eb64498e7`
-  (Build 351 scope: bw_apply-`||mn!=want`-Fix), davor Build-350-Hygiene/Build-348-Chainer.
-- **Kernel**: `4.14.369` — **K6A_GOV v1.5.2 als Modul** (`CONFIG_K6A_GOV=m`; `LOCALVERSION=
-  -BadazzKernel-sweet-v1.3.2-build$RUN`). Build 353 = `k6a_gov_exit`-BW-Floor-Fix +
-  `cool_set`-OFF-Clamp, Syntax-Check rc=0/0/0; Timestamp: CI run `39156974548` in_progress
-  beim Verfassen (Release-Nummer folgt der `run_number`-Konvention).
-- **GitHub-Releases**: `v4.14.369-badazz-build352` (run `39094802789` success, geflasht
-  2026-10-18, Boot-Verifikation grün: `k6a_gov 1.5.1`, `cd_thresholds=96 99 102 93 …`,
-  `thresholds_source=user`, ctl-Bootwrite idempotent). Build 351 (bw_apply-Fix) = Release
-  `build351`. **Name≠Scope-Regel bleibt**: nur `gh release list` + `build-info.txt
-  (`BUILD_NUMBER`/`COMMIT_SHA`) zählen.
-- **Gerät (sweet, MIUI 13 V816.0.13.0)**: Kernel **build352** (1.5.1, ko aus Fallback
-  `/data/adb/k6a_gov.ko` — nach dem frischen Modul-Flash fehlt `MODDIR/k6a_gov.ko`,
-  `_load_gov` findet den Fallback (SHA `68187683`); beim build353-Kernel-Zip-Flash wird
-  der Fallback automatisch auf 1.5.2 aktualisiert — MODDIR-Ko nicht nachbauen).
-  Dazu **k6a-ctl v1.4.3** (on-device, 6 Dateien gesynced mit `.bak-v142`-Backups): letzte
-  Releases `v1.4.3` (Gold-Cap-UI-Toggle + `thermal_protect` wirksam), `v1.4.2`
-  (`silver_cap_gaming`/`gpu_cap_gaming`), `v1.4.1` (Schwellen 96/99/102/93 + idempotenter
-  Bootwrite, löste die „Config-Drift"-Behauptung der externen Strukturanalyse), `v1.4.0`.
+- **Repo**: `vandalsquad187/BadazzKernel` branch `main` @ **`f9b2e6aab`** (Build 388 scope:
+  KernelSU-Next-Submodule `86773df0` — tote Monolith-TUs entfernt; Binary unverändert).
+  CI run `39857009034` queued beim Verfassen. Davor `f9b2e6aab`→`046760b0e` (Submodule-Bump-
+  Kette `9409a05f` su-shim-Cred-Fix → `ada691bf` Diag-Bits → `8082812b` Len-Fix →
+  `34c3b8ea` pre-ksud-Escape → `786bcb00` TAMPER-Patch-Init, alles **geflasht & verifiziert**,
+  Builds 383–387).
+- **Kernel**: `4.14.369` — K6A-kompatibel, KSU-Next **built-in, 4.14 direct-patch mode**
+  (14 Slots, `patch_ok=0x7f7f`, sys_call_table `0xffffff9a2d401000`).
+- **GitHub-Releases**: Releases entstehen automatisch pro Main-Bump (`v4.14.369-badazz-buildNNN`).
+  **Name≠Scope-Regel bleibt**: nur `gh release list` + `build-info.txt (`BUILD_NUMBER`/
+  `COMMIT_SHA`) zählen. Flashen ausdrücklich nur das **aosp-ZIP** (Gerät läuft crDroid).
+- **Gerät (sweet, crDroid/AOSP, Android 16)**: Kernel **build387** (KSU ver `38523`, KSU
+  `9409a05f`) — **Root läuft vollständig**: `su id` (Termux) → `uid=0(root) …
+  context=u:r:ksu:s0`; Alternativen `grant_cmd`/`rs3` (Probes `~/tmp/ksu_probe/`). Diag:
+  crown `0x780001bd`, open_errno 0. K6A/k6a-ctl-Bestand zuletzt verifiziert auf build352
+  (Details unten, wichtig fürs r50–r59-Messarchiv) — seit dem crDroid-Umzug nicht neu
+  kalibriert.
 - **Sampler-Bestand auf Gerät**: `fps_samp2.sh` = **capped-Variante** (kein `echo 2304000 >
   policy6/scaling_max_freq` mehr — Original unter `fps_samp2_uncap.bak`, r55-Befund);
   `sf_probe.sh` v2 (pro Snapshot layer-fresh, schreibt eigenes `sf_probe.log`);
@@ -35,11 +31,39 @@
   95** (Daemon-Pinning ist nicht sysfs-schraubbar); Gold-Cap-End-to-End-Test r59b:
   `p6=1708800 in 412/412 Samples` (capped-Sampler-Modus + ctl aktiv). Details im
   Abschnitt *Post-352-Messsituation*.
-- **KSU-Next Submodule**: `b100bd28` (`v3.3.0-95-gb100bd28`, dev-4.14-prctl-fix, UAPIv4)
-  - Runtime meldet `38309`/`uapi=4` (Kbuild-Basis 35000, Manager-Floor 34634) — nicht
-    „fixen", siehe KSU-Section.
+- **KSU-Next Submodule**: `72f8cc62` (`💀 kp_ksud.c`-Removal, unpumped), davor `86773df0`
+  (Dead-Cleanup), `9409a05f`. **UAPI=6**, Runtime 35000+revcount (build387 = `38523`).
+  - **su-Flow** (`feature/sucompat.c`, legacy <4.19-Adapter): exec `/system/bin/su` →
+    sucompat-Redirect → `/data/adb/ksud` → preexec-Escape (`hook_aarch64_execve`,
+    `ksu_preexec_ksud_escape` matcht **beide** Pfade: `/data/adb/ksud` +
+    `/data/adb/ksu/bin/ksud`) → `escape_with_root_profile()`.     **Root-Cause** des Dagewesenen: `kern_path("/data/adb/ksud")` als untrusted cred →
+    DAC-Durchlauf durch `/data/adb` (0700) verweigert → Lookup muss unter
+    `override_creds(ksu_cred)` laufen (5.x-Pfad machte das schon).
+  - **GRANT_ROOT**: `syscall(142 reboot-magic)` → ksu-fd → `ioctl(fd, _IO('K',1)
+    /*KSU_IOCTL_GRANT_ROOT*/)` → uid 0 (Termux ist allowlisted). erlaubt über
+    `allowed_for_su()` = manager-uid || allowlist-uid.
+  - **Features** (build387, `ksud feature list`): su_compat(0)/kernel_umount(1)/sulog(2)/
+    adb_root(3)/selinux_hide(4) **ENABLED**, shell_su_adb_only(6) DISABLED.
+  - **ksud**: `/data/adb/ksud` md5 `f3eacfd0` (v3.4.2-50-gb427a3f9, identisch
+    `libksud.so` App-Dir), Kontext `u:object_r:ksu_file:s0`; `libadbroot.so` (md5
+    `92f8e84a`) liegt unter `/data/adb/ksu/lib/` (adb_root-Feature-Preload-Pfad).
+    **ksud-Daemon läuft NICHT** (built-in-Modus, boot-behamster Spawn fehlt) — su/Root
+    funktioniert trotzdem; `post-fs-data` NICHT manuell nachfahren (Modul-Scripts
+    doppelt bearbeiten).
+  - **Crown-Bits** (Kumulativ-Slot bis Reboot, `include/ksu.h` bits 26–30):
+    `TAMPER_INIT(30)` `KSUD_EXEC(29)` `KSUD_ESCAPE(28)` `ESCAPE_RET0(27)`
+    `ESCAPE_FAIL(26)`; dmesg `/sdcard/Download/dmesg_b385.txt` (build386/ver 38522).
+- **On-device-Operativa (Wichtig für künftige Fix-Session)**:
+  1. **`cp` unter escaped-root-cred schreibt NULLen**: jedes `cp <src> <dst>` wenn
+     src in `/data/app/…/lib/arm64` bzw. bei großen Dateien — Inhalt Nullen bei
+     korrekter Länge. Immer `cat src > dst` + `md5sum`-Verifizieren, dann `chmod 755`
+     + `chcon u:object_r:ksu_file:s0 /data/adb/…`.
+  2. **`ksud install` niemals aus `/data/adb/ksud` selbst** (killt DAEMON_PATH vor dem
+     self-copy → ENOENT, Datei WEG). Die rust-Schritte bei Bedarf manuell replizieren.
 - **USB-Faults**: alle vier geschlossen (Build 336/338/348-Kette).
-- **User speaks German**; device reports go out in German
+- **User speaks German**; device reports go out in German; User flashen/rebootet selbst
+  (aosp-ZIP), meldet Build-/CI-Status. Releases/Tags nur mit explizitem OK.
+
 
 ## Repo & Docs Layout
 
