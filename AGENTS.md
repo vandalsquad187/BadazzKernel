@@ -8,7 +8,17 @@
   `34c3b8ea` pre-ksud-Escape → `786bcb00` TAMPER-Patch-Init, alles **geflasht & verifiziert**,
   Builds 383–387).
 - **Kernel**: `4.14.369` — K6A-kompatibel, KSU-Next **built-in, 4.14 direct-patch mode**
-  (14 Slots, `patch_ok=0x7f7f`, sys_call_table `0xffffff9a2d401000`).
+  (14 Slots, `patch_ok=0x7f7f`, sys_call_table `0xffffff9a2d401000`). **k6a_gov v1.6.0**
+  (Build 389-Scope): `gpu_floor`-Sysfs (Hz, 0=inaktiv) — GAMING-only KGSL-min_pwrlevel
+  via neuem Export `kgsl_k6a_set_min_level_idx()` (+min_idx in get_levels). On-device-
+  Proof build388-Kernel: `min_pwrlevel=2` pinnt `gpuclk=565 MHz`, restore 7 → 355.
+  Release-Pfad erfasst den User-MIN einmal (`gpu_floor_saved_min`) und restauriert ihn;
+  Status neu: `gpu_floor=`, `gpu_floor_last=`, `bt=` (Akkutemp, -1 unbekannt). GPU-
+  Tabelle live: 800/650/565/430/355/267/180/140 (idx 0–7; k6a sieht 0–6). KGSL-Interplay:
+  effektiver DCVS-Floor = `min_t(thermal_pwrlevel_floor=4, user_min)` → User-Min-Einträge
+  älter idx 4 (tiefer als 355 MHz) werden vom thermal-floor-Vorgabewert zurückgeclampt,
+  Einträge ≤ 4 greifen voll (live verifiziert). Gaming-Floors ≥ 355 (idx ≤ 4) sind der
+  relevante Bereich; dmesg-Proofs: `Build389:`-Marker.
 - **GitHub-Releases**: Releases entstehen automatisch pro Main-Bump (`v4.14.369-badazz-buildNNN`).
   **Name≠Scope-Regel bleibt**: nur `gh release list` + `build-info.txt (`BUILD_NUMBER`/
   `COMMIT_SHA`) zählen. Flashen ausdrücklich nur das **aosp-ZIP** (Gerät läuft crDroid).
@@ -23,7 +33,8 @@
   `sf_probe.sh` v2 (pro Snapshot layer-fresh, schreibt eigenes `sf_probe.log`);
   `arm.sh` mit 1560-s-Fenstern (Backups `arm.sh.bak-10min`). **Nie `fps_samp2.sh stop`
   aufrufen** — „stop" ist `DUR`, laufende Instanz trunciert `fps.log` (r59a zerstört).
-- **CODM-Messstand (r50–r59, alle build351/352, eine Runde pro Messung, gleiche Karte)**:
+- **CODM-Messstand (r50–r59, alle build351/352, crDroid/A16 — alle Runs liefen crDroid,
+  keine MIUI-Baseline; eine Runde pro Messung, gleiche Karte)**:
   Schwellen 96/99/102/93 sind der **+10…+13-med180-Hebel** (r52–r54 Ø 73,9 vs UC Ø 63,0);
   **Lüfter** hält die Spätrunde (r56 late-med 69,6 vs r57 45,6, bt 32 vs 41,7 °C —
   Kollaps = SoC-eigener CPU-Droop ab bt≈38 °C, k6a bleibt 100 % gaming); Trip95→98 °C

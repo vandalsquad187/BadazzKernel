@@ -3336,7 +3336,7 @@ void kgsl_pwrctrl_set_default_gpu_pwrlevel(struct kgsl_device *device)
 
 
 /* ── k6a-gov interface: read GPU pwrlevel table (BadazzKernel) ──── */
-int kgsl_k6a_get_levels(u32 *out, u32 max_n, u32 *cur_idx, u32 *max_idx)
+int kgsl_k6a_get_levels(u32 *out, u32 max_n, u32 *cur_idx, u32 *max_idx, u32 *min_idx)
 {
 	struct kgsl_device *device = kgsl_get_device(KGSL_DEVICE_3D0);
 	struct kgsl_pwrctrl *pwr;
@@ -3351,6 +3351,8 @@ int kgsl_k6a_get_levels(u32 *out, u32 max_n, u32 *cur_idx, u32 *max_idx)
 		*cur_idx = pwr->active_pwrlevel;
 	if (max_idx)
 		*max_idx = pwr->num_pwrlevels - 1;
+	if (min_idx)
+		*min_idx = pwr->min_pwrlevel;
 	mutex_unlock(&device->mutex);
 	return n;
 }
@@ -3381,3 +3383,22 @@ int kgsl_k6a_set_max_level_idx(unsigned int level)
 	return 0;
 }
 EXPORT_SYMBOL(kgsl_k6a_set_max_level_idx);
+
+/* ── k6a-gov interface: set GPU min pwrlevel idx (BadazzKernel) ────
+ * Same semantics as the min_pwrlevel sysfs store path. Larger idx =
+ * lower freq; this raises the floor under the GPU governor. Callable
+ * from process context only. Verified on-device (v1.6): min=2 pins
+ * gpuclk at 565 MHz, restoring the previous min releases it again.
+ */
+int kgsl_k6a_set_min_level_idx(unsigned int level)
+{
+	struct kgsl_device *device = kgsl_get_device(KGSL_DEVICE_3D0);
+
+	if (!device)
+		return -ENODEV;
+
+	kgsl_pwrctrl_min_pwrlevel_set(device, level);
+
+	return 0;
+}
+EXPORT_SYMBOL(kgsl_k6a_set_min_level_idx);

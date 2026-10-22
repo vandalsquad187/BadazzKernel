@@ -18,12 +18,13 @@
 #include <linux/fs.h>
 #include <linux/cpumask.h>
 
-extern int kgsl_k6a_get_levels(u32 *out, u32 max_n, u32 *cur_idx, u32 *max_idx);
+extern int kgsl_k6a_get_levels(u32 *out, u32 max_n, u32 *cur_idx, u32 *max_idx, u32 *min_idx);
 extern int kgsl_k6a_set_max_level_idx(unsigned int level);
+extern int kgsl_k6a_set_min_level_idx(unsigned int level);
 extern int k6a_devfreq_get_bw(const char *name, u32 *cur, u32 *min, u32 *max);
 extern int k6a_devfreq_set_bw(const char *name, u32 min, u32 max);
 
-#define K6A_GOV_VERSION       "1.5.2"
+#define K6A_GOV_VERSION       "1.6.0"
 #define K6A_GOV_KTHREAD_SLEEP_MS   250
 #define K6A_GOV_MAX_FREQS     32
 #define K6A_HIST_N            16
@@ -67,8 +68,12 @@ struct k6a_gov {
     u32 cd_l2_bw_gpubw, cd_l3_bw_gpubw, cd_l4_bw_gpubw;
     u32 cd_l2_bw_llcc, cd_l3_bw_llcc, cd_l4_bw_llcc;
     s32 gpu_last_idx;
+    u32 gpu_floor;
+    s32 gpu_floor_last;
+    s32 gpu_floor_saved_min;
     u32 bw_last_gpubw, bw_last_llcc;
     u32 hysteresis_fast, hysteresis_normal;
+    s32 batt_temp_c;
 
     u64 state_ts;
     u64 entry_since;
@@ -218,11 +223,11 @@ static void freq_init_worker(struct work_struct *work) {
     if (policy) cpufreq_cpu_put(policy);
 
     {
-        u32 gtab[K6A_GOV_MAX_FREQS]; u32 gn = 0, tl = 0;
-        int tl_ret = kgsl_k6a_get_levels(gtab, K6A_GOV_MAX_FREQS, &gn, &tl);
+        u32 gtab[K6A_GOV_MAX_FREQS]; u32 gn = 0, tl = 0, tmin = 0;
+        int tl_ret = kgsl_k6a_get_levels(gtab, K6A_GOV_MAX_FREQS, &gn, &tl, &tmin);
         if (tl_ret > 0)
-            pr_info("k6a_gov: gpu levels=%u cur_idx=%u max_idx=%u\n",
-                    tl_ret, gn, tl);
+            pr_info("Build389: gpu levels=%u cur_idx=%u max_idx=%u min_idx=%u\n",
+                    tl_ret, gn, tl, tmin);
         else
             pr_info("k6a_gov: gpu levels read failed (%d)\n", tl_ret);
     }
@@ -513,14 +518,14 @@ static u32 get_cd_gpu_cap(void) {
 }
 
 static void enforce_gpu_cap(void) {
-    u32 tab[K6A_GOV_MAX_FREQS], cur_idx = 0, max_idx = 0, cap;
+    u32 tab[K6A_GOV_MAX_FREQS], cur_idx = 0, max_idx = 0, min_idx = 0, cap;
     int n, i, best = -1;
 
     if (!gov || !gov->enabled || !gov->legacy_mode) { gpu_reset(); return; }
     cap = get_cd_gpu_cap();
     if (!cap) { gpu_reset(); return; }
 
-    n = kgsl_k6a_get_levels(tab, K6A_GOV_MAX_FREQS, &cur_idx, &max_idx);
+    n = kgsl_k6a_get_levels(tab, K6A_GOV_MAX_FREQS, &cur_idx, &max_idx, &min_idx);
     if (n <= 0) return;
 
     /* highest available level freq that still fits under the cap */
@@ -532,7 +537,64 @@ static void enforce_gpu_cap(void) {
     if (best != gov->gpu_last_idx) {
         if (!kgsl_k6a_set_max_level_idx((unsigned int)best)) {
             gov->gpu_last_idx = best;
-            pr_info("k6a_gov: gpu cap %uHz -> lvl %d (of %u)\n", cap, best, n);
+            pr_info("Build389: gpu cap %uHz -> lvl %d (of %u) min=%u\n", cap, best, n, min_idx);
+        }
+    }
+}
+
+/* ── GPU floor (v1.6): gaming-only min pwrlevel ────────────────────
+ * Rationale (r36): in CD(valleys) the GPU governor parks at 355 MHz
+ * while the CPU holds its cap, so gpu_floor = "never feed below X".
+ * Only tightened in GAMING; CD states release it (their caps already
+ * bound the ceiling). Write-on-change + kgsl's own clamps do the rest.
+ * On-device proof (Build389): min_pwrlevel=2 pins gpuclk at 565 MHz,
+ * restoring the previous index returns the DCVS to 355.
+ */
+static void gpu_floor_reset(void) {
+    int saved = gov->gpu_floor_saved_min;
+    u32 tab[K6A_GOV_MAX_FREQS], cur_idx = 0, max_idx = 0, min_idx = 0;
+
+    if (gov->gpu_floor_last < 0) return;
+    /* never leave kgsl pinned at a k6a-chosen floor */
+    if (saved < 0) {
+        int n = kgsl_k6a_get_levels(tab, K6A_GOV_MAX_FREQS, &cur_idx, &max_idx, &min_idx);
+        if (n <= 0) return;   /* table unavailable: retry next tick */
+        saved = (int)min_idx;
+        gov->gpu_floor_saved_min = saved;
+    }
+    if (kgsl_k6a_set_min_level_idx((unsigned int)saved)) return;
+    pr_info("Build389: gpu floor released (user min idx %d)\n", saved);
+    gov->gpu_floor_last = -1;
+}
+
+static void enforce_gpu_floor(void) {
+    u32 tab[K6A_GOV_MAX_FREQS], cur_idx = 0, max_idx = 0, min_idx = 0;
+    int n, i, best = -1;
+
+    if (!gov || !gov->enabled || !gov->legacy_mode) { gpu_floor_reset(); return; }
+    if (gov->state != K6A_GAMING || !gov->gpu_floor) { gpu_floor_reset(); return; }
+
+    n = kgsl_k6a_get_levels(tab, K6A_GOV_MAX_FREQS, &cur_idx, &max_idx, &min_idx);
+    if (n <= 0) return;
+
+    if (gov->gpu_floor_saved_min < 0) {
+        /* capture the user's min level once -> release restores it */
+        gov->gpu_floor_saved_min = (int)min_idx;
+        gov->gpu_floor_last = -1;
+    }
+
+    /* lowest level whose freq still satisfies the floor */
+    for (i = n - 1; i >= 0; i--)
+        if (tab[i] >= gov->gpu_floor) { best = i; break; }
+    if (best < 0) best = 0;   /* floor above the whole table: top level */
+
+    if ((int)min_idx <= best) return;   /* user min already covers this */
+
+    if (best != gov->gpu_floor_last) {
+        if (!kgsl_k6a_set_min_level_idx((unsigned int)best)) {
+            gov->gpu_floor_last = best;
+            pr_info("Build389: gpu floor %uHz -> min idx %d (user min %u)\n",
+                    gov->gpu_floor, best, min_idx);
         }
     }
 }
@@ -613,11 +675,13 @@ static void apply_limits(void) {
             apply_policy();
         }
         gpu_reset();
+        gpu_floor_reset();
         reset_bw_floors();
         return;
     }
     enforce_max_freq();
     enforce_gpu_cap();
+    enforce_gpu_floor();
     enforce_bw_floors();
 }
 
@@ -764,6 +828,7 @@ static int gov_thread(void *data) {
                 if (gov->battery_guard) {
                     int bt = read_bat_temp();
 
+                    gov->batt_temp_c = bt;
                     if (bt >= (int)gov->battery_guard_temp)
                         gov->batt_latched = true;
                     else if (bt < (int)gov->battery_guard_temp - 5)
@@ -775,6 +840,7 @@ static int gov_thread(void *data) {
                     }
                 } else {
                     gov->batt_latched = false;
+                    gov->batt_temp_c = -1;
                 }
                 state_machine();
             } else if (!gov->temp_warned) {
@@ -900,6 +966,8 @@ static ssize_t status_show(struct kobject *k, struct kobj_attribute *a, char *b)
     char vendor_cpu_limits[sizeof(gov->vendor_cpu_limits)];
     u64 throttle_events, state_age_ms;
     u32 gpu_caps[3], gpu_last_idx;
+    u32 gpu_floor;
+    s32 gpu_floor_last, batt_temp_c;
     u32 bw_floors_gpubw[3], bw_floors_llcc[3];
     u32 bwc, bwmn, bwmx;
     size_t len;
@@ -936,6 +1004,9 @@ static ssize_t status_show(struct kobject *k, struct kobj_attribute *a, char *b)
     gpu_caps[1] = gov->cd_l3_gpu_max;
     gpu_caps[2] = gov->cd_l4_gpu_max;
     gpu_last_idx = gov->gpu_last_idx;
+    gpu_floor = gov->gpu_floor;
+    gpu_floor_last = gov->gpu_floor_last;
+    batt_temp_c = gov->batt_temp_c;
     bw_floors_gpubw[0] = gov->cd_l2_bw_gpubw;
     bw_floors_gpubw[1] = gov->cd_l3_bw_gpubw;
     bw_floors_gpubw[2] = gov->cd_l4_bw_gpubw;
@@ -984,9 +1055,15 @@ static ssize_t status_show(struct kobject *k, struct kobj_attribute *a, char *b)
 
     len += scnprintf(b + len, PAGE_SIZE - len,
         "gpu_caps=%u %u %u\n"
-        "gpu_last_idx=%d\n",
+        "gpu_last_idx=%d\n"
+        "gpu_floor=%u\n"
+        "gpu_floor_last=%d\n"
+        "bt=%d\n",
         gpu_caps[0], gpu_caps[1], gpu_caps[2],
-        gpu_last_idx);
+        gpu_last_idx,
+        gpu_floor,
+        gpu_floor_last,
+        batt_temp_c);
 
     /* KB12M Phase 1: read-only bandwidth monitoring */
     if (!k6a_devfreq_get_bw("gpubw", &bwc, &bwmn, &bwmx))
@@ -1215,6 +1292,23 @@ static ssize_t gpu_caps_store(struct kobject *k, struct kobj_attribute *a, const
     return c;
 }
 
+static ssize_t gpu_floor_show(struct kobject *k, struct kobj_attribute *a, char *b) {
+    u32 v;
+    mutex_lock(&gov->lock);
+    v = gov->gpu_floor;
+    mutex_unlock(&gov->lock);
+    return sprintf(b, "%u\n", v);
+}
+static ssize_t gpu_floor_store(struct kobject *k, struct kobj_attribute *a, const char *b, size_t c) {
+    unsigned long v;
+    if (kstrtoul(b, 10, &v)) return -EINVAL;
+    if (v > 2000000000) return -EINVAL;   /* GPU-Takt, 0 = inaktiv */
+    mutex_lock(&gov->lock);
+    gov->gpu_floor = (u32)v;
+    mutex_unlock(&gov->lock);
+    return c;
+}
+
 static ssize_t bw_floors_show(struct kobject *k, struct kobj_attribute *a, char *b) {
     u32 gpubw[3], llcc[3];
     mutex_lock(&gov->lock);
@@ -1253,6 +1347,7 @@ static struct kobj_attribute attr_batt_guard  = __ATTR_RW(battery_guard);
 static struct kobj_attribute attr_batt_guard_temp = __ATTR_RW(battery_guard_temp);
 static struct kobj_attribute attr_poll_ms     = __ATTR_RW(poll_ms);
 static struct kobj_attribute attr_gpu_caps    = __ATTR_RW(gpu_caps);
+static struct kobj_attribute attr_gpu_floor   = __ATTR_RW(gpu_floor);
 static struct kobj_attribute attr_bw_floors   = __ATTR_RW(bw_floors);
 
 static struct attribute *gov_attrs[] = {
@@ -1267,6 +1362,7 @@ static struct attribute *gov_attrs[] = {
     &attr_batt_guard_temp.attr,
     &attr_poll_ms.attr,
     &attr_gpu_caps.attr,
+    &attr_gpu_floor.attr,
     &attr_bw_floors.attr,
     NULL,
 };
@@ -1319,6 +1415,10 @@ static int __init k6a_gov_init(void) {
                     gov->profile);
     }
     gov->gpu_last_idx = -1;
+    gov->gpu_floor = 0;
+    gov->gpu_floor_last = -1;
+    gov->gpu_floor_saved_min = -1;
+    gov->batt_temp_c = -1;
     gov->bw_last_gpubw = ~0u;
     gov->bw_last_llcc = ~0u;
 
@@ -1374,6 +1474,7 @@ static void __exit k6a_gov_exit(void) {
     gov->enforced_max = 0;
     apply_policy();
     kgsl_k6a_set_max_level_idx(0);   /* GPU-Cap freigeben */
+    gpu_floor_reset();               /* v1.6: GPU-Floor auf den User-Wert zurück */
     reset_bw_floors();               /* Build353: Exit-BW-Floor-Fix — Floors freigeben (war gelatcht, wie v1.3.1-Cap-Befund) */
     cancel_delayed_work_sync(&gov->freq_init_work);
     if (gov->kthread) kthread_stop(gov->kthread);
