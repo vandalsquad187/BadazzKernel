@@ -31,7 +31,8 @@
   95** (Daemon-Pinning ist nicht sysfs-schraubbar); Gold-Cap-End-to-End-Test r59b:
   `p6=1708800 in 412/412 Samples` (capped-Sampler-Modus + ctl aktiv). Details im
   Abschnitt *Post-352-Messsituation*.
-- **KSU-Next Submodule**: `72f8cc62` (`💀 kp_ksud.c`-Removal, unpumped), davor `86773df0`
+- **KSU-Next Submodule**: `72f8cc62` (kp_ksud.c-Removal, unpumped — kein eigener Build,
+  Binary neutral), davor `86773df0`
   (Dead-Cleanup), `9409a05f`. **UAPI=6**, Runtime 35000+revcount (build387 = `38523`).
   - **su-Flow** (`feature/sucompat.c`, legacy <4.19-Adapter): exec `/system/bin/su` →
     sucompat-Redirect → `/data/adb/ksud` → preexec-Escape (`hook_aarch64_execve`,
