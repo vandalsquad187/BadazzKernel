@@ -25,7 +25,10 @@ ramdisk_compression=gzip
 . ./tools/ak3-core.sh
 
 flash_banner() {
-  if [ -n "$BOOTMODE" ]; then
+  case "$ZIPFILE" in
+    /data/user/0/*) [ ! -e /twres ] && B=1 ;;
+  esac
+  if [ -n "$B" ]; then
     ui_print " ========================================"
     ui_print " ██████╗  █████╗  ██████╗  █████╗ ███████╗███████╗"
     ui_print " ██╔══██╗██╔══██╗██╔══██╗██╔══██╗╚══███╔╝╚══███╔╝"
