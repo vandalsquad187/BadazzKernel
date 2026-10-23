@@ -1665,6 +1665,30 @@ Syntax-Check (clang 21.1.8, Kern-Recipe aus Local Build Notes ohne `__ASSEMBLY__
 fs/susfs/susfs_core.c + susfs_features.c → beide rc=0, nur die (kern-wide bekannte)
 GNU-Variable-Sized-Warning aus `cgroup-defs.h`.
 
+## Android 17 Readiness (Audit 2026-10-23)
+
+A17 unterstützte Kernel-KMIs (AOSP Q4-Sync): `android17-6.18` (neu), `android16-6.12`
+(GKI), `android15-6.6`, `android14-6.1`, `android14-5.15` (Legacy-GKI). Unser 4.14
+ist nie GKI gewesen → bleibt **Legacy-Device-Path** mit launch-level VINTF-Konfig;
+A17 zwingt dem Kernel selbst keine Änderung auf. Ourkernels-Verdict: **A17-tauglich
+wie er ist**, keine fürsche Kernel-Arbeit nötig. Konsequenzen/Items:
+
+1. SUSFS-UNAME-Spoof `6.12.0-android16-6.12-perf-g1d01cd293` bleibt **gültig** —
+   KMI `android16-6.12` ist in A17 offiziell unterstützt; der Spoof deckt den
+   A17-Versionscheck für unsere 4.14-Basis ab.
+
+2. Config-Gate-Audit (nach Susfs-Bump, vor erstem sweet-A17-ROM-Flash):
+   defconfig gegen `kernel/configs/android-4.14` diffen, VINTF-Nerln (4.14-
+   Legacy-Frage) unverändert lassen; der build-Gate prüft Richtung dort schon.
+
+3. KSU/k6a-ctl: susfs-Supercall-ABI = v2.3.0 (Build 394 gesynced ✓),
+   KernelSU-Manager ABI compat essential; sepolicy.rule des Moduls unverändert
+   (A17 hat dieVendor-Namespace-Änderungen die wir brauchen NICHT geändert).
+
+4. Test: erster sweet-A17-ROM-Build = Boot + KSU + k6a_gov insmod seulement.
+   Bei Failure: `/proc/version`-Spoof-String + defconfig diff. Kein Plan-B
+   (6.1-Legacy bleibt bis Samsung Supportende).
+
 ## Working Agreements
 
 - **No code comments** — rationale lives in the commit body and in `pr_info` markers.
