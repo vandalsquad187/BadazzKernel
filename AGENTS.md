@@ -1636,6 +1636,35 @@ Messmethode-Änderungen:
   `fps.log` (r59a-Befund). Stop via `kill -INT <pid>` (Trap → `hp_cont` sauber), im Zweifel
   `arm.sh`-Neustart, oder `pgrep -f fps_samp2 && kill -INT`.
 
+## Build 394 Scope (SUSFS v2.3.0 kernel-core sync, 2026-10-23)
+
+Upstruktur-Aufnahme: susfs v2.3.0 lebt upstream (sidex15/pershoot/WildKernels, `kernel_patches/v2.3.0`
+und KernelSU-Next `legacy-susfs-v2`); KernelSU-Next 72f8cc62 trägt die SUS-Funktionen
+**im Submodul** (sus_mount/sus_path/susfs_kstat/susfs_opath/btf_layout/lsm_hook/susfs_main = LKM-
+Einstieg mit „refuse loading if in-built SuSFS is present"). Unser Kernel-Tree ist die
+Thin-Core/Variante (`fs/susfs/`-Split: core/features/kstat/mount/open_redirect/path/spoof,
+494 Z.) + Hooks nur in fs/stat.c (`susfs_sus_kstat_spoof_generic_fillattr`), fs/namei.c
+(SUS_PATH ×2), kernel/sys.c (uname), selinux/avc.c (avc-log). Der Bump ist deshalb
+**ABI-/Version-Sync, kein Feature-Portat**:
+
+| Änderung | Datei | Grund |
+|---|---|---|
+| `SUSFS_VERSION "v2.2.0" → "v2.3.0"` | `include/linux/susfs.h:13` | Version-String-Konsistenz mit Submodul-ABI (supercall meldet v2.3.0 aus `susfs_abi.h:62`) |
+| `DEFAULT_KSU_MNT_MINOR_DEV (1<<12)`, `STATX_SUS_KSTAT*` Bits, `susfs_is_current_app_uid()` | `include/linux/susfs_def.h` | upstream-True-Bit: Constants, die v2.3.0 ABI definieren; in Thin-Tree inert (keine super/world/state-Hooks), aber def.h #kein ABI-Drift |
+| `strcat` → gebundenes `strlcat`-Makro (SUSFS_APPEND_FEATURE) | `fs/susfs/susfs_features.c` | defensiv (8192-Puffer macht Overflow theoretisch unmöglich, aber verbiete Concat-Umbruch von v2.3.0-Muster) |
+| `Build394: susfs core v%s synced` pr_info | `fs/susfs/susfs_core.c:susfs_init` | post-flash dmesg-Beweis für die Version |
+| `.v210`-Leichen gelöscht (fs/susfs.c.v210 + 2 Header) | verworfene v2.1.0-Single-File-Backups | dead weight |
+
+Bewusst NICHT portiert: vfs_statfs/fdinfo/proc-fd-Spoof-Kanäle des 2.3-Refactors
+(61e9e48) und `fs/super.c`-MinorDev-Gap-Fix — die knallen an unsere Architektur
+(SUS-MOUNT = Submodul-Aufgabe, nicht Kernel-Blob); `result_mask`-Parameter des
+Upstream-Fills ist im 4.14-`generic_fillattr`-Site bedeutungslos (kein statx-Mask-Filter).
+SUSFS-Konfig (defconfig §5229–5237) unverändert.
+
+Syntax-Check (clang 21.1.8, Kern-Recipe aus Local Build Notes ohne `__ASSEMBLY__`):
+fs/susfs/susfs_core.c + susfs_features.c → beide rc=0, nur die (kern-wide bekannte)
+GNU-Variable-Sized-Warning aus `cgroup-defs.h`.
+
 ## Working Agreements
 
 - **No code comments** — rationale lives in the commit body and in `pr_info` markers.

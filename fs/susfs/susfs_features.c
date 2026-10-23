@@ -23,33 +23,40 @@ void susfs_get_enabled_features(void __user **user_info) {
 		info->err = -EFAULT;
 		goto out;
 	}
+#define SUSFS_APPEND_FEATURE(s) \
+	do { \
+		if (SUSFS_ENABLED_FEATURES_SIZE - strlen(info->enabled_features) - 1 > 0) \
+			strlcat(info->enabled_features, (s), SUSFS_ENABLED_FEATURES_SIZE); \
+	} while (0)
+
 #ifdef CONFIG_KSU_SUSFS_SUS_PATH
-	strcat(info->enabled_features, "CONFIG_KSU_SUSFS_SUS_PATH\n");
+	SUSFS_APPEND_FEATURE("CONFIG_KSU_SUSFS_SUS_PATH\n");
 #endif
 #ifdef CONFIG_KSU_SUSFS_SUS_MOUNT
-	strcat(info->enabled_features, "CONFIG_KSU_SUSFS_SUS_MOUNT\n");
+	SUSFS_APPEND_FEATURE("CONFIG_KSU_SUSFS_SUS_MOUNT\n");
 #endif
 #ifdef CONFIG_KSU_SUSFS_SUS_KSTAT
-	strcat(info->enabled_features, "CONFIG_KSU_SUSFS_SUS_KSTAT\n");
+	SUSFS_APPEND_FEATURE("CONFIG_KSU_SUSFS_SUS_KSTAT\n");
 #endif
 #ifdef CONFIG_KSU_SUSFS_SPOOF_UNAME
-	strcat(info->enabled_features, "CONFIG_KSU_SUSFS_SPOOF_UNAME\n");
+	SUSFS_APPEND_FEATURE("CONFIG_KSU_SUSFS_SPOOF_UNAME\n");
 #endif
 #ifdef CONFIG_KSU_SUSFS_ENABLE_LOG
-	strcat(info->enabled_features, "CONFIG_KSU_SUSFS_ENABLE_LOG\n");
+	SUSFS_APPEND_FEATURE("CONFIG_KSU_SUSFS_ENABLE_LOG\n");
 #endif
 #ifdef CONFIG_KSU_SUSFS_HIDE_KSU_SUSFS_SYMBOLS
-	strcat(info->enabled_features, "CONFIG_KSU_SUSFS_HIDE_KSU_SUSFS_SYMBOLS\n");
+	SUSFS_APPEND_FEATURE("CONFIG_KSU_SUSFS_HIDE_KSU_SUSFS_SYMBOLS\n");
 #endif
 #ifdef CONFIG_KSU_SUSFS_SPOOF_CMDLINE_OR_BOOTCONFIG
-	strcat(info->enabled_features, "CONFIG_KSU_SUSFS_SPOOF_CMDLINE_OR_BOOTCONFIG\n");
+	SUSFS_APPEND_FEATURE("CONFIG_KSU_SUSFS_SPOOF_CMDLINE_OR_BOOTCONFIG\n");
 #endif
 #ifdef CONFIG_KSU_SUSFS_OPEN_REDIRECT
-	strcat(info->enabled_features, "CONFIG_KSU_SUSFS_OPEN_REDIRECT\n");
+	SUSFS_APPEND_FEATURE("CONFIG_KSU_SUSFS_OPEN_REDIRECT\n");
 #endif
 #ifdef CONFIG_KSU_SUSFS_SUS_MAP
-	strcat(info->enabled_features, "CONFIG_KSU_SUSFS_SUS_MAP\n");
+	SUSFS_APPEND_FEATURE("CONFIG_KSU_SUSFS_SUS_MAP\n");
 #endif
+#undef SUSFS_APPEND_FEATURE
 	info->err = 0;
 out:
 	if (copy_to_user((struct st_susfs_enabled_features __user*)*user_info, info, sizeof(*info)))

@@ -19,5 +19,6 @@ out:
 }
 
 void susfs_init(void) {
+	pr_info("Build394: susfs core v%s synced\n", SUSFS_VERSION);
 	SUSFS_LOGI("SUSFS initialized\n");
 }
