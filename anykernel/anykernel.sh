@@ -24,6 +24,48 @@ ramdisk_compression=gzip
 
 . ./tools/ak3-core.sh
 
+flash_banner() {
+  if [ -n "$BOOTMODE" ]; then
+    ui_print " ========================================"
+    ui_print " ██████╗  █████╗  ██████╗  █████╗ ███████╗███████╗"
+    ui_print " ██╔══██╗██╔══██╗██╔══██╗██╔══██╗╚══███╔╝╚══███╔╝"
+    ui_print " ██████╔╝███████║██║  ██║███████║  ███╔╝   ███╔╝"
+    ui_print " ██╔══██╗██╔══██║██║  ██║██╔══██║ ███╔╝   ███╔╝ "
+    ui_print " ██████╔╝██║  ██║██████╔╝██║  ██║███████╗███████╗"
+    ui_print " ╚═════╝ ╚═╝  ╚═╝╚═════╝ ╚═╝  ╚═╝╚══════╝╚══════╝"
+    ui_print " "
+    ui_print " ██╗  ██╗███████╗██████╗ ███╗   ██╗███████╗██╗"
+    ui_print " ██║ ██╔╝██╔════╝██╔══██╗████╗  ██║██╔════╝██║"
+    ui_print " █████╔╝ █████╗  ██████╔╝██╔██╗ ██║█████╗  ██║"
+    ui_print " ██╔═██╗ ██╔══╝  ██╔══██╗██║╚██╗██║██╔══╝  ██║"
+    ui_print " ██║  ██╗███████╗██║  ██║██║ ╚████║███████╗███████╗"
+    ui_print " ╚═╝  ╚═╝╚══════╝╚═╝  ╚═╝╚═╝  ╚═══╝╚══════╝╚══════╝"
+    ui_print " "
+    ui_print "            ________        ________"
+    ui_print "            \ .     \      / .     /"
+    ui_print "             \_______\    /_______/"
+    ui_print "              \ .     \  / .     /"
+    ui_print "               \_______\/_______/"
+    ui_print "                   .         ."
+    ui_print "                     \     /"
+    ui_print "                      \   /"
+    ui_print "                       \ /"
+    ui_print "                        <>"
+    ui_print "             CUSTOM ANDROID KERNEL"
+    ui_print "                  by BADAZZ89"
+    ui_print "    [ 8 CORES ] [ 4.14.369 ] [ KSU BUILTIN ]"
+    ui_print " ========================================"
+  else
+    ui_print " "
+    ui_print " ----------"
+    ui_print " [ BADAZZ89 KERNEL ]"
+    ui_print " [ 8 CORES ] [ 4.14.369 ]"
+    ui_print " [ KSU BUILTIN ]"
+    ui_print " ----------"
+  fi
+}
+flash_banner
+
 # Boot-Image entpacken, Kernel ersetzen, neu packen
 split_boot
 
@@ -51,5 +93,9 @@ if [ -f "$AKHOME/k6a_gov.ko" ] && [ -d /data/adb ]; then
     fi
   fi
 fi
+
+ui_print " ========================================"
+ui_print "        [ BADAZZ89 ] flash done"
+ui_print "        stay cool, game hard"
 
 exit $AK_RC
