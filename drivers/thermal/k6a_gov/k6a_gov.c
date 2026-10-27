@@ -1,3 +1,4 @@
+#define pr_fmt(fmt) "k6a_gov: " fmt
 #include <linux/module.h>
 #include <linux/kernel.h>
 #include <linux/init.h>
@@ -11,6 +12,7 @@
 #include <linux/ktime.h>
 #include <linux/notifier.h>
 #include <linux/pid.h>
+#include <linux/threads.h>
 #include <linux/sched.h>
 #include <linux/delay.h>
 #include <linux/workqueue.h>
@@ -103,14 +105,14 @@ struct k6a_gov {
     int freq_init_retries;
 };
 
-struct k6a_gov *gov;
+static struct k6a_gov *gov;
 
 static int legacy_mode = 1;
-module_param(legacy_mode, int, 0644);
+module_param(legacy_mode, int, 0444);
 MODULE_PARM_DESC(legacy_mode, "1 = Kernel Cooldown (CPU-only) (default=1)");
 
 static int profile = K6A_PROFILE_GAMING;
-module_param(profile, int, 0644);
+module_param(profile, int, 0444);
 MODULE_PARM_DESC(profile, "Default profile: 0=off, 1=gaming, 2=battery, 3=badazz, 4=custom, 5=badazz_safe");
 
 /* ── Profile Defaults (Hz values, auto-mapped to table) ──────────── */
@@ -229,13 +231,13 @@ static void freq_init_worker(struct work_struct *work) {
             pr_info("Build389: gpu levels=%u cur_idx=%u max_idx=%u min_idx=%u\n",
                     tl_ret, gn, tl, tmin);
         else
-            pr_info("k6a_gov: gpu levels read failed (%d)\n", tl_ret);
+            pr_info("gpu levels read failed (%d)\n", tl_ret);
     }
 
     mutex_lock(&g->lock);
     if (g->gold_num > 0) {
         clamp_cd_freqs();
-        pr_info("k6a_gov: freq tables loaded: Gold=%u\n", g->gold_num);
+        pr_info("freq tables loaded: Gold=%u\n", g->gold_num);
         if (g->state != K6A_OFF && g->enabled && g->legacy_mode)
             enforce_max_freq();
         mutex_unlock(&g->lock);
@@ -246,7 +248,7 @@ static void freq_init_worker(struct work_struct *work) {
     if (++g->freq_init_retries < 30) {
         schedule_delayed_work(&g->freq_init_work, msecs_to_jiffies(500));
     } else {
-        pr_warn("k6a_gov: freq init failed after 30 retries, using defaults\n");
+        pr_warn("freq init failed after 30 retries, using defaults\n");
     }
 }
 
@@ -284,6 +286,9 @@ static void enforce_max_freq(void) {
     if (p) {
         seen = p->max;
         hard = p->cpuinfo.max_freq;
+        /* erwartete Obergrenze = was der User selbst erlaubt */
+        if (p->user_policy.max && p->user_policy.max < hard)
+            hard = p->user_policy.max;
         cpufreq_cpu_put(p);
     }
 
@@ -503,7 +508,7 @@ done:
 static void gpu_reset(void) {
     if (gov->gpu_last_idx >= 0) {
         if (!kgsl_k6a_set_max_level_idx(0))
-            pr_info("k6a_gov: gpu cap released\n");
+            pr_info("gpu cap released\n");
         gov->gpu_last_idx = -1;
     }
 }
@@ -565,11 +570,12 @@ static void gpu_floor_reset(void) {
     if (kgsl_k6a_set_min_level_idx((unsigned int)saved)) return;
     pr_info("Build389: gpu floor released (user min idx %d)\n", saved);
     gov->gpu_floor_last = -1;
+    gov->gpu_floor_saved_min = -1;
 }
 
 static void enforce_gpu_floor(void) {
     u32 tab[K6A_GOV_MAX_FREQS], cur_idx = 0, max_idx = 0, min_idx = 0;
-    int n, i, best = -1;
+    int n, i, best = -1, user_min;
 
     if (!gov || !gov->enabled || !gov->legacy_mode) { gpu_floor_reset(); return; }
     if (gov->state != K6A_GAMING || !gov->gpu_floor) { gpu_floor_reset(); return; }
@@ -577,25 +583,28 @@ static void enforce_gpu_floor(void) {
     n = kgsl_k6a_get_levels(tab, K6A_GOV_MAX_FREQS, &cur_idx, &max_idx, &min_idx);
     if (n <= 0) return;
 
-    if (gov->gpu_floor_saved_min < 0) {
-        /* capture the user's min level once -> release restores it */
-        gov->gpu_floor_saved_min = (int)min_idx;
-        gov->gpu_floor_last = -1;
-    }
+    /* Min-Level des Users: solange wir pinnen, der gemerkte Wert,
+     * sonst das, was kgsl gerade meldet */
+    user_min = gov->gpu_floor_last >= 0 ? gov->gpu_floor_saved_min : (int)min_idx;
 
     /* lowest level whose freq still satisfies the floor */
     for (i = n - 1; i >= 0; i--)
         if (tab[i] >= gov->gpu_floor) { best = i; break; }
     if (best < 0) best = 0;   /* floor above the whole table: top level */
 
-    if ((int)min_idx <= best) return;   /* user min already covers this */
+    if (user_min <= best) {   /* user min already covers this */
+        gpu_floor_reset();
+        return;
+    }
+    if (best == gov->gpu_floor_last) return;
 
-    if (best != gov->gpu_floor_last) {
-        if (!kgsl_k6a_set_min_level_idx((unsigned int)best)) {
-            gov->gpu_floor_last = best;
-            pr_info("Build389: gpu floor %uHz -> min idx %d (user min %u)\n",
-                    gov->gpu_floor, best, min_idx);
-        }
+    if (gov->gpu_floor_last < 0)
+        gov->gpu_floor_saved_min = user_min;   /* vor dem ersten Pin merken */
+
+    if (!kgsl_k6a_set_min_level_idx((unsigned int)best)) {
+        gov->gpu_floor_last = best;
+        pr_info("Build389: gpu floor %uHz -> min idx %d (user min %d)\n",
+                gov->gpu_floor, best, user_min);
     }
 }
 
@@ -686,16 +695,44 @@ static void apply_limits(void) {
 }
 
 /* ── Battery Guard ─────────────────────────────────────────────── */
-static int read_bat_temp(void) {
+/* 0 = ok, sonst Fehlercode; *celsius nur bei Erfolg gesetzt */
+static int read_bat_temp(int *celsius) {
     struct power_supply *psy;
     union power_supply_propval val;
     int ret;
+
     psy = power_supply_get_by_name("battery");
-    if (!psy) return 0;
-    ret = psy->desc->get_property(psy, POWER_SUPPLY_PROP_TEMP, &val);
+    if (!psy) return -ENODEV;
+    ret = power_supply_get_property(psy, POWER_SUPPLY_PROP_TEMP, &val);
     power_supply_put(psy);
-    if (ret) return 0;
-    return val.intval / 10;  /* Zehntelgrad → Celsius */
+    if (ret) return ret;
+    *celsius = val.intval / 10;  /* Zehntelgrad -> Celsius */
+    return 0;
+}
+
+/* caller holds gov->lock */
+static void battery_guard_tick(void) {
+    int bt;
+
+    if (!gov->battery_guard) {
+        gov->batt_latched = false;
+        gov->batt_temp_c = -1;
+        return;
+    }
+    if (read_bat_temp(&bt))
+        return;   /* Lesefehler: Latch und letzten Wert behalten */
+
+    gov->batt_temp_c = bt;
+    if (bt >= (int)gov->battery_guard_temp)
+        gov->batt_latched = true;
+    else if (bt < (int)gov->battery_guard_temp - 5)
+        gov->batt_latched = false;
+
+    if (gov->batt_latched && gov->state == K6A_GAMING) {
+        set_state_locked(K6A_CD_L2);
+        gov->throttle_events++;
+        pr_warn_ratelimited("Build345: battery guard %dC -> CD_L2\n", bt);
+    }
 }
 
 /* ── Kthread ─────────────────────────────────────────────────────── */
@@ -820,28 +857,12 @@ static int gov_thread(void *data) {
                 }
             }
             t = read_temp();
+            battery_guard_tick();
             if (gov->temp_valid) {
                 gov->temp_celsius = t;
                 if (gov->temp_warned)
                     pr_info("Build340: temp source restored (src=%u)\n", gov->temp_src);
                 gov->temp_warned = false;
-                if (gov->battery_guard) {
-                    int bt = read_bat_temp();
-
-                    gov->batt_temp_c = bt;
-                    if (bt >= (int)gov->battery_guard_temp)
-                        gov->batt_latched = true;
-                    else if (bt < (int)gov->battery_guard_temp - 5)
-                        gov->batt_latched = false;
-                    if (gov->batt_latched && gov->state == K6A_GAMING) {
-                        set_state_locked(K6A_CD_L2);
-                        gov->throttle_events++;
-                        pr_warn_ratelimited("Build345: battery guard %dC -> CD_L2\n", bt);
-                    }
-                } else {
-                    gov->batt_latched = false;
-                    gov->batt_temp_c = -1;
-                }
                 state_machine();
             } else if (!gov->temp_warned) {
                 gov->temp_warned = true;
@@ -900,6 +921,7 @@ static ssize_t enable_store(struct kobject *k, struct kobj_attribute *a, const c
         gov->entry_since = 0;
         gov->enforced_max = 0;
         gpu_reset();
+        gpu_floor_reset();
         reset_bw_floors();
         apply_policy();
     }
@@ -968,6 +990,7 @@ static ssize_t status_show(struct kobject *k, struct kobj_attribute *a, char *b)
     u32 gpu_caps[3], gpu_last_idx;
     u32 gpu_floor;
     s32 gpu_floor_last, batt_temp_c;
+    pid_t game_pid;
     u32 bw_floors_gpubw[3], bw_floors_llcc[3];
     u32 bwc, bwmn, bwmx;
     size_t len;
@@ -1007,6 +1030,7 @@ static ssize_t status_show(struct kobject *k, struct kobj_attribute *a, char *b)
     gpu_floor = gov->gpu_floor;
     gpu_floor_last = gov->gpu_floor_last;
     batt_temp_c = gov->batt_temp_c;
+    game_pid = gov->game_pid;
     bw_floors_gpubw[0] = gov->cd_l2_bw_gpubw;
     bw_floors_gpubw[1] = gov->cd_l3_bw_gpubw;
     bw_floors_gpubw[2] = gov->cd_l4_bw_gpubw;
@@ -1065,6 +1089,8 @@ static ssize_t status_show(struct kobject *k, struct kobj_attribute *a, char *b)
         gpu_floor_last,
         batt_temp_c);
 
+    len += scnprintf(b + len, PAGE_SIZE - len, "game_pid=%d\n", game_pid);
+
     /* KB12M Phase 1: read-only bandwidth monitoring */
     if (!k6a_devfreq_get_bw("gpubw", &bwc, &bwmn, &bwmx))
         len += scnprintf(b + len, PAGE_SIZE - len,
@@ -1122,8 +1148,10 @@ static ssize_t game_pid_show(struct kobject *k, struct kobj_attribute *a, char *
     return sprintf(b, "%d\n", pid);
 }
 static ssize_t game_pid_store(struct kobject *k, struct kobj_attribute *a, const char *b, size_t c) {
-    unsigned long v;
-    if (kstrtoul(b, 10, &v)) return -EINVAL;
+    int v;
+
+    if (kstrtoint(b, 10, &v)) return -EINVAL;
+    if (v < 0 || v > PID_MAX_LIMIT) return -EINVAL;   /* 0 = kein Game */
     mutex_lock(&gov->lock);
     gov->game_pid = v;
     mutex_unlock(&gov->lock);
@@ -1424,7 +1452,6 @@ static int __init k6a_gov_init(void) {
 
     INIT_DELAYED_WORK(&gov->freq_init_work, freq_init_worker);
     gov->freq_init_retries = 0;
-    schedule_delayed_work(&gov->freq_init_work, 0);
 
     gov->kobj = kobject_create_and_add("k6a_gov", kernel_kobj);
     if (!gov->kobj) { ret = -ENOMEM; goto err; }
@@ -1433,24 +1460,26 @@ static int __init k6a_gov_init(void) {
 
     ret = cpufreq_register_notifier(&k6a_cpufreq_nb, CPUFREQ_POLICY_NOTIFIER);
     if (ret) {
-        pr_err("k6a_gov: cpufreq_register_notifier failed: %d\n", ret);
+        pr_err("cpufreq_register_notifier failed: %d\n", ret);
         goto err_sysfs;
     }
 
     gov->cooling_dev = thermal_cooling_device_register("k6a_gov", gov, &cool_ops);
     if (IS_ERR(gov->cooling_dev)) {
         ret = PTR_ERR(gov->cooling_dev);
-        pr_err("k6a_gov: cooling device registration failed: %d\n", ret);
+        pr_err("cooling device registration failed: %d\n", ret);
         goto err_cpufreq;
     }
 
     gov->enabled = true;
     gov->kthread = kthread_run(gov_thread, gov, "k6a_gov");
     if (IS_ERR(gov->kthread)) {
-        pr_err("k6a_gov: kthread creation failed\n");
+        pr_err("kthread creation failed\n");
         ret = PTR_ERR(gov->kthread);
         goto err_cooling;
     }
+
+    schedule_delayed_work(&gov->freq_init_work, 0);
 
     pr_info("Build345: k6a_gov v%s loaded (legacy=%d profile=%d freq_init=deferred)\n",
             K6A_GOV_VERSION, gov->legacy_mode, gov->profile);
