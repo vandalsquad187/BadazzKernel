@@ -39,115 +39,144 @@
 
 #define USE_LMH_DEV	0
 
-/* Dynamic thermal floor thresholds (in millidegrees) - configurable via sysfs */
+/*
+ * Dynamic thermal floor: begrenzt die maximale Drosseltiefe (cooling state)
+ * abhaengig von der Gold-Temperatur. Temperaturen in Millicelsius.
+ *
+ *   temp < temps[0] -> max. Level levels[0]
+ *   temp < temps[1] -> max. Level levels[1]
+ *   temp < temps[2] -> max. Level levels[2]
+ *   sonst           -> Level 8
+ *   temp >= hard_temp -> Floor aufgehoben (volle Drosselung inkl. Core-Isolation)
+ */
+
+/* 1 = Floor nur fuer Cluster ohne CPU0 (Gold), 0 = alle Cluster (bisheriges Verhalten) */
+#define THERMAL_FLOOR_GOLD_ONLY		0
+
 static unsigned int thermal_floor_temps[3] = {85000, 90000, 95000};
 static unsigned int thermal_floor_levels[3] = {6, 7, 8};
+static unsigned int thermal_floor_hard_temp = 100000;
+static bool thermal_floor_enable = true;
 
-/* Sysfs interface for runtime thermal floor configuration */
-static int thermal_floor_temp1 = 85000;
-static int thermal_floor_temp2 = 90000;
-static int thermal_floor_temp3 = 95000;
+/* serialisiert nur die sysfs-Schreiber, der Lesepfad nutzt READ_ONCE */
+static DEFINE_MUTEX(thermal_floor_lock);
 
-static int get_thermal_floor_level(unsigned int temp)
+static unsigned int get_thermal_floor_level(unsigned int temp)
 {
-	if (temp < thermal_floor_temps[0])
-		return min(thermal_floor_levels[0], 8u);
-	else if (temp < thermal_floor_temps[1])
-		return min(thermal_floor_levels[1], 8u);
-	else if (temp < thermal_floor_temps[2])
-		return min(thermal_floor_levels[2], 8u);
+	int i;
+
+	for (i = 0; i < 3; i++)
+		if (temp < READ_ONCE(thermal_floor_temps[i]))
+			return min_t(unsigned int, thermal_floor_levels[i], 8u);
 	return 8;
 }
 
-/* Sysfs handlers for thermal floor configuration */
-static ssize_t thermal_floor_temp1_show(struct kobject *kobj,
-					struct kobj_attribute *attr, char *buf)
+/* idx 0..2: temps[idx] setzen, Reihenfolge temp1 < temp2 < temp3 < hard_temp */
+static ssize_t thermal_floor_set_temp(int idx, const char *buf, size_t count)
 {
-	return sprintf(buf, "%u\n", thermal_floor_temp1);
-}
-
-static ssize_t thermal_floor_temp1_store(struct kobject *kobj,
-					 struct kobj_attribute *attr,
-					 const char *buf, size_t count)
-{
+	unsigned int val;
 	int ret;
-	unsigned long val;
 
-	ret = kstrtoul(buf, 10, &val);
+	ret = kstrtouint(buf, 10, &val);
 	if (ret)
 		return ret;
-
 	if (val > 150000)
 		return -EINVAL;
 
-	thermal_floor_temp1 = val;
-	thermal_floor_temps[0] = val;
+	mutex_lock(&thermal_floor_lock);
+	if ((idx > 0 && val <= thermal_floor_temps[idx - 1]) ||
+	    (idx < 2 && val >= thermal_floor_temps[idx + 1]) ||
+	    (idx == 2 && val >= thermal_floor_hard_temp)) {
+		mutex_unlock(&thermal_floor_lock);
+		return -EINVAL;
+	}
+	WRITE_ONCE(thermal_floor_temps[idx], val);
+	mutex_unlock(&thermal_floor_lock);
 	return count;
 }
 
-static ssize_t thermal_floor_temp2_show(struct kobject *kobj,
-					struct kobj_attribute *attr, char *buf)
+#define THERMAL_FLOOR_TEMP_ATTR(n, idx)					\
+static ssize_t thermal_floor_temp##n##_show(struct kobject *kobj,	\
+			struct kobj_attribute *attr, char *buf)		\
+{									\
+	return sprintf(buf, "%u\n", READ_ONCE(thermal_floor_temps[idx])); \
+}									\
+static ssize_t thermal_floor_temp##n##_store(struct kobject *kobj,	\
+			struct kobj_attribute *attr, const char *buf,	\
+			size_t count)					\
+{									\
+	return thermal_floor_set_temp(idx, buf, count);			\
+}									\
+static struct kobj_attribute thermal_floor_temp##n##_attr =		\
+	__ATTR(thermal_floor_temp##n, 0644, thermal_floor_temp##n##_show, \
+	       thermal_floor_temp##n##_store)
+
+THERMAL_FLOOR_TEMP_ATTR(1, 0);
+THERMAL_FLOOR_TEMP_ATTR(2, 1);
+THERMAL_FLOOR_TEMP_ATTR(3, 2);
+
+static ssize_t thermal_floor_hard_temp_show(struct kobject *kobj,
+					    struct kobj_attribute *attr,
+					    char *buf)
 {
-	return sprintf(buf, "%u\n", thermal_floor_temp2);
+	return sprintf(buf, "%u\n", READ_ONCE(thermal_floor_hard_temp));
 }
 
-static ssize_t thermal_floor_temp2_store(struct kobject *kobj,
-					 struct kobj_attribute *attr,
-					 const char *buf, size_t count)
+static ssize_t thermal_floor_hard_temp_store(struct kobject *kobj,
+					     struct kobj_attribute *attr,
+					     const char *buf, size_t count)
 {
+	unsigned int val;
 	int ret;
-	unsigned long val;
 
-	ret = kstrtoul(buf, 10, &val);
+	ret = kstrtouint(buf, 10, &val);
 	if (ret)
 		return ret;
-
 	if (val > 150000)
 		return -EINVAL;
 
-	thermal_floor_temp2 = val;
-	thermal_floor_temps[1] = val;
+	mutex_lock(&thermal_floor_lock);
+	if (val <= thermal_floor_temps[2]) {
+		mutex_unlock(&thermal_floor_lock);
+		return -EINVAL;
+	}
+	WRITE_ONCE(thermal_floor_hard_temp, val);
+	mutex_unlock(&thermal_floor_lock);
 	return count;
 }
 
-static ssize_t thermal_floor_temp3_show(struct kobject *kobj,
-					struct kobj_attribute *attr, char *buf)
+static ssize_t thermal_floor_enable_show(struct kobject *kobj,
+					 struct kobj_attribute *attr,
+					 char *buf)
 {
-	return sprintf(buf, "%u\n", thermal_floor_temp3);
+	return sprintf(buf, "%d\n", READ_ONCE(thermal_floor_enable));
 }
 
-static ssize_t thermal_floor_temp3_store(struct kobject *kobj,
-					 struct kobj_attribute *attr,
-					 const char *buf, size_t count)
+static ssize_t thermal_floor_enable_store(struct kobject *kobj,
+					  struct kobj_attribute *attr,
+					  const char *buf, size_t count)
 {
+	bool v;
 	int ret;
-	unsigned long val;
 
-	ret = kstrtoul(buf, 10, &val);
+	ret = kstrtobool(buf, &v);
 	if (ret)
 		return ret;
-
-	if (val > 150000)
-		return -EINVAL;
-
-	thermal_floor_temp3 = val;
-	thermal_floor_temps[2] = val;
+	WRITE_ONCE(thermal_floor_enable, v);
 	return count;
 }
 
-static struct kobj_attribute thermal_floor_temp1_attr =
-	__ATTR(thermal_floor_temp1, 0644, thermal_floor_temp1_show,
-	       thermal_floor_temp1_store);
+static struct kobj_attribute thermal_floor_enable_attr =
+	__ATTR(thermal_floor_enable, 0644, thermal_floor_enable_show,
+	       thermal_floor_enable_store);
 
-static struct kobj_attribute thermal_floor_temp2_attr =
-	__ATTR(thermal_floor_temp2, 0644, thermal_floor_temp2_show,
-	       thermal_floor_temp2_store);
-
-static struct kobj_attribute thermal_floor_temp3_attr =
-	__ATTR(thermal_floor_temp3, 0644, thermal_floor_temp3_show,
-	       thermal_floor_temp3_store);
+static struct kobj_attribute thermal_floor_hard_temp_attr =
+	__ATTR(thermal_floor_hard_temp, 0644, thermal_floor_hard_temp_show,
+	       thermal_floor_hard_temp_store);
 
 static struct attribute *thermal_floor_attrs[] = {
+	&thermal_floor_enable_attr.attr,
+	&thermal_floor_hard_temp_attr.attr,
 	&thermal_floor_temp1_attr.attr,
 	&thermal_floor_temp2_attr.attr,
 	&thermal_floor_temp3_attr.attr,
@@ -161,12 +190,16 @@ static struct attribute_group thermal_floor_attr_group = {
 static int __init thermal_floor_init(void)
 {
 	struct kobject *k6a_kobj;
+	int ret;
 
 	k6a_kobj = kobject_create_and_add("k6a_thermal", kernel_kobj);
 	if (!k6a_kobj)
 		return -ENOMEM;
 
-	return sysfs_create_group(k6a_kobj, &thermal_floor_attr_group);
+	ret = sysfs_create_group(k6a_kobj, &thermal_floor_attr_group);
+	if (ret)
+		kobject_put(k6a_kobj);
+	return ret;
 }
 device_initcall(thermal_floor_init);
 
@@ -818,6 +851,39 @@ static int cpufreq_get_cur_state(struct thermal_cooling_device *cdev,
  *
  * Return: 0 on success, an error code otherwise.
  */
+/*
+ * Begrenzt den angeforderten Cooling-State auf die Floor-Tiefe, solange die
+ * Temperatur unter hard_temp liegt. Nicht lesbare Temperatur = kein Eingriff.
+ */
+static unsigned long thermal_floor_clamp(struct cpufreq_cooling_device *cdev,
+					 unsigned long state)
+{
+	struct thermal_zone_device *tz;
+	unsigned long allowed;
+	int temp = 0;
+
+	if (!READ_ONCE(thermal_floor_enable))
+		return state;
+
+#if THERMAL_FLOOR_GOLD_ONLY
+	/* CPU 0 liegt immer im Silver-Policy */
+	if (cpumask_test_cpu(0, cdev->policy->related_cpus))
+		return state;
+#endif
+
+	tz = thermal_zone_get_zone_by_name("cpu-1-0-usr");
+	if (IS_ERR(tz) || thermal_zone_get_temp(tz, &temp) || temp <= 0)
+		return state;
+
+	/* harte Grenze: Floor aufgehoben, volle Drosselung inkl. Core-Isolation */
+	if ((unsigned int)temp >= READ_ONCE(thermal_floor_hard_temp))
+		return state;
+
+	allowed = min_t(unsigned long, get_thermal_floor_level(temp),
+			cdev->max_level);
+	return min(state, allowed);
+}
+
 static int cpufreq_set_cur_state(struct thermal_cooling_device *cdev,
 				 unsigned long state)
 {
@@ -832,19 +898,8 @@ static int cpufreq_set_cur_state(struct thermal_cooling_device *cdev,
 	if (WARN_ON(state > cpufreq_cdev->max_level))
 		state = cpufreq_cdev->max_level;
 
-	/* Dynamic cooling floor: clamp state based on SoC temperature */
-	{
-		int temp = 0;
-		struct thermal_zone_device *tz =
-			thermal_zone_get_zone_by_name("cpu-1-0-usr");
-		if (!IS_ERR(tz) && !thermal_zone_get_temp(tz, &temp) && temp > 0) {
-			unsigned long allowed = cpufreq_cdev->max_level;
-			allowed = min((unsigned long)get_thermal_floor_level(temp),
-				      cpufreq_cdev->max_level);
-			if (state > allowed)
-				state = allowed;
-		}
-	}
+	/* Dynamic cooling floor: Drosseltiefe temperaturabhaengig begrenzen */
+	state = thermal_floor_clamp(cpufreq_cdev, state);
 
 	/* Check if the old cooling action is same as new cooling action */
 	if (cpufreq_cdev->cpufreq_state == state)
