@@ -1,82 +1,95 @@
 # Kernel Build Status
 
 ## Current State
-- **Repo**: `vandalsquad187/BadazzKernel` branch `main` @ **`f9b2e6aab`** (Build 388 scope:
-  KernelSU-Next-Submodule `86773df0` — tote Monolith-TUs entfernt; Binary unverändert).
-  CI run `39857009034` queued beim Verfassen. Davor `f9b2e6aab`→`046760b0e` (Submodule-Bump-
-  Kette `9409a05f` su-shim-Cred-Fix → `ada691bf` Diag-Bits → `8082812b` Len-Fix →
-  `34c3b8ea` pre-ksud-Escape → `786bcb00` TAMPER-Patch-Init, alles **geflasht & verifiziert**,
-  Builds 383–387).
-- **Kernel**: `4.14.369` — K6A-kompatibel, KSU-Next **built-in, 4.14 direct-patch mode**
-  (14 Slots, `patch_ok=0x7f7f`, sys_call_table `0xffffff9a2d401000`). **k6a_gov v1.6.0**
-  (Build 389-Scope): `gpu_floor`-Sysfs (Hz, 0=inaktiv) — GAMING-only KGSL-min_pwrlevel
-  via neuem Export `kgsl_k6a_set_min_level_idx()` (+min_idx in get_levels). On-device-
-  Proof build388-Kernel: `min_pwrlevel=2` pinnt `gpuclk=565 MHz`, restore 7 → 355.
-  Release-Pfad erfasst den User-MIN einmal (`gpu_floor_saved_min`) und restauriert ihn;
-  Status neu: `gpu_floor=`, `gpu_floor_last=`, `bt=` (Akkutemp, -1 unbekannt). GPU-
-  Tabelle live: 800/650/565/430/355/267/180/140 (idx 0–7; k6a sieht 0–6). KGSL-Interplay:
-  effektiver DCVS-Floor = `min_t(thermal_pwrlevel_floor=4, user_min)` → User-Min-Einträge
-  älter idx 4 (tiefer als 355 MHz) werden vom thermal-floor-Vorgabewert zurückgeclampt,
-  Einträge ≤ 4 greifen voll (live verifiziert). Gaming-Floors ≥ 355 (idx ≤ 4) sind der
-  relevante Bereich; dmesg-Proofs: `Build389:`-Marker.
-- **GitHub-Releases**: Releases entstehen automatisch pro Main-Bump (`v4.14.369-badazz-buildNNN`).
-  **Name≠Scope-Regel bleibt**: nur `gh release list` + `build-info.txt (`BUILD_NUMBER`/
-  `COMMIT_SHA`) zählen. Flashen ausdrücklich nur das **aosp-ZIP** (Gerät läuft crDroid).
-- **Gerät (sweet, crDroid/AOSP, Android 16)**: Kernel **build387** (KSU ver `38523`, KSU
-  `9409a05f`) — **Root läuft vollständig**: `su id` (Termux) → `uid=0(root) …
-  context=u:r:ksu:s0`; Alternativen `grant_cmd`/`rs3` (Probes `~/tmp/ksu_probe/`). Diag:
-  crown `0x780001bd`, open_errno 0. K6A/k6a-ctl-Bestand zuletzt verifiziert auf build352
-  (Details unten, wichtig fürs r50–r59-Messarchiv) — seit dem crDroid-Umzug nicht neu
-  kalibriert.
-- **Sampler-Bestand auf Gerät**: `fps_samp2.sh` = **capped-Variante** (kein `echo 2304000 >
-  policy6/scaling_max_freq` mehr — Original unter `fps_samp2_uncap.bak`, r55-Befund);
-  `sf_probe.sh` v2 (pro Snapshot layer-fresh, schreibt eigenes `sf_probe.log`);
-  `arm.sh` mit 1560-s-Fenstern (Backups `arm.sh.bak-10min`). **Nie `fps_samp2.sh stop`
-  aufrufen** — „stop" ist `DUR`, laufende Instanz trunciert `fps.log` (r59a zerstört).
-- **CODM-Messstand (r50–r59, alle build351/352, crDroid/A16 — alle Runs liefen crDroid,
-  keine MIUI-Baseline; eine Runde pro Messung, gleiche Karte)**:
-  Schwellen 96/99/102/93 sind der **+10…+13-med180-Hebel** (r52–r54 Ø 73,9 vs UC Ø 63,0);
-  **Lüfter** hält die Spätrunde (r56 late-med 69,6 vs r57 45,6, bt 32 vs 41,7 °C —
-  Kollaps = SoC-eigener CPU-Droop ab bt≈38 °C, k6a bleibt 100 % gaming); Trip95→98 °C
-  verschlechtert (r58: med180 63,8, bt 45,2 °C, k6a 17 % cd_l2) — **Trips bleiben auf
-  95** (Daemon-Pinning ist nicht sysfs-schraubbar); Gold-Cap-End-to-End-Test r59b:
-  `p6=1708800 in 412/412 Samples` (capped-Sampler-Modus + ctl aktiv). Details im
-  Abschnitt *Post-352-Messsituation*.
-- **KSU-Next Submodule**: `72f8cc62` (kp_ksud.c-Removal, unpumped — kein eigener Build,
-  Binary neutral), davor `86773df0`
-  (Dead-Cleanup), `9409a05f`. **UAPI=6**, Runtime 35000+revcount (build387 = `38523`).
-  - **su-Flow** (`feature/sucompat.c`, legacy <4.19-Adapter): exec `/system/bin/su` →
-    sucompat-Redirect → `/data/adb/ksud` → preexec-Escape (`hook_aarch64_execve`,
-    `ksu_preexec_ksud_escape` matcht **beide** Pfade: `/data/adb/ksud` +
-    `/data/adb/ksu/bin/ksud`) → `escape_with_root_profile()`.     **Root-Cause** des Dagewesenen: `kern_path("/data/adb/ksud")` als untrusted cred →
-    DAC-Durchlauf durch `/data/adb` (0700) verweigert → Lookup muss unter
-    `override_creds(ksu_cred)` laufen (5.x-Pfad machte das schon).
-  - **GRANT_ROOT**: `syscall(142 reboot-magic)` → ksu-fd → `ioctl(fd, _IO('K',1)
-    /*KSU_IOCTL_GRANT_ROOT*/)` → uid 0 (Termux ist allowlisted). erlaubt über
-    `allowed_for_su()` = manager-uid || allowlist-uid.
-  - **Features** (build387, `ksud feature list`): su_compat(0)/kernel_umount(1)/sulog(2)/
-    adb_root(3)/selinux_hide(4) **ENABLED**, shell_su_adb_only(6) DISABLED.
-  - **ksud**: `/data/adb/ksud` md5 `f3eacfd0` (v3.4.2-50-gb427a3f9, identisch
-    `libksud.so` App-Dir), Kontext `u:object_r:ksu_file:s0`; `libadbroot.so` (md5
-    `92f8e84a`) liegt unter `/data/adb/ksu/lib/` (adb_root-Feature-Preload-Pfad).
-    **ksud-Daemon läuft NICHT** (built-in-Modus, boot-behamster Spawn fehlt) — su/Root
-    funktioniert trotzdem; `post-fs-data` NICHT manuell nachfahren (Modul-Scripts
-    doppelt bearbeiten).
-  - **Crown-Bits** (Kumulativ-Slot bis Reboot, `include/ksu.h` bits 26–30):
-    `TAMPER_INIT(30)` `KSUD_EXEC(29)` `KSUD_ESCAPE(28)` `ESCAPE_RET0(27)`
-    `ESCAPE_FAIL(26)`; dmesg `/sdcard/Download/dmesg_b385.txt` (build386/ver 38522).
-- **On-device-Operativa (Wichtig für künftige Fix-Session)**:
-  1. **`cp` unter escaped-root-cred schreibt NULLen**: jedes `cp <src> <dst>` wenn
-     src in `/data/app/…/lib/arm64` bzw. bei großen Dateien — Inhalt Nullen bei
-     korrekter Länge. Immer `cat src > dst` + `md5sum`-Verifizieren, dann `chmod 755`
-     + `chcon u:object_r:ksu_file:s0 /data/adb/…`.
-  2. **`ksud install` niemals aus `/data/adb/ksud` selbst** (killt DAEMON_PATH vor dem
-     self-copy → ENOENT, Datei WEG). Die rust-Schritte bei Bedarf manuell replizieren.
+- **Repo**: `vandalsquad187/BadazzKernel` branch `main`: `f48a2d428` (Build 397: k6a_gov
+  Fixes 1-7 + `pr_fmt`) -> **`a462761d0`** (Build 398: Fixes 8-10) -> Docs-Bump (dieser
+  Commit). CI gruen (Runs `40492281250` / `40495310866`, aosp 12m26s / miui 17m38s). Releases
+  entstehen automatisch pro Main-Bump — **397** (11:14 UTC) und **398** (11:41 UTC, Latest),
+  Docs-Bump erzeugt konventionsgemaess `399` (Kernel-Code identisch zu 398). **Name ungleich
+  Scope-Regel bleibt**: nur `gh release list` + `build-info.txt` (`BUILD_NUMBER`/`COMMIT_SHA`)
+  zaehlen. Flashen ausdruecklich nur das **aosp-ZIP** (Geraet laeuft crDroid); Releases/
+  Tags nur mit explizitem OK (User-OK fuer die Fix-Builds lag vor).
+- **Kernel**: `4.14.369`, KSU-Next **built-in, 4.14 direct-patch mode**, **k6a_gov v1.6.0**
+  (`CONFIG_K6A_GOV=m`, sweet_defconfig:208 — `.ko` in der ZIP, insmod durch k6a-ctl).
+  GPU-Tabelle live 800/650/565/430/355/267/180/140 (idx 0-7; k6a sieht 0-6); KGSL-Floor-
+  Interplay `min_t(thermal_pwrlevel_floor=4, user_min)` (live verifiziert, siehe
+  gpu_floor-Abschnitt unten).
+- **k6a_gov Fixes 1-10 (2026-10-27, Commits `f48a2d428` + `a462761d0`)**:
+  1. Gold-Clamp respektiert `user_policy.max`-Release (`enforce_max_freq()`).
+  2. `enable_store(0)` ruft zusaetzlich `gpu_floor_reset()`.
+  3. `gpu_floor_reset()` cleared `saved_min=-1`; `enforce_gpu_floor()` schuetzt den gemerkten
+     User-Min beim Re-Cap.
+  4. Battery-Guard: `read_bat_temp()` (int*-Signatur) — Fehlerfall sauber 0 statt
+     Fake-Temp; `battery_guard_tick()`-Helper, vom `temp_valid` entkoppelt (gov_thread
+     haelt LOCK).
+  5. Init-UAF: `schedule_delayed_work` erst nach `kthread_run` (err_cooling-Pfad).
+  6. `game_pid_store`: `kstrtoint` + `PID_MAX_LIMIT`-Bound; `game_pid=` jetzt in `status`.
+  7. `static struct k6a_gov *gov`; module params 0644 -> 0444; `pr_fmt(fmt) "k6a_gov: " fmt`
+     (Erste-Zeile-Define, 7x Praefixe aus den Strings entfernt).
+  8. L4-Flapping: `#define K6A_L4_MARGIN 3` — Rueckstufung nur wenn `tp + 3 < cd_l4_temp`.
+  9. `profile=0/off`: force-OFF sofort — `state_machine()`-Head plus direktes
+     `set_state_locked(K6A_OFF)` im `profile_store()`, unabhaengig von `thresholds_user`.
+  10. GPU-Cap: neu `s32 gpu_cap_saved_max` (User-`max_pwrlevel` vor dem ersten Cap merken);
+      `gpu_reset()` restored das User-Max (vorher starr idx 0), Fail -> Retry next tick;
+      `enforce_gpu_cap()` released, wenn `user_max >= best`; `k6a_gov_exit()` ruft
+      `gpu_reset()`.
+  - **Post-Flash-Verify (offen — User flasht 398-aosp)**: `build_hash=` = `a462761d…` (neu,
+    nicht mehr `f91204d2`); `game_pid=`-Zeile im `status`; dmesg-Praefix `k6a_gov: `;
+    Fix-10-Semantik: `gpu levels`-`max_idx` == `/sys/class/kgsl/kgsl-3d0/max_pwrlevel`
+    (Patch-Doc-Frage, Live-Test beim ersten Runde-Setup); Smoke `k6a_gov: gpu cap released`.
+- **Geraet (sweet, crDroid/AOSP, Android 16)**: Kernel build396 (`f91204d2`) gesund
+  (r60j-Dauerproof). **build398-aosp-ZIP wird geflasht** (397 wird uebersprungen, 398
+  enthaelt alles). Root laeuft vollstaendig (KSU-Next, Probes `~/tmp/ksu_probe/`).
+  K6A-k6a-ctl-Kalibrierung nach dem Flash wieder aufnehmen.
+- **r60-Serie (Blackscreen, 2026-10-27)**: r60f + r60g Crash mit Sampler, 3 clean ohne,
+  r60i nur Match-Tail, **r60j = Voll-Datensatz** (1396 rows ueber die vollen 1500 s,
+  Sampler 7854 s vor dem Match armiert, Fan-ON): GPU-Peak 800 MHz, maxbusy 99 %, MAXTEMP
+  83 °C, Akku -24 %/25 min, klog sauber (nur Boot-`a615_zap`-Load) -> **Sampler exonerated**;
+  der Blackscreen bleibt **intermittierend** (Power/PMIC-Glitch-Verdacht, Szene-Hypothese
+  tot). r60j = die Fan-ON-Baseline. **Fan-OFF-Redo pending** — r60k x3 / r60l / r60m / r60n
+  gingen durch Beobachter-Toede verloren.
+- **Beobachter-Hardening (2026-10-27)**: Hintergrundprozesse aus dem Termux/su-App-Baum
+  sterben zufaellig nach ~30-550 s, auch setsid/nohup mit PPID=1 (Android 16/SDK 36,
+  Phantom-Killer); Settings-Knobs (`settings_enable_monitor_phantom_procs=false`,
+  `max_phantom_processes=2147483647`) gesetzt aber wirkungslos. Belege: klog-Daemon-Ende
+  bei uptime 5402 (`klog_r60.log`), logcat-Stand 25 585 812 B (`lc_r60.log`), Sampler-Toede
+  r60d ~320 s, r60i 154 s, r60k 176 s/212 s, r60m 189 s, r60n 144 s. **Loesung: KSU-Modul
+  `/data/adb/modules/badazz_iowatch/`** — ksud/Boot-Spawn ist killer-immun (k6a-ctl
+  service.sh lebte Stunden). `service.sh` v4: mkdir-Lock-Dedupe
+  (`/data/local/tmp/.io_watch_lock`), sleep-2-Tick, Spawn mit `&`; liest `.io_samp_env`
+  (MAXWAIT/DUR/OUT) + `.io_arm_flag` -> `io_samp4.sh`. Verifiziert nach Reboot: 1 Watchdog
+  (pid 1812, ppid=1), Sampler pid 29319 (ppid=1812). Mitten-in-Session-Spawns bleiben
+  killbar — nur der Boot-Spawn ist immun; bei Bedarf Reboot vor dem naechsten Run.
+- **Sampler-Politik**: `io_samp4.sh` (zero-fork-Heartbeat-Trigger, env-Datei
+  `.io_samp_env`, frischer OUT pro Run, laeuft zwischen Runs weiter), **DUR=1500**
+  (User-Direktive), **Discharging-Pflicht** (Kabel raus vor dem Arm), Luefter AUS fuer den
+  Fan-OFF-Redo-Zweig. Alte r50-r59-Welt (`fps_samp2.sh` capped-Variante, `sf_probe.sh` v2,
+  `arm.sh` 1560-s-Fenster; **nie `fps_samp2.sh stop`** — trunciert `fps.log`) pausiert.
+- **A17**: Audit 2026-10-23 (Abschnitt unten) — 4.14 bleibt Legacy-Device-Path; SUSFS-
+  Uname-Spoof und susfs-ABI v2.3.0 gueltig. **Tester-Kit pending** (`/sdcard/Download/cr17/`).
+- **Uncommitted nach diesem Commit**: `D include/linux/susfs.h.v210` / `susfs_def.h.v210`
+  (bewusst geloeschte v2.1.0-Backups, Build-394-Scope — als eigener Commit nachziehen);
+  Pre-Patch-Backup `~/tmp/opencode/kc14/k6a_gov.c.orig` (kc14-Dir kann gewipped werden —
+  dann neu anlegen).
+- **KSU-Next carry-over (unveraendert)**: Submodule `72f8cc626` (v3.3.0-311), UAPI=6,
+  Runtime 35000+revcount (build387 = `38523`). su-Flow: `/system/bin/su` -> sucompat-
+  Redirect `/data/adb/ksud` -> preexec-Escape (`ksu_preexec_ksud_escape`, beide Pfade) ->
+  `escape_with_root_profile()`; das `kern_path("/data/adb/ksud")` laeuft unter
+  `override_creds(ksu_cred)` (DAC durch `/data/adb` 0700). GRANT_ROOT: `syscall(142
+  reboot-magic)` -> ksu-fd -> `ioctl(fd, _IO('K',1) /*KSU_IOCTL_GRANT_ROOT*/)`, Termux ist
+  allowlisted. ksud `/data/adb/ksud` md5 `f3eacfd0` (v3.4.2-50-gb427a3f9, Context
+  `u:object_r:ksu_file:s0`); Daemon laeuft NICHT (built-in-Modus), `post-fs-data` nicht
+  manuell nachfahren. Features ENABLED: su_compat/kernel_umount/sulog/adb_root/
+  selinux_hide; DISABLED: shell_su_adb_only. Crown-Bits 26-30 (`include/ksu.h`), dmesg-
+  Archiv `/sdcard/Download/dmesg_b385.txt`.
+- **On-device-Operativa**: `cp` unter escaped-root-cred schreibt NULLen -> immer
+  `cat src > dst` + `md5sum` + `chmod 755` + `chcon u:object_r:ksu_file:s0`. `ksud install`
+  nie aus `/data/adb/ksud` selbst. `su` nur in Termux' mount-namespace; absolute Pfade
+  im `su -c`. SUSFS spoofs `uname` (`6.12.0-android16-...`) — Build-Beweis = dmesg-Banner /
+  `BuildNNN:`-Marker.
 - **USB-Faults**: alle vier geschlossen (Build 336/338/348-Kette).
-- **User speaks German**; device reports go out in German; User flashen/rebootet selbst
-  (aosp-ZIP), meldet Build-/CI-Status. Releases/Tags nur mit explizitem OK.
-
-
+- **User speaks German**; device reports in German; User flasht/rebootet selbst (aosp-ZIP),
+  meldet Build-/CI-Status.
 ## Repo & Docs Layout
 
 | Path | What it is |
@@ -459,7 +472,12 @@ pristine / 1388 after the Build 340 edit) — CI uses GCC, so it never sees it. 
 `~/tmp/`: a `#include "governor.h"` resolves relative to the file, so a copy outside the tree
 fails with a bogus "file not found".
 
-## k6a_gov v1.5.0
+## k6a_gov v1.6.0
+
+> **Update 2026-10-27 (Build 397/398):** Fixes 1-10 sind in
+> `build397`/`build398` gelandet (Details in *Current State*). Die Abschnitte unten
+> stammen aus der v1.5.0-aeRa und bleiben als Feature-/Debug-Doku gueltig (Nodes,
+> Anker, Marker-Logik unveraendert).
 
 ### Build 347 scope — robust temperature signal, anti-thrash dwell, profile clobber fix — flashed as `build348` 2026-10-05, passed
 
