@@ -525,7 +525,7 @@ static void gpu_reset(void) {
     restore = gov->gpu_cap_saved_max >= 0 ? (unsigned int)gov->gpu_cap_saved_max : 0;
     if (kgsl_k6a_set_max_level_idx(restore))
         return;   /* Fehler: naechster Tick versucht es erneut */
-    pr_info("k6a_gov: gpu cap released (user max idx %u)\n", restore);
+    pr_info("gpu cap released (user max idx %u)\n", restore);
     gov->gpu_last_idx = -1;
     gov->gpu_cap_saved_max = -1;
 }
@@ -1533,7 +1533,6 @@ static void __exit k6a_gov_exit(void) {
     gov->enabled = false;
     gov->enforced_max = 0;
     apply_policy();
-    kgsl_k6a_set_max_level_idx(0);   /* GPU-Cap freigeben — 10e: gpu_reset() stattdessen */
     gpu_reset();
     gpu_floor_reset();               /* v1.6: GPU-Floor auf den User-Wert zurück */
     reset_bw_floors();               /* Build353: Exit-BW-Floor-Fix — Floors freigeben (war gelatcht, wie v1.3.1-Cap-Befund) */
