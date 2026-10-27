@@ -30,6 +30,7 @@ extern int k6a_devfreq_set_bw(const char *name, u32 min, u32 max);
 #define K6A_GOV_KTHREAD_SLEEP_MS   250
 #define K6A_GOV_MAX_FREQS     32
 #define K6A_HIST_N            16
+#define K6A_L4_MARGIN     3   /* K unter cd_l4_temp, bevor L4 verlassen wird */
 
 enum k6a_state { K6A_OFF=0, K6A_GAMING=1, K6A_CD_L2=2, K6A_CD_L3=3, K6A_CD_L4=4 };
 enum k6a_tsrc { K6A_TSRC_NONE=0, K6A_TSRC_GOLD, K6A_TSRC_SILVER, K6A_TSRC_XO, K6A_TSRC_SOC, K6A_TSRC_ZONE0 };
@@ -70,6 +71,7 @@ struct k6a_gov {
     u32 cd_l2_bw_gpubw, cd_l3_bw_gpubw, cd_l4_bw_gpubw;
     u32 cd_l2_bw_llcc, cd_l3_bw_llcc, cd_l4_bw_llcc;
     s32 gpu_last_idx;
+    s32 gpu_cap_saved_max;   /* user max_pwrlevel vor dem ersten Cap, -1 = keiner aktiv */
     u32 gpu_floor;
     s32 gpu_floor_last;
     s32 gpu_floor_saved_min;
@@ -441,6 +443,13 @@ static void state_machine(void) {
     u32 t = gov->temp_celsius;
     u32 tp = gov->temp_peak ? gov->temp_peak : t;
 
+    if (gov->profile == K6A_PROFILE_OFF) {
+        /* Profil "off": Governor inaktiv, egal was thresholds_user sagt */
+        set_state_locked(K6A_OFF);
+        gov->entry_since = 0;
+        return;
+    }
+
     if (gov->state == K6A_OFF && gov->enabled &&
         gov->profile != K6A_PROFILE_OFF) {
         set_state_locked(K6A_GAMING);
@@ -465,7 +474,11 @@ static void state_machine(void) {
 
     switch (gov->state) {
     case K6A_CD_L4:
-        if (t < gov->cd_l3_temp && (now - gov->state_ts) >= dwell_out)
+        /* Rueckstufung nur, wenn auch die Spitze klar unter der L4-Schwelle liegt,
+         * sonst eskaliert der naechste Tick sofort wieder */
+        if (t < gov->cd_l3_temp &&
+            tp + K6A_L4_MARGIN < gov->cd_l4_temp &&
+            (now - gov->state_ts) >= dwell_out)
             set_state_locked(K6A_CD_L3);
         break;
     case K6A_CD_L3:
@@ -506,11 +519,15 @@ done:
 /* GPU cap via native KGSL interface (KB10R-2). Kthread = process
  * context, same locking as kgsl's own sysfs store path. */
 static void gpu_reset(void) {
-    if (gov->gpu_last_idx >= 0) {
-        if (!kgsl_k6a_set_max_level_idx(0))
-            pr_info("gpu cap released\n");
-        gov->gpu_last_idx = -1;
-    }
+    unsigned int restore;
+
+    if (gov->gpu_last_idx < 0) return;
+    restore = gov->gpu_cap_saved_max >= 0 ? (unsigned int)gov->gpu_cap_saved_max : 0;
+    if (kgsl_k6a_set_max_level_idx(restore))
+        return;   /* Fehler: naechster Tick versucht es erneut */
+    pr_info("k6a_gov: gpu cap released (user max idx %u)\n", restore);
+    gov->gpu_last_idx = -1;
+    gov->gpu_cap_saved_max = -1;
 }
 
 static u32 get_cd_gpu_cap(void) {
@@ -524,7 +541,7 @@ static u32 get_cd_gpu_cap(void) {
 
 static void enforce_gpu_cap(void) {
     u32 tab[K6A_GOV_MAX_FREQS], cur_idx = 0, max_idx = 0, min_idx = 0, cap;
-    int n, i, best = -1;
+    int n, i, best = -1, user_max;
 
     if (!gov || !gov->enabled || !gov->legacy_mode) { gpu_reset(); return; }
     cap = get_cd_gpu_cap();
@@ -539,11 +556,22 @@ static void enforce_gpu_cap(void) {
             best = i;
     if (best < 0) best = n - 1;   /* nothing fits: lowest level */
 
-    if (best != gov->gpu_last_idx) {
-        if (!kgsl_k6a_set_max_level_idx((unsigned int)best)) {
-            gov->gpu_last_idx = best;
-            pr_info("Build389: gpu cap %uHz -> lvl %d (of %u) min=%u\n", cap, best, n, min_idx);
-        }
+    /* Max-Level des Users: solange wir cappen, der gemerkte Wert,
+     * sonst das, was kgsl gerade meldet */
+    user_max = gov->gpu_last_idx >= 0 ? gov->gpu_cap_saved_max : (int)max_idx;
+
+    if (user_max >= best) {   /* user max already at or below our cap */
+        gpu_reset();
+        return;
+    }
+    if (best == gov->gpu_last_idx) return;
+
+    if (gov->gpu_last_idx < 0)
+        gov->gpu_cap_saved_max = user_max;   /* vor dem ersten Cap merken */
+
+    if (!kgsl_k6a_set_max_level_idx((unsigned int)best)) {
+        gov->gpu_last_idx = best;
+        pr_info("Build389: gpu cap %uHz -> lvl %d (of %u) min=%u\n", cap, best, n, min_idx);
     }
 }
 
@@ -965,6 +993,8 @@ static ssize_t profile_store(struct kobject *k, struct kobj_attribute *a, const 
     if (v > K6A_PROFILE_MAX) return -EINVAL;
     mutex_lock(&gov->lock);
     gov->profile = v;
+    if (v == K6A_PROFILE_OFF)
+        set_state_locked(K6A_OFF);   /* sofort, nicht erst im naechsten Tick */
     if (v == K6A_PROFILE_CUSTOM) {
         pr_info("Build347: profile=custom keeps current thresholds\n");
     } else if (gov->thresholds_user) {
@@ -1443,6 +1473,7 @@ static int __init k6a_gov_init(void) {
                     gov->profile);
     }
     gov->gpu_last_idx = -1;
+    gov->gpu_cap_saved_max = -1;
     gov->gpu_floor = 0;
     gov->gpu_floor_last = -1;
     gov->gpu_floor_saved_min = -1;
@@ -1502,7 +1533,8 @@ static void __exit k6a_gov_exit(void) {
     gov->enabled = false;
     gov->enforced_max = 0;
     apply_policy();
-    kgsl_k6a_set_max_level_idx(0);   /* GPU-Cap freigeben */
+    kgsl_k6a_set_max_level_idx(0);   /* GPU-Cap freigeben — 10e: gpu_reset() stattdessen */
+    gpu_reset();
     gpu_floor_reset();               /* v1.6: GPU-Floor auf den User-Wert zurück */
     reset_bw_floors();               /* Build353: Exit-BW-Floor-Fix — Floors freigeben (war gelatcht, wie v1.3.1-Cap-Befund) */
     cancel_delayed_work_sync(&gov->freq_init_work);
