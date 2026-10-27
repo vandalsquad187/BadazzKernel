@@ -3396,10 +3396,11 @@ static void __lockdep_init_map_waits(struct lockdep_map *lock, const char *name,
 }
 
 void lockdep_init_map_waits(struct lockdep_map *lock, const char *name,
-		      struct lock_class_key *key, int subclass)
+		      struct lock_class_key *key, int subclass,
+		      short inner, short outer)
 {
 	cross_init(lock, 0);
-	__lockdep_init_map_waits(lock, name, key, subclass);
+	__lockdep_init_map_waits(lock, name, key, subclass, inner, outer);
 }
 EXPORT_SYMBOL_GPL(lockdep_init_map_waits);
 
