@@ -20,13 +20,16 @@
 #include <linux/fs.h>
 #include <linux/cpumask.h>
 
+#define CREATE_TRACE_POINTS
+#include "trace.h"
+
 extern int kgsl_k6a_get_levels(u32 *out, u32 max_n, u32 *cur_idx, u32 *max_idx, u32 *min_idx);
 extern int kgsl_k6a_set_max_level_idx(unsigned int level);
 extern int kgsl_k6a_set_min_level_idx(unsigned int level);
 extern int k6a_devfreq_get_bw(const char *name, u32 *cur, u32 *min, u32 *max);
 extern int k6a_devfreq_set_bw(const char *name, u32 min, u32 max);
 
-#define K6A_GOV_VERSION       "1.6.0"
+#define K6A_GOV_VERSION       "1.6.1"
 #define K6A_GOV_KTHREAD_SLEEP_MS   250
 #define K6A_GOV_MAX_FREQS     32
 #define K6A_HIST_N            16
@@ -64,6 +67,9 @@ struct k6a_gov {
     bool battery_guard;
     u32 battery_guard_temp;
     u32 poll_ms;
+    u32 poll_adaptive;
+    bool slow_poll;
+    s32 slow_base;
 
     u32 cd_l2_temp, cd_l3_temp, cd_l4_temp, cd_recover;
     u32 cd_l2_gold_max, cd_l3_gold_max, cd_l4_gold_max;
@@ -428,6 +434,7 @@ static void set_state_locked(enum k6a_state ns) {
     gov->state_ts = ktime_to_ms(ktime_get());
     gov->entry_since = 0;
     k6a_hist_push(from);
+    trace_k6a_state((unsigned int)from, (unsigned int)ns, (s32)gov->temp_celsius);
 }
 
 /* ── State Machine ───────────────────────────────────────────────── */
@@ -867,6 +874,7 @@ static void read_vendor_nodes(void) {
 static int gov_thread(void *data) {
     while (!kthread_should_stop()) {
         int t;
+        unsigned int sleep_ms;
         mutex_lock(&gov->lock);
         if (gov->enabled) {
             if (hash_state == K6A_HASH_PENDING) {
@@ -901,8 +909,36 @@ static int gov_thread(void *data) {
             apply_limits();
         }
         gov->ticks++;
+        {
+            unsigned int sm = gov->poll_ms;
+
+            if (gov->poll_adaptive) {
+                /* Build402: OFF / BATTERY weit unter den Schwellen duerfen
+                 * langsam pollen; steigt die Temp oder naht eine Aktion,
+                 * sofort wieder benutzer-poll_ms */
+                bool far_cool = (gov->state == K6A_OFF) ||
+                    (gov->profile == K6A_PROFILE_BATTERY &&
+                     !gov->batt_latched &&
+                     (s32)gov->temp_celsius + 5 < (s32)gov->cd_l2_temp);
+                if (!far_cool)
+                    gov->slow_poll = false;
+                else if (!gov->slow_poll) {
+                    gov->slow_poll = true;
+                    gov->slow_base = (s32)gov->temp_celsius;
+                } else if ((s32)gov->temp_celsius >= gov->slow_base + 3)
+                    gov->slow_poll = false;
+                else {
+                    if ((s32)gov->temp_celsius < gov->slow_base)
+                        gov->slow_base = (s32)gov->temp_celsius;
+                    if (sm < 1000)
+                        sm = 1000;
+                }
+            } else
+                gov->slow_poll = false;
+            sleep_ms = sm;
+        }
         mutex_unlock(&gov->lock);
-        msleep(gov->poll_ms);
+        msleep(sleep_ms);
     }
     return 0;
 }
@@ -1276,6 +1312,23 @@ static ssize_t poll_ms_store(struct kobject *k, struct kobj_attribute *a, const 
     return c;
 }
 
+static ssize_t poll_adaptive_show(struct kobject *k, struct kobj_attribute *a, char *b) {
+    u32 v;
+    mutex_lock(&gov->lock);
+    v = gov->poll_adaptive;
+    mutex_unlock(&gov->lock);
+    return sprintf(b, "%u\n", v);
+}
+static ssize_t poll_adaptive_store(struct kobject *k, struct kobj_attribute *a, const char *b, size_t c) {
+    unsigned long v;
+    if (kstrtoul(b, 10, &v)) return -EINVAL;
+    if (v > 1) return -EINVAL;
+    mutex_lock(&gov->lock);
+    gov->poll_adaptive = (u32)v;
+    mutex_unlock(&gov->lock);
+    return c;
+}
+
 static ssize_t cd_thresholds_show(struct kobject *k, struct kobj_attribute *a, char *b) {
     u32 l2t, l3t, l4t, rec, l2g, l3g, l4g;
     mutex_lock(&gov->lock);
@@ -1404,6 +1457,7 @@ static struct kobj_attribute attr_cd_thresh   = __ATTR_RW(cd_thresholds);
 static struct kobj_attribute attr_batt_guard  = __ATTR_RW(battery_guard);
 static struct kobj_attribute attr_batt_guard_temp = __ATTR_RW(battery_guard_temp);
 static struct kobj_attribute attr_poll_ms     = __ATTR_RW(poll_ms);
+static struct kobj_attribute attr_poll_adaptive = __ATTR_RW(poll_adaptive);
 static struct kobj_attribute attr_gpu_caps    = __ATTR_RW(gpu_caps);
 static struct kobj_attribute attr_gpu_floor   = __ATTR_RW(gpu_floor);
 static struct kobj_attribute attr_bw_floors   = __ATTR_RW(bw_floors);
@@ -1419,6 +1473,7 @@ static struct attribute *gov_attrs[] = {
     &attr_batt_guard.attr,
     &attr_batt_guard_temp.attr,
     &attr_poll_ms.attr,
+    &attr_poll_adaptive.attr,
     &attr_gpu_caps.attr,
     &attr_gpu_floor.attr,
     &attr_bw_floors.attr,
@@ -1444,6 +1499,7 @@ static int __init k6a_gov_init(void) {
     gov->hysteresis_normal = 2000;
     gov->battery_guard_temp = 45;
     gov->poll_ms = K6A_GOV_KTHREAD_SLEEP_MS;
+    gov->poll_adaptive = 1;
     gov->profile = (profile >= 0 && profile <= K6A_PROFILE_MAX) ?
                    profile : K6A_PROFILE_OFF;
 

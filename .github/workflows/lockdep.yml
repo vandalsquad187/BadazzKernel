@@ -1,0 +1,44 @@
+name: Lockdep Test Build
+
+on:
+  workflow_dispatch:
+
+jobs:
+  lockdep:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          submodules: true
+
+      - name: Install toolchain
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y bc bison build-essential ccache clang curl flex \
+            gcc-aarch64-linux-gnu gcc-arm-linux-gnueabihf libncurses-dev libssl-dev lzop
+
+      - name: Cache ccache
+        uses: actions/cache@v4
+        with:
+          path: .ccache
+          key: ccache-lockdep-${{ github.sha }}
+          restore-keys: ccache-lockdep-
+
+      - name: Build with PROVE_LOCKING + DEBUG_ATOMIC_SLEEP
+        run: |
+          export CCACHE_DIR=$GITHUB_WORKSPACE/.ccache
+          export PATH=/usr/lib/ccache:$PATH
+          printf 'CONFIG_PROVE_LOCKING=y\nCONFIG_DEBUG_ATOMIC_SLEEP=y\n' > lockdep.config
+          scripts/kconfig/merge_config.sh -m arch/arm64/configs/sweet_defconfig lockdep.config
+          make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- CROSS_COMPILE_COMPAT=arm-linux-gnueabihf- olddefconfig
+          grep -E "CONFIG_(PROVE_LOCKING|DEBUG_ATOMIC_SLEEP)=" .config
+          make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- CROSS_COMPILE_COMPAT=arm-linux-gnueabihf- -j$(nproc) Image.gz
+          ls -la arch/arm64/boot/Image.gz
+
+      - name: Upload
+        uses: actions/upload-artifact@v4
+        with:
+          name: lockdep-image
+          path: arch/arm64/boot/Image.gz
