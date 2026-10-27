@@ -3350,7 +3350,7 @@ int kgsl_k6a_get_levels(u32 *out, u32 max_n, u32 *cur_idx, u32 *max_idx, u32 *mi
 	if (cur_idx)
 		*cur_idx = pwr->active_pwrlevel;
 	if (max_idx)
-		*max_idx = pwr->num_pwrlevels - 1;
+		*max_idx = pwr->thermal_pwrlevel;
 	if (min_idx)
 		*min_idx = pwr->min_pwrlevel;
 	mutex_unlock(&device->mutex);
