@@ -30,7 +30,7 @@ jobs:
         run: |
           export CCACHE_DIR=$GITHUB_WORKSPACE/.ccache
           export PATH=/usr/lib/ccache:$PATH
-          printf 'CONFIG_PROVE_LOCKING=y\nCONFIG_DEBUG_ATOMIC_SLEEP=y\n' > lockdep.config
+          printf 'CONFIG_DEBUG_KERNEL=y\nCONFIG_PROVE_LOCKING=y\nCONFIG_DEBUG_ATOMIC_SLEEP=y\n' > lockdep.config
           scripts/kconfig/merge_config.sh -m arch/arm64/configs/sweet_defconfig lockdep.config
           make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- CROSS_COMPILE_COMPAT=arm-linux-gnueabihf- olddefconfig
           grep -E "CONFIG_(PROVE_LOCKING|DEBUG_ATOMIC_SLEEP)=" .config
