@@ -253,6 +253,15 @@ jobs:
             exit 1
           fi
           ls -la drivers/thermal/k6a_gov/k6a_gov.ko
+          echo "=== vermagic check (k6a_gov.ko vs kernel.release) ==="
+          VM=$(modinfo -F vermagic drivers/thermal/k6a_gov/k6a_gov.ko)
+          KR=$(cat include/config/kernel.release)
+          echo "vermagic: $VM"
+          echo "release : $KR"
+          case "$VM" in
+            "$KR "*) echo "::notice::vermagic matches kernel.release ($KR)" ;;
+            *) echo "::error::vermagic mismatch — k6a_gov.ko would NOT load on device"; exit 1 ;;
+          esac
           echo "::notice::k6a_gov.ko verified"
 
       # -------------------------------------------------------
@@ -322,7 +331,7 @@ jobs:
   release:
     name: Release (aosp + miui + SHA256SUMS)
     needs: [build]
-    if: github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/')
+    if: github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-24.04
     permissions:
       contents: write
