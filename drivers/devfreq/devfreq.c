@@ -773,7 +773,7 @@ EXPORT_SYMBOL(devm_devfreq_remove_device);
 int k6a_devfreq_set_bw(const char *name, u32 min, u32 max)
 {
 	struct devfreq *df;
-	int ret = -ENODEV;
+	int ret = -ENODEV, matches = 0, applied = 0;
 
 	if (!name)
 		return -EINVAL;
@@ -788,15 +788,23 @@ int k6a_devfreq_set_bw(const char *name, u32 min, u32 max)
 		if (!np || !np->name || !strstr(np->name, name))
 			continue;
 
+		/* Build408: strstr kann mehrere Nodes treffen — ersten
+		 * anwenden (wie bisher), Mehrfachtreffer sichtbar machen. */
+		matches++;
+		if (applied)
+			continue;
+		applied = 1;
 		mutex_lock(&df->lock);
 		df->min_freq = min;
 		if (max)
 			df->max_freq = max;
 		mutex_unlock(&df->lock);
 		ret = 0;
-		break;
 	}
 	mutex_unlock(&devfreq_list_lock);
+	if (matches > 1)
+		pr_warn_ratelimited("k6a_devfreq: '%s' matched %d devfreq nodes, applied to first\n",
+				    name, matches);
 	return ret;
 }
 EXPORT_SYMBOL_GPL(k6a_devfreq_set_bw);
