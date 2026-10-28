@@ -2,6 +2,11 @@ name: Lockdep Test Build
 
 on:
   workflow_dispatch:
+    inputs:
+      kasan:
+        description: 'Add CONFIG_KASAN=y (slow, GCC 13 on 4.14 may fail — that is the test)'
+        type: boolean
+        default: false
   push:
     branches: [main]
     paths:
@@ -43,10 +48,13 @@ jobs:
         run: |
           export CCACHE_DIR=$GITHUB_WORKSPACE/.ccache
           export PATH=/usr/lib/ccache:$PATH
-          printf 'CONFIG_DEBUG_KERNEL=y\nCONFIG_PROVE_LOCKING=y\nCONFIG_DEBUG_ATOMIC_SLEEP=y\n' > lockdep.config
+          printf 'CONFIG_DEBUG_KERNEL=y\nCONFIG_PROVE_LOCKING=y\nCONFIG_DEBUG_ATOMIC_SLEEP=y\nCONFIG_FORTIFY_SOURCE=y\nCONFIG_DEBUG_OBJECTS_WORK=y\nCONFIG_DEBUG_LIST=y\n' > lockdep.config
+          if [ "${{ inputs.kasan }}" = "true" ]; then
+            echo 'CONFIG_KASAN=y' >> lockdep.config
+          fi
           scripts/kconfig/merge_config.sh -m arch/arm64/configs/sweet_defconfig lockdep.config
           make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- CROSS_COMPILE_COMPAT=arm-linux-gnueabihf- olddefconfig
-          grep -E "CONFIG_(PROVE_LOCKING|DEBUG_ATOMIC_SLEEP)=" .config
+          grep -E "CONFIG_(PROVE_LOCKING|DEBUG_ATOMIC_SLEEP|FORTIFY_SOURCE|DEBUG_OBJECTS_WORK|DEBUG_LIST)=" .config
           make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- CROSS_COMPILE_COMPAT=arm-linux-gnueabihf- -j$(nproc) Image.gz
           ls -la arch/arm64/boot/Image.gz
 

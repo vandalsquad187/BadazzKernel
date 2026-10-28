@@ -29,7 +29,7 @@ extern int kgsl_k6a_set_min_level_idx(unsigned int level);
 extern int k6a_devfreq_get_bw(const char *name, u32 *cur, u32 *min, u32 *max);
 extern int k6a_devfreq_set_bw(const char *name, u32 min, u32 max);
 
-#define K6A_GOV_VERSION       "1.6.2"
+#define K6A_GOV_VERSION       "1.6.3"
 #define K6A_GOV_KTHREAD_SLEEP_MS   250
 #define K6A_GOV_MAX_FREQS     32
 #define K6A_HIST_N            16
@@ -874,21 +874,32 @@ static void read_one_node(const char *path, char *dst, size_t cap) {
     snprintf(dst, cap, "%s", len ? buf : "none");
 }
 
-static void read_vendor_nodes(void) {
-    read_one_node("/sys/class/thermal/thermal_message/sconfig",
-                  gov->vendor_sconfig, sizeof(gov->vendor_sconfig));
-    read_one_node("/sys/class/thermal/thermal_message/cpu_limits",
-                  gov->vendor_cpu_limits, sizeof(gov->vendor_cpu_limits));
-}
-
 static int gov_thread(void *data) {
     while (!kthread_should_stop()) {
         int t;
         unsigned int sleep_ms;
+        bool do_hash, do_vendor;
+        int r_hash = 0;
+        char vsbuf[sizeof(gov->vendor_sconfig)];
+        char vlbuf[sizeof(gov->vendor_cpu_limits)];
+
+        /* Build408: filp_open laeuft ausserhalb von gov->lock — unter dem
+         * Lock blockiert File-I/O sysfs-Handler fuer ms. Snapshot-Entscheidungen
+         * sind benign Races (nur dieser Thread schreibt). */
+        do_hash = (hash_state == K6A_HASH_PENDING) && READ_ONCE(gov->enabled);
+        if (do_hash)
+            r_hash = verify_build_hash();
+        do_vendor = READ_ONCE(gov->enabled) && !(READ_ONCE(gov->ticks) & 63);
+        if (do_vendor) {
+            read_one_node("/sys/class/thermal/thermal_message/sconfig",
+                          vsbuf, sizeof(vsbuf));
+            read_one_node("/sys/class/thermal/thermal_message/cpu_limits",
+                          vlbuf, sizeof(vlbuf));
+        }
         mutex_lock(&gov->lock);
         if (gov->enabled) {
-            if (hash_state == K6A_HASH_PENDING) {
-                int r = verify_build_hash();
+            if (do_hash && hash_state == K6A_HASH_PENDING) {
+                int r = r_hash;
 
                 hash_tries++;
                 if (r > 0) {
@@ -914,8 +925,10 @@ static int gov_thread(void *data) {
                 gov->temp_warned = true;
                 pr_warn("Build340: no temperature source, holding state %u\n", gov->state);
             }
-            if (!(gov->ticks & 63))
-                read_vendor_nodes();
+            if (do_vendor) {
+                memcpy(gov->vendor_sconfig, vsbuf, sizeof(gov->vendor_sconfig));
+                memcpy(gov->vendor_cpu_limits, vlbuf, sizeof(gov->vendor_cpu_limits));
+            }
             apply_limits();
         }
         gov->ticks++;
@@ -983,6 +996,15 @@ static struct thermal_cooling_device_ops cool_ops = {
 };
 
 /* ── Sysfs ───────────────────────────────────────────────────────── */
+/* Build408: sysfs-Stores wecken den Tick-Thread sofort — das Polling
+ * schlaeft adaptiv bis 5 s (Fix 12a macht den Schlaf weckbar). */
+static void gov_wake(void) {
+    struct task_struct *k;
+    if (!gov) return;
+    k = READ_ONCE(gov->kthread);
+    if (k) wake_up_process(k);
+}
+
 static ssize_t enable_show(struct kobject *k, struct kobj_attribute *a, char *b) {
     int v;
     mutex_lock(&gov->lock);
@@ -1005,6 +1027,7 @@ static ssize_t enable_store(struct kobject *k, struct kobj_attribute *a, const c
         apply_policy();
     }
     mutex_unlock(&gov->lock);
+    gov_wake();
     return c;
 }
 
@@ -1055,6 +1078,7 @@ static ssize_t profile_store(struct kobject *k, struct kobj_attribute *a, const 
     }
     gov->entry_since = 0;
     mutex_unlock(&gov->lock);
+    gov_wake();
     return c;
 }
 
@@ -1256,6 +1280,7 @@ static ssize_t legacy_store(struct kobject *k, struct kobj_attribute *a, const c
         apply_policy();
     }
     mutex_unlock(&gov->lock);
+    gov_wake();
     return c;
 }
 
@@ -1275,6 +1300,7 @@ static ssize_t hysteresis_store(struct kobject *k, struct kobj_attribute *a, con
     gov->hysteresis_fast = fast;
     gov->hysteresis_normal = normal;
     mutex_unlock(&gov->lock);
+    gov_wake();
     return c;
 }
 
@@ -1291,6 +1317,7 @@ static ssize_t battery_guard_store(struct kobject *k, struct kobj_attribute *a, 
     mutex_lock(&gov->lock);
     gov->battery_guard = !!v;
     mutex_unlock(&gov->lock);
+    gov_wake();
     return c;
 }
 static ssize_t battery_guard_temp_show(struct kobject *k, struct kobj_attribute *a, char *b) {
@@ -1307,6 +1334,7 @@ static ssize_t battery_guard_temp_store(struct kobject *k, struct kobj_attribute
     mutex_lock(&gov->lock);
     gov->battery_guard_temp = v;
     mutex_unlock(&gov->lock);
+    gov_wake();
     return c;
 }
 
@@ -1324,6 +1352,7 @@ static ssize_t poll_ms_store(struct kobject *k, struct kobj_attribute *a, const 
     mutex_lock(&gov->lock);
     gov->poll_ms = v;
     mutex_unlock(&gov->lock);
+    gov_wake();
     return c;
 }
 
@@ -1341,6 +1370,7 @@ static ssize_t poll_adaptive_store(struct kobject *k, struct kobj_attribute *a, 
     mutex_lock(&gov->lock);
     gov->poll_adaptive = (u32)v;
     mutex_unlock(&gov->lock);
+    gov_wake();
     return c;
 }
 
@@ -1369,6 +1399,7 @@ static ssize_t cd_thresholds_store(struct kobject *k, struct kobj_attribute *a, 
         }
         gov->entry_since = 0;
         mutex_unlock(&gov->lock);
+    gov_wake();
         return c;
     }
     if (sscanf(b, "%u %u %u %u %u %u %u",
@@ -1391,6 +1422,7 @@ static ssize_t cd_thresholds_store(struct kobject *k, struct kobj_attribute *a, 
     clamp_cd_freqs();
     gov->entry_since = 0;
     mutex_unlock(&gov->lock);
+    gov_wake();
     pr_info("Build347: user thresholds %u %u %u %u, profile switches no longer overwrite\n",
             l2t, l3t, l4t, rec);
     return c;
@@ -1415,6 +1447,7 @@ static ssize_t gpu_caps_store(struct kobject *k, struct kobj_attribute *a, const
     mutex_lock(&gov->lock);
     gov->cd_l2_gpu_max=l2g; gov->cd_l3_gpu_max=l3g; gov->cd_l4_gpu_max=l4g;
     mutex_unlock(&gov->lock);
+    gov_wake();
     return c;
 }
 
@@ -1432,6 +1465,7 @@ static ssize_t gpu_floor_store(struct kobject *k, struct kobj_attribute *a, cons
     mutex_lock(&gov->lock);
     gov->gpu_floor = (u32)v;
     mutex_unlock(&gov->lock);
+    gov_wake();
     return c;
 }
 
@@ -1459,6 +1493,7 @@ static ssize_t bw_floors_store(struct kobject *k, struct kobj_attribute *a, cons
     gov->cd_l2_bw_gpubw=gpubw_l2; gov->cd_l3_bw_gpubw=gpubw_l3; gov->cd_l4_bw_gpubw=gpubw_l4;
     gov->cd_l2_bw_llcc=llcc_l2; gov->cd_l3_bw_llcc=llcc_l3; gov->cd_l4_bw_llcc=llcc_l4;
     mutex_unlock(&gov->lock);
+    gov_wake();
     return c;
 }
 

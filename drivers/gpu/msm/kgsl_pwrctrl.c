@@ -3345,6 +3345,14 @@ int kgsl_k6a_get_levels(u32 *out, u32 max_n, u32 *cur_idx, u32 *max_idx, u32 *mi
 		return -ENODEV;
 	pwr = &device->pwrctrl;
 	mutex_lock(&device->mutex);
+	/* Build408: num_pwrlevels ist unsigned — 0 liessse die Schleife via
+	 * 0-1=UINT_MAX laufen und pwrlevels[] ueberlesen. */
+	if (pwr->num_pwrlevels < 2) {
+		mutex_unlock(&device->mutex);
+		return -ENODEV;
+	}
+	if (max_n > KGSL_MAX_PWRLEVELS)
+		max_n = KGSL_MAX_PWRLEVELS;
 	for (i = 0; i < pwr->num_pwrlevels - 1 && n < max_n; i++)
 		out[n++] = pwr->pwrlevels[i].gpu_freq;
 	if (cur_idx)
