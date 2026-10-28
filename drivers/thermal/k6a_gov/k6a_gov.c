@@ -29,7 +29,7 @@ extern int kgsl_k6a_set_min_level_idx(unsigned int level);
 extern int k6a_devfreq_get_bw(const char *name, u32 *cur, u32 *min, u32 *max);
 extern int k6a_devfreq_set_bw(const char *name, u32 min, u32 max);
 
-#define K6A_GOV_VERSION       "1.6.1"
+#define K6A_GOV_VERSION       "1.6.2"
 #define K6A_GOV_KTHREAD_SLEEP_MS   250
 #define K6A_GOV_MAX_FREQS     32
 #define K6A_HIST_N            16
@@ -571,10 +571,15 @@ static void enforce_gpu_cap(void) {
         gpu_reset();
         return;
     }
-    if (best == gov->gpu_last_idx) return;
-
-    if (gov->gpu_last_idx < 0)
+    if (best == gov->gpu_last_idx) {
+        /* Cap steht: unsere Grenze oder eine strengere (z. B. opp_notify) */
+        if ((int)max_idx >= best)
+            return;
+        pr_info_ratelimited("gpu cap idx %d was lowered externally (max_idx=%u), re-applying\n",
+                            best, max_idx);
+    } else if (gov->gpu_last_idx < 0) {
         gov->gpu_cap_saved_max = user_max;   /* vor dem ersten Cap merken */
+    }
 
     if (!kgsl_k6a_set_max_level_idx((unsigned int)best)) {
         gov->gpu_last_idx = best;
@@ -631,10 +636,15 @@ static void enforce_gpu_floor(void) {
         gpu_floor_reset();
         return;
     }
-    if (best == gov->gpu_floor_last) return;
-
-    if (gov->gpu_floor_last < 0)
+    if (best == gov->gpu_floor_last) {
+        /* Floor steht: unsere Grenze oder eine strengere */
+        if ((int)min_idx <= best)
+            return;
+        pr_info_ratelimited("gpu floor idx %d was loosened externally (min_idx=%u), re-applying\n",
+                            best, min_idx);
+    } else if (gov->gpu_floor_last < 0) {
         gov->gpu_floor_saved_min = user_min;   /* vor dem ersten Pin merken */
+    }
 
     if (!kgsl_k6a_set_min_level_idx((unsigned int)best)) {
         gov->gpu_floor_last = best;
@@ -938,7 +948,12 @@ static int gov_thread(void *data) {
             sleep_ms = sm;
         }
         mutex_unlock(&gov->lock);
-        msleep(sleep_ms);
+
+        /* weckbar durch kthread_stop(); Muster ist race-frei */
+        set_current_state(TASK_INTERRUPTIBLE);
+        if (!kthread_should_stop())
+            schedule_timeout(msecs_to_jiffies(sleep_ms));
+        __set_current_state(TASK_RUNNING);
     }
     return 0;
 }
@@ -1586,20 +1601,36 @@ err:
 
 static void __exit k6a_gov_exit(void) {
     if (!gov) return;
-    gov->enabled = false;
-    gov->enforced_max = 0;
-    apply_policy();
-    gpu_reset();
-    gpu_floor_reset();               /* v1.6: GPU-Floor auf den User-Wert zurück */
-    reset_bw_floors();               /* Build353: Exit-BW-Floor-Fix — Floors freigeben (war gelatcht, wie v1.3.1-Cap-Befund) */
-    cancel_delayed_work_sync(&gov->freq_init_work);
-    if (gov->kthread) kthread_stop(gov->kthread);
-    if (gov->cooling_dev && !IS_ERR(gov->cooling_dev))
-        thermal_cooling_device_unregister(gov->cooling_dev);
-    cpufreq_unregister_notifier(&k6a_cpufreq_nb, CPUFREQ_POLICY_NOTIFIER);
+
+    /* 1. Keine neuen Zugriffe von aussen: sysfs (wartet auf laufende Handler)
+     *    und Thermal-Core */
     sysfs_remove_group(gov->kobj, &gov_attr_group);
     kobject_put(gov->kobj);
-    kfree(gov); gov = NULL;
+    if (gov->cooling_dev && !IS_ERR(gov->cooling_dev))
+        thermal_cooling_device_unregister(gov->cooling_dev);
+
+    /* 2. Tick stoppen: enabled unter Lock, damit ein laufender Tick nicht
+     *    mehr neu erzwingt; danach Worker und Kthread beenden */
+    mutex_lock(&gov->lock);
+    gov->enabled = false;
+    mutex_unlock(&gov->lock);
+    cancel_delayed_work_sync(&gov->freq_init_work);
+    if (gov->kthread) kthread_stop(gov->kthread);
+    cpufreq_unregister_notifier(&k6a_cpufreq_nb, CPUFREQ_POLICY_NOTIFIER);
+
+    /* 3. Jetzt ist niemand mehr aktiv: alle Limits freigeben */
+    mutex_lock(&gov->lock);
+    gov->enforced_max = 0;
+    apply_policy();
+    gpu_reset();          /* stellt das User-max_pwrlevel wieder her */
+    gpu_floor_reset();    /* stellt das User-min_pwrlevel wieder her */
+    reset_bw_floors();
+    if (gov->gpu_last_idx >= 0 || gov->gpu_floor_last >= 0)
+        pr_warn("gpu limits could not be released at unload\n");
+    mutex_unlock(&gov->lock);
+
+    kfree(gov);
+    gov = NULL;
     pr_info("k6a_gov unloaded\n");
 }
 
