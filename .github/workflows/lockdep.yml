@@ -2,10 +2,23 @@ name: Lockdep Test Build
 
 on:
   workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - 'drivers/thermal/**'
+      - 'drivers/gpu/msm/**'
+      - 'kernel/locking/**'
+
+concurrency:
+  group: lockdep-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
 
 jobs:
   lockdep:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -23,7 +36,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: .ccache
-          key: ccache-lockdep-${{ github.sha }}
+          key: ccache-lockdep-${{ github.run_id }}
           restore-keys: ccache-lockdep-
 
       - name: Build with PROVE_LOCKING + DEBUG_ATOMIC_SLEEP

@@ -1,19 +1,15 @@
 # Build Kernel — Badazz-kernel for sweet
 # -----------------------------------------------------------
-# Läuft bei jedem Push auf Branch main
-# Baut den Kernel + DTBs, packt ein flashbares AnyKernel3-ZIP
-# und veröffentlicht es als GitHub Release.
+# Läuft bei jedem Push auf main (ausser Doku-Änderungen) und
+# per workflow_dispatch.
 #
 # Ablauf:
-#   1. Repo clonen
-#   2. AArch64 Cross-Compiler installieren
-#   3. ccache-Cache wiederherstellen (persistent über Runs)
-#   4. Kernel + DTBs bauen (sweet_defconfig)
-#   5. Kritische Configs validieren
-#   6. Artefakte in anykernel/ kopieren
-#   7. Flashbares ZIP + Build-Info erstellen
-#   8. Release erstellen mit ZIP als Artefakt
-#   9. ccache-Cache speichern
+#   resync-miui : miui/test mit main synchen (X-ours, Push-Rechte)
+#   build       : aosp + miui bauen, ZIPs als Artefakte (keine Releases)
+#   release     : NUR bei workflow_dispatch — Release mit beiden ZIPs + SHA256SUMS
+#
+# Rechte-Modell: workflow-weit contents:read; write nur in
+# resync-miui (Branch-Push) und release (Release-Erstellung).
 # -----------------------------------------------------------
 
 name: Build Kernel
@@ -21,14 +17,66 @@ name: Build Kernel
 on:
   push:
     branches: [main]
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
   workflow_dispatch:
 
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
 jobs:
-  build:
-    name: Build sweet kernel
-    runs-on: ubuntu-latest
+  # -----------------------------------------------------------
+  # Resync: miui/test mit main mergen (-X ours), bevor gebaut wird.
+  # Eigenständiger Job, weil nur hier contents:write nötig ist.
+  # [skip ci] im Merge-Commit verhindert die Trigger-Kaskade.
+  # -----------------------------------------------------------
+  resync-miui:
+    name: Resync miui/test with main (X-ours)
+    runs-on: ubuntu-24.04
     permissions:
       contents: write
+    steps:
+      - name: Checkout miui/test
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          submodules: true
+          ref: miui/test
+
+      - name: Resync miui branch with main (X-ours)
+        run: |
+          git config user.name "ksu-bot"
+          git config user.email "vandalsquad187@users.noreply.github.com"
+          git fetch origin main --quiet
+          if git merge-base --is-ancestor origin/main HEAD; then
+            echo "Branch bereits aktuell — kein merge/push noetig"
+          else
+            git merge -X ours --no-edit -m "Merge origin/main into miui/test [skip ci] (X-ours auto)" origin/main || { echo "::error::Merge-Konflikt — manueller merge noetig"; exit 1; }
+            # merge aktualisiert nur den Gitlink-Entry — Submodul-Checkout neu materialisieren,
+            # sonst baut der miui-Leg noch den Kernel vom VORHERIGEN Run (build377-Befund)
+            git submodule sync --quiet
+            git submodule update --init --recursive --force
+            # GITHUB_TOKEN darf .github/* nicht aendern — yml auf Branch-Stand bringen, damit der Push-Diff keine Workflow-Datei enthaelt
+            git checkout HEAD~1 -- .github/workflows/ 2>/dev/null || true
+            git commit --amend --no-edit --quiet 2>/dev/null || true
+            git push origin HEAD:refs/heads/miui/test || echo "::warning::resync-push fehlgeschlagen — branch bleibt alt (build laeuft trotzdem mit gemergtem baum)"
+          fi
+
+  # -----------------------------------------------------------
+  # Build: aosp (main) + miui (miui/test), Artefakte only.
+  # Kein Release hier — Releases macht der Release-Job.
+  # -----------------------------------------------------------
+  build:
+    name: Build sweet kernel (${{ matrix.variant }})
+    needs: [resync-miui]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
     strategy:
       matrix:
         include:
@@ -51,60 +99,35 @@ jobs:
           ref: ${{ matrix.ref }}
 
       # -------------------------------------------------------
-      # Schritt 1b: miui-Branch auto-resync mit main (-X ours)
-      # Konfliktbereiche (stock-USB-Blockade) folgen dem MIUI-Profil;
-      # ungekonfliktete main-Aenderungen fließen normal ein.
-      # [skip ci] im Merge-Commit verhindert die trigger-Kaskade.
-      # -------------------------------------------------------
-      - name: Resync miui branch with main (X-ours)
-        if: matrix.variant == 'miui'
-        run: |
-          git config user.name "ksu-bot"
-          git config user.email "vandalsquad187@users.noreply.github.com"
-          git fetch origin main --quiet
-          if git merge-base --is-ancestor origin/main HEAD; then
-            echo "Branch bereits aktuell — kein merge/push noetig"
-          else
-            git merge -X ours --no-edit -m "Merge origin/main into miui/test [skip ci] (X-ours auto)" origin/main || { echo "::error::Merge-Konflikt — manueller merge noetig"; exit 1; }
-            # merge aktualisiert nur den Gitlink-Entry — Submodul-Checkout neu materialisieren,
-            # sonst baut der miui-Leg noch den Kernel vom VORHERIGEN Run (build377-Befund)
-            git submodule sync --quiet
-            git submodule update --init --recursive --force
-            # GITHUB_TOKEN darf .github/* nicht aendern — yml auf Branch-Stand bringen, damit der Push-Diff keine Workflow-Datei enthaelt
-            git checkout HEAD~1 -- .github/workflows/ 2>/dev/null || true
-            git commit --amend --no-edit --quiet 2>/dev/null || true
-            git push origin HEAD:refs/heads/miui/test || echo "::warning::resync-push fehlgeschlagen — branch bleibt alt (build laeuft trotzdem mit gemergtem baum)"
-          fi
-
-      # -------------------------------------------------------
       # Schritt 2: Cross-Compiler + Build-Tools installieren
-      # Der Kernel 4.14 baut sauber mit dem distro-eigenen
-      # aarch64-linux-gnu-gcc (GCC 13/14).
-      # ccache für inkrementelle Builds, clang für LTO-Unterstützung.
+      # Toolchain auf ubuntu-24.04 gepinnt; gcc-Version landet in
+      # build-info.txt, damit Builds reproduzierbar dokumentiert sind.
       # -------------------------------------------------------
       - name: Install toolchain
         run: |
           sudo rm -f /etc/apt/sources.list.d/google-chrome.list
-          sudo apt-get update || true
+          sudo apt-get update
           sudo apt-get install -y \
             gcc-aarch64-linux-gnu \
             gcc-arm-linux-gnueabihf \
             ccache \
             clang \
             llvm
+          aarch64-linux-gnu-gcc --version | head -1
 
       # -------------------------------------------------------
       # Schritt 3: ccache-Cache wiederherstellen
-      # Persistiert über GitHub Actions Cache — Key basiert auf
-      # Kernel-Makefile, um bei Versionswechseln zu invalidieren.
+      # Key ist pro Run eindeutig (schreibt neuen Cache),
+      # restore-keys holt den jüngsten Stand. So friert der
+      # Cache nicht mehr auf dem ersten Key ein.
       # -------------------------------------------------------
       - name: Restore ccache
         uses: actions/cache@v4
         with:
           path: ~/.ccache
-          key: ccache-${{ runner.os }}-sweet-${{ hashFiles('Makefile') }}
+          key: ccache-${{ runner.os }}-sweet-${{ matrix.variant }}-${{ github.run_id }}
           restore-keys: |
-            ccache-${{ runner.os }}-sweet-
+            ccache-${{ runner.os }}-sweet-${{ matrix.variant }}-
 
       # -------------------------------------------------------
       # Schritt 4: Kernel-Version aus Makefile extrahieren
@@ -180,15 +203,15 @@ jobs:
 
       # -------------------------------------------------------
       # Schritt 7: Kernel + DTBs bauen
-      # ccache mit Kompression und Größenlimit für schnelle
-      # inkrementelle Builds und minimierten Speicherverbrauch.
+      # ccache über PATH aktiviert (USE_CCACHE ist eine
+      # AOSP-Variable, die Kbuild nicht kennt).
       # -------------------------------------------------------
       - name: Build kernel
         run: |
           export ARCH=arm64
           export CROSS_COMPILE=aarch64-linux-gnu-
           export CROSS_COMPILE_COMPAT=arm-linux-gnueabihf-
-          export USE_CCACHE=1
+          export PATH=/usr/lib/ccache:$PATH
           export CCACHE_DIR=~/.ccache
           export CCACHE_COMPRESS=true
           export CCACHE_MAXSIZE=2G
@@ -199,10 +222,11 @@ jobs:
           fi
           make -j$JOBS Image.gz dtb.img dtbo.img
           make -j$JOBS modules
+          ccache -s | tee -a "$GITHUB_STEP_SUMMARY"
 
       # -------------------------------------------------------
       # Schritt 7b: Post-Build Config verifizieren + QUSB2-Objekt prüfen
-      # + k6a_gov.ko prüfen
+      # + k6a_gov.ko prüfen (Version per modinfo, nicht per grep auf der Binärdatei)
       # -------------------------------------------------------
       - name: Verify post-build config
         run: |
@@ -246,8 +270,9 @@ jobs:
           cp arch/arm64/boot/dtbo.img anykernel/
           cp drivers/thermal/k6a_gov/k6a_gov.ko anykernel/
 
-          K6A_GOV_VERSION=$(grep -aoE 'version=[0-9]+\.[0-9]+\.[0-9]+' drivers/thermal/k6a_gov/k6a_gov.ko | head -1 | sed 's/version=//')
+          K6A_GOV_VERSION=$(modinfo -F version drivers/thermal/k6a_gov/k6a_gov.ko 2>/dev/null || true)
           [ -n "$K6A_GOV_VERSION" ] || K6A_GOV_VERSION=unknown
+          TOOLCHAIN=$(aarch64-linux-gnu-gcc --version | head -1)
 
           # Build-Info für Debugging und User-Transparenz
           cat > anykernel/build-info.txt << EOF
@@ -255,6 +280,7 @@ jobs:
           KSU_VERSION=${KSU_VER}
           K6A_GOV_VERSION=${K6A_GOV_VERSION}
           VARIANT=${{ matrix.variant }}
+          TOOLCHAIN=${TOOLCHAIN}
           BUILD_DATE=$(date -u +%Y-%m-%dT%H:%M:%SZ)
           BUILD_NUMBER=${{ github.run_number }}
           COMMIT_SHA=${{ github.sha }}
@@ -265,7 +291,7 @@ jobs:
             -x ".git/*" "README.md"
 
       # -------------------------------------------------------
-      # Schritt 8b: ZIP als Artifact hochladen (Test-Branches)
+      # Schritt 8b: ZIP als Artifact hochladen
       # -------------------------------------------------------
       - name: Upload flashable ZIP (fuer Release-Job)
         uses: actions/upload-artifact@v4
@@ -288,13 +314,16 @@ jobs:
           echo "ZIP:    Badazz-kernel-sweet-v${VERSION}-build${{ github.run_number }}-$VARIANT.zip"
 
   # -----------------------------------------------------------
-  # Release: EIN Release pro Push, mit beiden zips (aosp + miui)
+  # Release: NUR bei workflow_dispatch (oder Tag-Push). Ein Push
+  # auf main baut nur Artefakte — Doku-Fixes erzeugen keine
+  # Releases mehr mit evtl. falscher ZIP (Build399-Befund).
+  # Enthält beide zips (aosp + miui) + SHA256SUMS.
   # -----------------------------------------------------------
   release:
-    name: Release (aosp + miui)
+    name: Release (aosp + miui + SHA256SUMS)
     needs: [build]
-    if: github.ref == 'refs/heads/main'
-    runs-on: ubuntu-latest
+    if: github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-24.04
     permissions:
       contents: write
 
@@ -318,6 +347,12 @@ jobs:
           path: dist
           merge-multiple: true
 
+      - name: SHA256-Prüfsummen
+        run: |
+          cd dist
+          sha256sum Badazz-kernel-sweet-*.zip > SHA256SUMS
+          cat SHA256SUMS
+
       - name: Release-Body vorbereiten
         run: |
           {
@@ -326,7 +361,8 @@ jobs:
             echo "- **Basis:** ${{ steps.ver.outputs.short }}-openela-rc1-perf"
             echo "- **Root:** KernelSU-Next (UAPIv2)"
             echo "- **Manager:** KernelSU-Next Manager APK installieren"
-            echo "- **2 Builds pro Push:** \`-aosp.zip\` (Stock/HOS/LOS) und \`-miui.zip\` (MIUI: stock-USB-Profil)"
+            echo "- **2 Builds pro Release:** \`-aosp.zip\` (Stock/HOS/LOS) und \`-miui.zip\` (MIUI: stock-USB-Profil)"
+            echo "- **Integrität:** \`SHA256SUMS\` im Release — vor dem Flashen prüfen"
             echo
             echo "**Changelog:**"
             git log --oneline HEAD~10..HEAD 2>/dev/null | grep -v 'skip ci' | head -10
@@ -340,4 +376,6 @@ jobs:
           tag_name: v${{ steps.ver.outputs.short }}-badazz-build${{ github.run_number }}
           name: "Badazz-kernel v${{ steps.ver.outputs.short }}-badazz-build${{ github.run_number }}"
           body_path: body.md
-          files: dist/Badazz-kernel-sweet-*.zip
+          files: |
+            dist/Badazz-kernel-sweet-*.zip
+            dist/SHA256SUMS
