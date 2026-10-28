@@ -4,7 +4,7 @@
   <p>Gaming-optimized kernel for <b>SM7150 (sweet / sweet k6a)</b> — 4.14.369</p>
   <p>
     <img src="https://img.shields.io/badge/Kernel-4.14.369-blue?style=flat-square">
-    <img src="https://img.shields.io/badge/k6a__gov-1.6.0-orange?style=flat-square">
+    <img src="https://img.shields.io/badge/k6a__gov-1.6.2-orange?style=flat-square">
     <img src="https://img.shields.io/badge/KernelSU--Next-v3.3.0--311-green?style=flat-square">
     <img src="https://img.shields.io/badge/SUSFS-v2.3.0-success?style=flat-square">
     <img src="https://img.shields.io/badge/Android-13%20%E2%80%93%2016-lightgrey?style=flat-square">
@@ -15,7 +15,7 @@
 
 ## Overview
 
-BadazzKernel is a performance and gaming tuned kernel for **Redmi Note 12 Pro 4G (sweet / sweetin)**. Core is the in-kernel governor **k6a_gov v1.6.0** (loadable module, `CONFIG_K6A_GOV=m`, insmodded by k6a-ctl) — the perfect base for the companion module **[k6a-ctl](https://github.com/vandalsquad187/k6a-ctl)**. Both work hand-in-hand in delegated mode: kernel throttles, module controls.
+BadazzKernel is a performance and gaming tuned kernel for **Redmi Note 12 Pro 4G (sweet / sweetin)**. Core is the in-kernel governor **k6a_gov v1.6.2** (loadable module, `CONFIG_K6A_GOV=m`, insmodded by k6a-ctl) — the perfect base for the companion module **[k6a-ctl](https://github.com/vandalsquad187/k6a-ctl)**. Both work hand-in-hand in delegated mode: kernel throttles, module controls.
 
 🤌🏻 Join my Telegram channel: https://t.me/Badazz89
 
@@ -26,7 +26,7 @@ BadazzKernel is a performance and gaming tuned kernel for **Redmi Note 12 Pro 4G
 ```
 linux-4.14.369
 ├── KernelSU-Next v3.3.0-311 (UAPI 6, 4.14 direct-patch) + SUSFS v2.3.0  # Root + Hide (submodule 72f8cc626)
-├── drivers/thermal/k6a_gov/k6a_gov.c v1.6.0     # In-kernel gaming governor (CONFIG_K6A_GOV=m)
+├── drivers/thermal/k6a_gov/k6a_gov.c v1.6.2     # In-kernel gaming governor (CONFIG_K6A_GOV=m)
 ├── drivers/gpu/msm/kgsl_pwrctrl.c               # GPU pwrlevel export (k6a_gov)
 ├── drivers/devfreq/devfreq.c                    # BW floors (gpubw / llcc), 0 = release floor
 ├── drivers/gpu/msm/ + drivers/thermal/          # Thermal + cooling floors
@@ -38,7 +38,7 @@ linux-4.14.369
 
 | Area | Feature | Details |
 |------|---------|---------|
-| **Governor** | **k6a_gov v1.6.0** | Loadable module (`CONFIG_K6A_GOV=m`, `k6a_gov.ko` shipped in the zip and loaded by k6a-ctl), state machine OFF→GAMING→CD_L2/L3/L4, hysteresis, **immediate escalation** L2→L3→L4, entry dwell on GAMING, L4 flap margin (`peak + 3 K < cd_l4_temp`), `profile=0` forces OFF immediately, throttle history (16), boot default **schedutil** |
+| **Governor** | **k6a_gov v1.6.2** | Loadable module (`CONFIG_K6A_GOV=m`, `k6a_gov.ko` shipped in the zip and loaded by k6a-ctl), state machine OFF→GAMING→CD_L2/L3/L4, hysteresis, **immediate escalation** L2→L3→L4, entry dwell on GAMING, L4 flap margin (`peak + 3 K < cd_l4_temp`), `profile=0` forces OFF immediately, throttle history (16), boot default **schedutil** |
 | **CPU** | Gold clamp | `find_gold_cpu()` + `clamp_freq`, `enforce_max_freq` + `cpufreq_update_policy` (kthread only), hardened notifier, **released again on recovery/disable** |
 | **Temp** | Multi-zone | Max over 4 Gold zones `cpu-1-0..3-usr`, fallback `cpu-0-0-usr` → `xo-therm` → `soc-therm` → `thermal_zone0`; `temp_src`/`temp_valid` in status, holds the last state if no zone answers |
 | **GPU** | Native enforcement | `kgsl_k6a_get_levels` / `kgsl_k6a_set_max_level_idx`, caps per CD state |
@@ -72,6 +72,17 @@ Fixes 1–10, all in-tree: `build397` shipped 1–7 + unified `pr_fmt`, `build39
 | 8 | L4 down-step only when `peak + 3 K < cd_l4_temp` — kills the escalate/retreat flap loop | `K6A_L4_MARGIN` |
 | 9 | `profile=0/off` forces state OFF immediately (no more resurrection by `thresholds_user`) | `state_machine()`, `profile_store()` |
 | 10 | GPU cap: remembers the user `max_pwrlevel` (`gpu_cap_saved_max`) and restores it on release (was a hard idx 0) | `enforce_gpu_cap()`, `gpu_reset()` |
+
+### k6a_gov v1.6.1 / v1.6.2 (Builds 402–404, Oct 2026)
+
+| # | Fix | Where |
+|---|-----|-------|
+| — | Adaptive polling: `poll_adaptive` (default on), slow-poll OFF/battery-cool, instant fast on +3 K trend | `gov_thread()` |
+| — | ftrace tracepoint `k6a_state` (`from`/`to`/`temp`) on every state transition | `trace.h`, `set_state_locked()` |
+| 11 | GPU cap/floor **read-back**: live `max_idx`/`min_idx` compared against the target every tick — if KGSL (`opp_notify`) loosened our limit, it is re-applied (ratelimited log); stricter external limits are never relaxed | `enforce_gpu_cap()`, `enforce_gpu_floor()` |
+| 12 | Race-free unload: sysfs + cooling device removed first, `enabled=false` under lock, thread sleep is `kthread_stop()`-wakeable (no poll_ms stall on rmmod), all limits released under lock afterwards | `k6a_gov_exit()`, `gov_thread()` |
+
+CPU side (Build 401): `cpu_cooling.c` thermal floor clamp + `k6a_thermal` sysfs (see below).
 
 ---
 
@@ -107,14 +118,33 @@ exactly what makes this trap invisible.
 | `profile` | RW | 0..5 — off/gaming/battery/badazz/custom/badazz_safe (4 = keeps the current thresholds) |
 | `status` | RO | `version/state/temp/temp_src/temp_valid/temp_peak/ticks/state_age_ms/policy_max/throttle_events/gold_* /bw_* /gpu_floor/gpu_floor_last/gpu_last_idx/bt/hash_verified/hash_state/build_hash/battery_guard/batt_latched/thresholds_source/vendor_sconfig/vendor_cpu_limits/game_pid/hist=` |
 | `hysteresis` | RW | `fast normal` — dwell ms, `fast` 1..1000 (default 500), `normal` 1..5000 (default 2000) |
-| `cd_thresholds` | RW | `l2t l3t l4t rec` in **°C** then `l2g l3g l4g` in **Hz** — 7 values, all-or-none zero, Gold caps must be non-increasing |
-| `gpu_caps` | RW | `l2 l3 l4` — GPU Hz caps, all-or-none zero, must be non-increasing, ≤ 2 000 000 000 |
-| `bw_floors` | RW | `gpubw_l2 l3 l4 llcc_l2 l3 l4` — MB/s, each ≤ 30000, 0 = no floor |
+| `cd_thresholds` | RW | `l2t l3t l4t rec` in **°C**, `l2g l3g l4g` in **kHz** (CPU-Gold-Caps) — Beispiel: `96 99 102 93 1708800 1209600 1094400` (GAMING) |
+| `gpu_caps` | RW | `l2 l3 l4` — **Hz** — Beispiel: `800000000 565000000 430000000` (GAMING) |
+| `bw_floors` | RW | `gpubw_l2 l3 l4 llcc_l2 l3 l4` — **raw DT-table votes** (gpubw/llcc devfreq tables, max ≈ 6881/7716), each ≤ 30000, 0 = no floor — Beispiel: `4000 3000 1500 0 4000 3000` (GAMING) |
 | `battery_guard` | RW | 0/1 — battery guard (trip point in `battery_guard_temp`) |
 | `battery_guard_temp` | RW | 35..60 °C, default 45 |
 | `poll_ms` | RW | 100..5000 — kthread interval, default 250 |
 | `legacy` | RW | 0/1 — enforcement on/off; 0 releases everything the governor holds |
 | `game_pid` | RW | PID of the game — stored and echoed in `status` only, the kernel never acts on it |
+| `poll_adaptive` | RW | 0/1 (default 1) — slow-poll (≥1 s) while OFF or battery-cool; instant fast-poll on a +3 K trend or any action-range exit. `0` = constant `poll_ms` |
+
+**Units in this interface:** CPU limits/frequencies in **kHz**, GPU limits in **Hz**, BW floors as **raw DT-table votes** (gpubw/llcc devfreq), temperatures as °C in `k6a_gov` and **milli-°C** in `k6a_thermal`.
+
+### k6a_thermal — CPU-cooling floor (Build 401, `/sys/kernel/k6a_thermal/`)
+
+Own clamp layer in `cpu_cooling.c`: under thermal pressure the CPU max level is held at a floor instead of letting cpufreq collapse. SELinux label `u:object_r:sysfs:s0`, readable/writable as root.
+
+| Node | R/W | Unit / Default | Purpose |
+|------|-----|----------------|---------|
+| `thermal_floor_enable` | RW | 0/1, default 1 | Master switch for the floor clamp |
+| `thermal_floor_hard_temp` | RW | m°C, default `100000` (= 100 °C) | At/above this temp the floor is lifted entirely (hard override) |
+| `thermal_floor_temp1` | RW | m°C, default `85000` (85 °C) | First floor step: hold CPU level ≥ 6 |
+| `thermal_floor_temp2` | RW | m°C, default `90000` (90 °C) | Second step: hold level ≥ 7 |
+| `thermal_floor_temp3` | RW | m°C, default `95000` (95 °C) | Third step: hold level ≥ 8 |
+
+### ftrace tracepoint (Build 402)
+
+`/sys/kernel/tracing/events/k6a_gov/k6a_state` — fires on every governor state transition with `from`, `to`, `temp`. Test: `echo 1 > /sys/kernel/tracing/events/k6a_gov/k6a_state/enable && echo 0 > /sys/kernel/k6a_gov/enable && echo 1 > /sys/kernel/k6a_gov/enable && grep k6a_state /sys/kernel/tracing/trace`.
 
 > **Kernel provides the levers — k6a-ctl pulls them.** Without module k6a_gov runs with safe defaults. With module it reacts dynamically to load/temperature.
 
