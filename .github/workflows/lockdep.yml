@@ -48,7 +48,7 @@ jobs:
         run: |
           export CCACHE_DIR=$GITHUB_WORKSPACE/.ccache
           export PATH=/usr/lib/ccache:$PATH
-          printf 'CONFIG_DEBUG_KERNEL=y\nCONFIG_PROVE_LOCKING=y\nCONFIG_DEBUG_ATOMIC_SLEEP=y\nCONFIG_FORTIFY_SOURCE=y\nCONFIG_DEBUG_OBJECTS_WORK=y\nCONFIG_DEBUG_LIST=y\n' > lockdep.config
+          printf 'CONFIG_DEBUG_KERNEL=y\nCONFIG_PROVE_LOCKING=y\nCONFIG_DEBUG_ATOMIC_SLEEP=y\nCONFIG_FORTIFY_SOURCE=y\nCONFIG_DEBUG_OBJECTS_WORK=y\nCONFIG_DEBUG_LIST=y\n# CONFIG_LOCKDEP_CROSSRELEASE is not set\n# CONFIG_LOCKDEP_COMPLETIONS is not set\n' > lockdep.config
           if [ "${{ inputs.kasan }}" = "true" ]; then
             echo 'CONFIG_KASAN=y' >> lockdep.config
           fi
