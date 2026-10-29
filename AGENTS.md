@@ -1,15 +1,29 @@
 # Kernel Build Status
 
-## Current State
-- **Repo**: `vandalsquad187/BadazzKernel` branch `main`: `f48a2d428` (Build 397: k6a_gov
-  Fixes 1-7 + `pr_fmt`) -> **`a462761d0`** (Build 398: Fixes 8-10) -> Docs-Bump (dieser
-  Commit). CI gruen (Runs `40492281250` / `40495310866`, aosp 12m26s / miui 17m38s). Releases
-  entstehen automatisch pro Main-Bump — **397** (11:14 UTC) und **398** (11:41 UTC, Latest),
-  Docs-Bump erzeugt konventionsgemaess `399` (Kernel-Code identisch zu 398). **Name ungleich
-  Scope-Regel bleibt**: nur `gh release list` + `build-info.txt` (`BUILD_NUMBER`/`COMMIT_SHA`)
-  zaehlen. Flashen ausdruecklich nur das **aosp-ZIP** (Geraet laeuft crDroid); Releases/
-  Tags nur mit explizitem OK (User-OK fuer die Fix-Builds lag vor).
-- **Kernel**: `4.14.369`, KSU-Next **built-in, 4.14 direct-patch mode**, **k6a_gov v1.6.0**
+## Current State (Stand 2026-10-29, Build 416)
+- **Repo**: `vandalsquad187/BadazzKernel` branch `main` @ **`8116a7c4`** (KSU fork bump:
+  ratelimit.h includes). Kette: `f48a2d428`/`a462761d0` (397/398) -> `2848b197b` (403
+  lockdep const-fix) -> `3adfb9001` (404: Fixes 11/12, **k6a_gov v1.6.2**) -> `f2b059635`
+  (CI-Hardening) -> `31fa12f95` (vermagic-Check) -> `6c0f61c6f` (README) -> `0e55e3d54`
+  (409: **v1.6.3**) -> `bffdcdc85`/`8116a7c4` (KSU Haertung+Fixes). Releases **NUR via
+  `gh workflow run build-kernel.yml`** (dispatch-only); Push-Runs bauen ohne Release,
+  `paths-ignore: ['**.md','docs/**']`. Release-Nummer = interner Run-Zaehler (414, 416 —
+  Luecken durch fehlgeschlagene Runs normal). **Name ungleich Scope-Regel bleibt**: nur
+  `gh release list` + `build-info.txt` (`BUILD_NUMBER`/`COMMIT_SHA`) zaehlen. Flashen
+  ausdruecklich nur das **aosp-ZIP** (Geraet laeuft crDroid); Releases/Tags nur mit
+  explizitem OK.
+- **Geraet**: build416 (Latest) geflasht + verifiziert 2026-10-29: root OK, k6a_gov v1.6.3
+  aktiv, 0 Oops. **Am-Geraet-Beweis der A/B-Runden**: r60r-A (416 + Luefter) = gc med 565,
+  ktemp max 75; r60q (404, ohne Luefter) = gc med 355, ktemp max 81; r60j-Ref startet 37 °C.
+- **KSU-Regression build414 (Root Cause + Lektion)**: `virt_addr_valid`-Guards (mein
+  "toten !page-Check ersetzt"-Fix) killten alle Syscall-Table-Hooks — auf arm64-4.14 deckt
+  `virt_addr_valid` nur die **Linear Map** ab, `sys_call_table`/`ksu_syscall_table` liegen
+  im **KIMAGE** (unter PAGE_OFFSET) → Guard immer FALSE → KSU "nicht unterstuetzt",
+  Manager-UID-Erkennung tot, alles EPERM. `__pa()` loest KIMAGE korrekt auf
+  (`__kimg_to_phys` via `kimage_voffset`). **Lektion**: Hook-Install-Refactors niemals
+  "theoretisch tot"-erklären und bündeln — einzeln flashen/verifizieren, mit Root-Diag
+  beweisen.
+- **Kernel**: `4.14.369`, KSU-Next **built-in, 4.14 direct-patch mode**, **k6a_gov v1.6.3**
   (`CONFIG_K6A_GOV=m`, sweet_defconfig:208 — `.ko` in der ZIP, insmod durch k6a-ctl).
   GPU-Tabelle live 800/650/565/430/355/267/180/140 (idx 0-7; k6a sieht 0-6); KGSL-Floor-
   Interplay `min_t(thermal_pwrlevel_floor=4, user_min)` (live verifiziert, siehe
@@ -90,6 +104,29 @@
 - **USB-Faults**: alle vier geschlossen (Build 336/338/348-Kette).
 - **User speaks German**; device reports in German; User flasht/rebootet selbst (aosp-ZIP),
   meldet Build-/CI-Status.
+## k6a-ctl (Magisk Modul — integraler Bestandteil des Kernel-Pakets, User-OK 2026-10-29)
+- **Pfad**: `/data/adb/modules/k6a-ctl/` (v1.4.6, id=`k6a-ctl`, Autor BadaZz89).
+  **Gehoert ausdruecklich zum Kernel dazu** (User-Anweisung: "merke dir k6a-ctl, es
+  gehoert zum kernel dazu") — beim Kernel-Bau/-Flash denken, nicht nur badazz_iowatch.
+- **Rolle**: Userspace-Begleiter des in-kernel `k6a_gov`:
+  - `service.sh`: **laedt k6a_gov.ko** beim Boot (`_load_gov`, Kandidatenpfade
+    `$MODDIR/k6a_gov.ko` -> /data/adb -> /system/lib/modules -> /vendor/lib/modules) mit
+    **Versions-Gate**: akzeptiert nur ko-Version 1.5.x/1.6.x (`strings`-Check) — bei
+    neueren ko-Versionen gate anpassen (GOV_KO_VER).
+  - schreibt persistente/idempotente `cd_thresholds 96/99/102/93` (-> status
+    `thresholds_source=user`), Gold-Cluster-Cap-UI-Toggle, schedutil-Tuning,
+    `thermal_protect` (pausiert Gaming-Deckel).
+  - `bin/`: `k6a-controller`, `k6a-lib.sh`, `webui-server.sh`/`webui-handler.sh`
+    (localhost **WebUI**), Backups `*.bak-v142..146`.
+  - `config/settings.conf` (single-source config), `config/service.log(.1/.2)` (100 KB
+    Rotation), `webroot/`, `run/`, `sepolicy.rule` (kernel -> sysfs read/open etc.).
+  - ships eigenes `k6a_gov.ko` (wird bei jedem Kernel-Release-Flash mit der ZIP-Version
+    aktualisiert — mit insmod durch service.sh).
+- **Aufteilung klären, wenn State-Fragen kommen**: State-Maschine/Game-Detect/Floors/Temp
+  = **Kernel-Modul** (k6a_gov.ko, /sys/kernel/k6a_gov); Konfig/Thresholds/Schedutil/WebUI
+  = **k6a-ctl** (Userspace). "gaming ohne Match" = Game-Detect sieht offene Lobby (z.B.
+  com.activision.callofduty.shooter PID offen) — korrekt, kein Phaenom.
+
 ## Repo & Docs Layout
 
 | Path | What it is |
