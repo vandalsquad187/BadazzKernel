@@ -1760,7 +1760,8 @@ static int lookup_fast(struct nameidata *nd,
 	if (likely(err > 0)) {
 		*inode = d_backing_inode(path->dentry);
 		if (unlikely(susfs_is_inode_sus_path(*inode))) {
-			dput(path->dentry);
+			/* dentry ref + (nur bei Mount-Uebergang) mnt ref freigeben */
+			path_put_conditional(path, nd);
 			return -ENOENT;
 		}
 	}
@@ -1947,7 +1948,10 @@ static int walk_component(struct nameidata *nd, int flags)
 	}
 
 	if (unlikely(susfs_is_inode_sus_path(inode))) {
-		path_put(&path);
+		/* RCU-walk haelt keine Referenzen; ref-walk: nur freigeben, was
+		 * lookup_fast()/follow_managed() wirklich genommen hat */
+		if (!(nd->flags & LOOKUP_RCU))
+			path_put_conditional(&path, nd);
 		return -ENOENT;
 	}
 
