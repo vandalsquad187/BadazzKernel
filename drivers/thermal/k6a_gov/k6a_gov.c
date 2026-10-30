@@ -29,10 +29,11 @@ extern int kgsl_k6a_set_min_level_idx(unsigned int level);
 extern int k6a_devfreq_get_bw(const char *name, u32 *cur, u32 *min, u32 *max);
 extern int k6a_devfreq_set_bw(const char *name, u32 min, u32 max);
 
-#define K6A_GOV_VERSION       "1.6.3"
+#define K6A_GOV_VERSION       "1.7.0"
 #define K6A_GOV_KTHREAD_SLEEP_MS   250
 #define K6A_GOV_MAX_FREQS     32
 #define K6A_HIST_N            16
+#define K6A_RAMP_UP_TICKS     4   /* Ticks pro OPP-Schritt beim Loesen des Gold-Caps */
 #define K6A_L4_MARGIN     3   /* K unter cd_l4_temp, bevor L4 verlassen wird */
 
 enum k6a_state { K6A_OFF=0, K6A_GAMING=1, K6A_CD_L2=2, K6A_CD_L3=3, K6A_CD_L4=4 };
@@ -86,6 +87,8 @@ struct k6a_gov {
     s32 batt_temp_c;
 
     u64 state_ts;
+    u64 state_ms[5];       /* abgeschlossene Verweilzeit pro State (ms) */
+    u64 res_start_ms;      /* Beginn des Residency-Fensters (Init / stats_reset) */
     u64 entry_since;
     u64 throttle_events;
 
@@ -98,6 +101,8 @@ struct k6a_gov {
     u32 gold_freqs[K6A_GOV_MAX_FREQS];
     u32 gold_num;
     u32 enforced_max;
+    u32 cap_now;           /* aktuell angewendeter (gerampter) Gold-Cap, 0 = keiner */
+    u32 ramp_up_wait;
     cpumask_t gold_mask;
     bool batt_latched;
 
@@ -272,6 +277,47 @@ static u32 get_cd_max_freq(void) {
     }
 }
 
+/* Naechster Gold-Cap Richtung Ziel (0 = kein Cap). Runter: ein OPP pro Tick,
+ * hoch: ein OPP alle K6A_RAMP_UP_TICKS Ticks, L4 und fehlende Tabelle sofort.
+ * Caller haelt gov->lock. */
+static u32 ramp_next_cap(u32 cur, u32 target) {
+    u32 top = 0, cur_f, tgt_f, step = 0, f, i;
+
+    if (!gov->gold_num || gov->state == K6A_CD_L4 || cur == target) {
+        gov->ramp_up_wait = 0;
+        return target;
+    }
+    for (i = 0; i < gov->gold_num; i++)
+        if (gov->gold_freqs[i] > top) top = gov->gold_freqs[i];
+    cur_f = cur ? cur : top;
+    tgt_f = target ? target : top;
+    if (cur_f == tgt_f) {
+        gov->ramp_up_wait = 0;
+        return target;
+    }
+
+    if (cur_f > tgt_f) {                 /* anziehen: naechst niedrigerer OPP, nicht unter Ziel */
+        gov->ramp_up_wait = 0;
+        for (i = 0; i < gov->gold_num; i++) {
+            f = gov->gold_freqs[i];
+            if (f < cur_f && f > step) step = f;
+        }
+        if (!step || step < tgt_f) step = tgt_f;
+    } else {                             /* loesen: langsam hoch */
+        if (gov->ramp_up_wait) {
+            gov->ramp_up_wait--;
+            return cur;
+        }
+        gov->ramp_up_wait = K6A_RAMP_UP_TICKS - 1;
+        for (i = 0; i < gov->gold_num; i++) {
+            f = gov->gold_freqs[i];
+            if (f > cur_f && (!step || f < step)) step = f;
+        }
+        if (!step || step > tgt_f) step = tgt_f;
+    }
+    return (!target && step >= top) ? 0 : step;
+}
+
 static void apply_policy(void) {
     int cpu = find_gold_cpu();
     if (cpu >= 0)
@@ -284,7 +330,8 @@ static void enforce_max_freq(void) {
     struct cpufreq_policy *p;
 
     if (!gov || !gov->enabled || !gov->legacy_mode) return;
-    max = get_cd_max_freq();
+    gov->cap_now = ramp_next_cap(gov->cap_now, get_cd_max_freq());
+    max = gov->cap_now;
     if (max == gov->enforced_max) return;
     gov->enforced_max = max;
     apply_policy();
@@ -321,12 +368,12 @@ static int cpufreq_notify(struct notifier_block *nb, unsigned long e, void *data
     struct cpufreq_policy *p;
     u32 max;
 
-    if (!gov || !gov->enabled || !gov->legacy_mode || gov->state < K6A_CD_L2)
+    if (!gov || !gov->enabled || !gov->legacy_mode)
         return NOTIFY_OK;
     if (e != CPUFREQ_ADJUST && e != CPUFREQ_INCOMPATIBLE)
         return NOTIFY_OK;
     p = data;
-    max = get_cd_max_freq();
+    max = READ_ONCE(gov->cap_now);   /* gerampter Cap, nicht das State-Ziel */
     if (!max) return NOTIFY_OK;
 
     if (is_gold_policy(p) && p->max > max) {
@@ -429,9 +476,13 @@ static void k6a_hist_push(enum k6a_state from) {
 /* single entry point for every state transition */
 static void set_state_locked(enum k6a_state ns) {
     enum k6a_state from = gov->state;
+    u64 now;
     if (ns == from) return;
+    now = ktime_to_ms(ktime_get());
+    if ((unsigned int)from < ARRAY_SIZE(gov->state_ms))
+        gov->state_ms[from] += now - max_t(u64, gov->state_ts, gov->res_start_ms);
     gov->state = ns;
-    gov->state_ts = ktime_to_ms(ktime_get());
+    gov->state_ts = now;
     gov->entry_since = 0;
     k6a_hist_push(from);
     trace_k6a_state((unsigned int)from, (unsigned int)ns, (s32)gov->temp_celsius);
@@ -726,6 +777,7 @@ static void apply_limits(void) {
     if (!gov->legacy_mode) {
         if (gov->enforced_max) {
             gov->enforced_max = 0;
+            gov->cap_now = 0;
             apply_policy();
         }
         gpu_reset();
@@ -1021,6 +1073,7 @@ static ssize_t enable_store(struct kobject *k, struct kobj_attribute *a, const c
         set_state_locked(K6A_OFF);
         gov->entry_since = 0;
         gov->enforced_max = 0;
+        gov->cap_now = 0;
         gpu_reset();
         gpu_floor_reset();
         reset_bw_floors();
@@ -1091,7 +1144,8 @@ static ssize_t status_show(struct kobject *k, struct kobj_attribute *a, char *b)
     u32 temp_peak, thresholds_user;
     char vendor_sconfig[sizeof(gov->vendor_sconfig)];
     char vendor_cpu_limits[sizeof(gov->vendor_cpu_limits)];
-    u64 throttle_events, state_age_ms;
+    u64 throttle_events, state_age_ms, res_ms[5];
+    u32 gold_cap_now;
     u32 gpu_caps[3], gpu_last_idx;
     u32 gpu_floor;
     s32 gpu_floor_last, batt_temp_c;
@@ -1121,6 +1175,10 @@ static ssize_t status_show(struct kobject *k, struct kobj_attribute *a, char *b)
     memcpy(vendor_sconfig, gov->vendor_sconfig, sizeof(vendor_sconfig));
     memcpy(vendor_cpu_limits, gov->vendor_cpu_limits, sizeof(vendor_cpu_limits));
     state_age_ms = ktime_to_ms(ktime_get()) - gov->state_ts;
+    memcpy(res_ms, gov->state_ms, sizeof(res_ms));
+    if (si < ARRAY_SIZE(res_ms))
+        res_ms[si] += ktime_to_ms(ktime_get()) - max_t(u64, gov->state_ts, gov->res_start_ms);
+    gold_cap_now = gov->cap_now;
     {
         int gcpu = find_gold_cpu();
         struct cpufreq_policy *pol = gcpu >= 0 ? cpufreq_cpu_get(gcpu) : NULL;
@@ -1228,6 +1286,11 @@ static ssize_t status_show(struct kobject *k, struct kobj_attribute *a, char *b)
         vendor_sconfig,
         vendor_cpu_limits);
 
+    len += scnprintf(b + len, PAGE_SIZE - len,
+        "gold_cap_now=%u\n"
+        "residency_ms=off:%llu,gaming:%llu,cd_l2:%llu,cd_l3:%llu,cd_l4:%llu\n",
+        gold_cap_now, res_ms[0], res_ms[1], res_ms[2], res_ms[3], res_ms[4]);
+
     /* KB7: throttle history, oldest first */
     len += scnprintf(b + len, PAGE_SIZE - len, "hist=");
     for (i = 0; i < hist_len && len < PAGE_SIZE - 48; i++) {
@@ -1277,6 +1340,7 @@ static ssize_t legacy_store(struct kobject *k, struct kobj_attribute *a, const c
     gov->legacy_mode = !!v;
     if (!v && gov->enforced_max) {
         gov->enforced_max = 0;
+        gov->cap_now = 0;
         apply_policy();
     }
     mutex_unlock(&gov->lock);
@@ -1497,6 +1561,15 @@ static ssize_t bw_floors_store(struct kobject *k, struct kobj_attribute *a, cons
     return c;
 }
 
+static ssize_t stats_reset_store(struct kobject *k, struct kobj_attribute *a, const char *b, size_t c) {
+    mutex_lock(&gov->lock);
+    memset(gov->state_ms, 0, sizeof(gov->state_ms));
+    gov->res_start_ms = ktime_to_ms(ktime_get());
+    gov->throttle_events = 0;
+    mutex_unlock(&gov->lock);
+    return c;
+}
+
 static struct kobj_attribute attr_enable      = __ATTR_RW(enable);
 static struct kobj_attribute attr_profile     = __ATTR_RW(profile);
 static struct kobj_attribute attr_status      = __ATTR_RO(status);
@@ -1511,6 +1584,7 @@ static struct kobj_attribute attr_poll_adaptive = __ATTR_RW(poll_adaptive);
 static struct kobj_attribute attr_gpu_caps    = __ATTR_RW(gpu_caps);
 static struct kobj_attribute attr_gpu_floor   = __ATTR_RW(gpu_floor);
 static struct kobj_attribute attr_bw_floors   = __ATTR_RW(bw_floors);
+static struct kobj_attribute attr_stats_reset = __ATTR_WO(stats_reset);
 
 static struct attribute *gov_attrs[] = {
     &attr_enable.attr,
@@ -1527,6 +1601,7 @@ static struct attribute *gov_attrs[] = {
     &attr_gpu_caps.attr,
     &attr_gpu_floor.attr,
     &attr_bw_floors.attr,
+    &attr_stats_reset.attr,
     NULL,
 };
 static struct attribute_group gov_attr_group = { .attrs = gov_attrs };
@@ -1580,6 +1655,7 @@ static int __init k6a_gov_init(void) {
     }
     gov->gpu_last_idx = -1;
     gov->gpu_cap_saved_max = -1;
+    gov->res_start_ms = gov->state_ts = ktime_to_ms(ktime_get());
     gov->gpu_floor = 0;
     gov->gpu_floor_last = -1;
     gov->gpu_floor_saved_min = -1;
@@ -1656,6 +1732,7 @@ static void __exit k6a_gov_exit(void) {
     /* 3. Jetzt ist niemand mehr aktiv: alle Limits freigeben */
     mutex_lock(&gov->lock);
     gov->enforced_max = 0;
+    gov->cap_now = 0;
     apply_policy();
     gpu_reset();          /* stellt das User-max_pwrlevel wieder her */
     gpu_floor_reset();    /* stellt das User-min_pwrlevel wieder her */
