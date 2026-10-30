@@ -108,6 +108,12 @@
 - **Pfad**: `/data/adb/modules/k6a-ctl/` (v1.4.6, id=`k6a-ctl`, Autor BadaZz89).
   **Gehoert ausdruecklich zum Kernel dazu** (User-Anweisung: "merke dir k6a-ctl, es
   gehoert zum kernel dazu") — beim Kernel-Bau/-Flash denken, nicht nur badazz_iowatch.
+  **GATE-FALLE (2026-10-30 real passiert, build421)**: ko-Version uebersteigt das Gate
+  -> Modul laedt NICHT, /sys/kernel/k6a_gov fehlt, k6a-ctl faellt in "reiner Legacy-
+  Betrieb" ohne Fehler-toaster. Nach jedem k6a_gov-Version-Bump: service.sh `kver_ok()`
+  erweitern (z.B. `1.5.*|1.6.*|1.7.*`) + `GOV_KO_VER` setzen; Notfall-Reload:
+  `insmod /data/adb/modules/k6a-ctl/k6a_gov.ko` (Controller-HB merkt es im naechsten
+  Tick, "legacy -> 1 (delegated=1)").
 - **Rolle**: Userspace-Begleiter des in-kernel `k6a_gov`:
   - `service.sh`: **laedt k6a_gov.ko** beim Boot (`_load_gov`, Kandidatenpfade
     `$MODDIR/k6a_gov.ko` -> /data/adb -> /system/lib/modules -> /vendor/lib/modules) mit

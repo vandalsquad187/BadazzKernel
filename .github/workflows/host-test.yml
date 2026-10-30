@@ -1,0 +1,32 @@
+name: k6a_gov host test
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'drivers/thermal/k6a_gov/**'
+      - 'tools/k6a_gov_host_test/**'
+  pull_request:
+    paths:
+      - 'drivers/thermal/k6a_gov/**'
+      - 'tools/k6a_gov_host_test/**'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: host-test-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  state-machine:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: |
+            drivers/thermal/k6a_gov
+            tools/k6a_gov_host_test
+      - name: State machine host test
+        run: tools/k6a_gov_host_test/run.sh
