@@ -30,11 +30,11 @@ extern struct cred *ksu_cred;
 
 #ifdef CONFIG_KSU_SUSFS_ENABLE_LOG
 extern struct static_key_true susfs_is_log_enabled;
-#define SUSFS_LOGI(fmt, ...) if (static_branch_likely(&susfs_is_log_enabled)) pr_info("susfs:[%u][%d][%s] " fmt, current_uid().val, current->pid, __func__, ##__VA_ARGS__)
-#define SUSFS_LOGE(fmt, ...) if (static_branch_likely(&susfs_is_log_enabled)) pr_err("susfs:[%u][%d][%s]" fmt, current_uid().val, current->pid, __func__, ##__VA_ARGS__)
+#define SUSFS_LOGI(fmt, ...) do { if (static_branch_likely(&susfs_is_log_enabled)) pr_info("susfs:[%u][%d][%s] " fmt, current_uid().val, current->pid, __func__, ##__VA_ARGS__); } while (0)
+#define SUSFS_LOGE(fmt, ...) do { if (static_branch_likely(&susfs_is_log_enabled)) pr_err("susfs:[%u][%d][%s]" fmt, current_uid().val, current->pid, __func__, ##__VA_ARGS__); } while (0)
 #else
-#define SUSFS_LOGI(fmt, ...)
-#define SUSFS_LOGE(fmt, ...)
+#define SUSFS_LOGI(fmt, ...) do { } while (0)
+#define SUSFS_LOGE(fmt, ...) do { } while (0)
 #endif
 
 void susfs_enable_log(void __user **user_info);

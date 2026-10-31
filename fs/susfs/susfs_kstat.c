@@ -3,11 +3,12 @@
 #ifdef CONFIG_KSU_SUSFS_SUS_KSTAT
 static DEFINE_HASHTABLE(susfs_sus_kstat_hlist, 10);
 static DEFINE_MUTEX(susfs_sus_kstat_mutex);
+static unsigned int susfs_sus_kstat_cnt;   /* unter susfs_sus_kstat_mutex */
 
 void susfs_add_sus_kstat(void __user **user_info) {
 	struct st_susfs_sus_kstat info = {0};
-	struct st_susfs_sus_kstat_hlist *new_entry = NULL;
-	bool added = false;
+	struct st_susfs_sus_kstat_hlist *new_entry = NULL, *e;
+	bool added = false, dup = false;
 	struct path path;
 	struct inode *inode = NULL;
 
@@ -27,12 +28,24 @@ void susfs_add_sus_kstat(void __user **user_info) {
 	new_entry->target_dev = inode->i_sb->s_dev;
 	new_entry->is_fuse = (inode->i_sb->s_magic == FUSE_SUPER_MAGIC);
 	memcpy(&new_entry->info, &info, sizeof(info));
-	set_bit(AS_FLAGS_SUS_KSTAT, &inode->i_mapping->flags);
 	mutex_lock(&susfs_sus_kstat_mutex);
-	hash_add_rcu(susfs_sus_kstat_hlist, &new_entry->node, new_entry->target_ino);
-	added = true;
+	hash_for_each_possible(susfs_sus_kstat_hlist, e, node, new_entry->target_ino) {
+		if (e->target_ino == new_entry->target_ino && e->target_dev == new_entry->target_dev) { dup = true; break; }
+	}
+	if (dup) {
+		info.err = -EEXIST;                   /* aendern geht ueber update_sus_kstat */
+	} else if (susfs_sus_kstat_cnt >= SUSFS_MAX_SUS_KSTAT) {
+		info.err = -ENOSPC;
+	} else {
+		hash_add_rcu(susfs_sus_kstat_hlist, &new_entry->node, new_entry->target_ino);
+		susfs_sus_kstat_cnt++;
+		added = true;
+		info.err = 0;
+	}
 	mutex_unlock(&susfs_sus_kstat_mutex);
-	info.err = 0;
+	/* Flag erst setzen, wenn der Eintrag wirklich in der Tabelle steht */
+	if (added)
+		set_bit(AS_FLAGS_SUS_KSTAT, &inode->i_mapping->flags);
 out_path:
 	path_put(&path);
 out:
@@ -46,6 +59,7 @@ out:
 void susfs_update_sus_kstat(void __user **user_info) {
 	struct st_susfs_sus_kstat info = {0};
 	struct st_susfs_sus_kstat_hlist *entry;
+	bool found = false;
 
 	if (copy_from_user(&info, (struct st_susfs_sus_kstat __user*)*user_info, sizeof(info))) {
 		info.err = -EFAULT;
@@ -57,11 +71,12 @@ void susfs_update_sus_kstat(void __user **user_info) {
 	hash_for_each_possible(susfs_sus_kstat_hlist, entry, node, info.target_ino) {
 		if (entry->target_ino == info.target_ino) {
 			memcpy(&entry->info, &info, sizeof(info));
+			found = true;
 			break;
 		}
 	}
 	mutex_unlock(&susfs_sus_kstat_mutex);
-	info.err = 0;
+	info.err = found ? 0 : -ENOENT;           /* vorher: stiller Erfolg bei unbekanntem Inode */
 out:
 	if (copy_to_user(&((struct st_susfs_sus_kstat __user*)*user_info)->err, &info.err, sizeof(info.err)))
 		info.err = -EFAULT;
@@ -76,6 +91,9 @@ void susfs_sus_kstat_spoof_generic_fillattr(struct inode *inode, struct kstat *s
 	rcu_read_lock();
 	hash_for_each_possible_rcu(susfs_sus_kstat_hlist, entry, node, inode->i_ino) {
 		if (entry->target_ino == inode->i_ino && entry->target_dev == inode->i_sb->s_dev) {
+			/* root/ksud (KSU-Domain) sehen die echten Werte (Backups, Diagnose) */
+			if (susfs_is_current_ksu_domain())
+				break;
 			if (entry->info.flags & KSTAT_SPOOF_INO)
 				stat->ino = entry->info.spoofed_ino;
 			if (entry->info.flags & KSTAT_SPOOF_DEV)
