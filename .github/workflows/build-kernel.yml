@@ -42,7 +42,7 @@ jobs:
       contents: write
     steps:
       - name: Checkout miui/test
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           fetch-depth: 0
           submodules: true
@@ -92,7 +92,7 @@ jobs:
       # Schritt 1: Repo auschecken
       # -------------------------------------------------------
       - name: Checkout source (${{ matrix.variant }})
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           fetch-depth: 0
           submodules: true
@@ -122,7 +122,7 @@ jobs:
       # Cache nicht mehr auf dem ersten Key ein.
       # -------------------------------------------------------
       - name: Restore ccache
-        uses: actions/cache@v4
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
         with:
           path: ~/.ccache
           key: ccache-${{ runner.os }}-sweet-${{ matrix.variant }}-${{ github.run_id }}
@@ -303,7 +303,7 @@ jobs:
       # Schritt 8b: ZIP als Artifact hochladen
       # -------------------------------------------------------
       - name: Upload flashable ZIP (fuer Release-Job)
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: Badazz-kernel-sweet-v${{ steps.kernel_ver.outputs.short }}-build${{ github.run_number }}${{ matrix.variant }}
           path: Badazz-kernel-sweet-*.zip
@@ -338,7 +338,7 @@ jobs:
 
     steps:
       - name: Checkout (fuer Versionsauszug)
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           fetch-depth: 12
 
@@ -351,7 +351,7 @@ jobs:
           echo "short=$VERSION.$PATCHLEVEL.$SUBLEVEL" >> $GITHUB_OUTPUT
 
       - name: Download artifacts (aosp + miui)
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           path: dist
           merge-multiple: true
@@ -380,7 +380,7 @@ jobs:
           } > body.md
 
       - name: Create Release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2.6.2
         with:
           tag_name: v${{ steps.ver.outputs.short }}-badazz-build${{ github.run_number }}
           name: "Badazz-kernel v${{ steps.ver.outputs.short }}-badazz-build${{ github.run_number }}"

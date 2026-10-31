@@ -26,7 +26,7 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           fetch-depth: 0
           submodules: true
@@ -38,7 +38,7 @@ jobs:
             gcc-aarch64-linux-gnu gcc-arm-linux-gnueabihf libncurses-dev libssl-dev lzop
 
       - name: Cache ccache
-        uses: actions/cache@v4
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
         with:
           path: .ccache
           key: ccache-lockdep-${{ github.run_id }}
@@ -59,7 +59,7 @@ jobs:
           ls -la arch/arm64/boot/Image.gz
 
       - name: Upload
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: lockdep-image
           path: arch/arm64/boot/Image.gz
