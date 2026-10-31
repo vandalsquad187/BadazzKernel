@@ -7,6 +7,7 @@ static DEFINE_MUTEX(susfs_sus_kstat_mutex);
 void susfs_add_sus_kstat(void __user **user_info) {
 	struct st_susfs_sus_kstat info = {0};
 	struct st_susfs_sus_kstat_hlist *new_entry = NULL;
+	bool added = false;
 	struct path path;
 	struct inode *inode = NULL;
 
@@ -14,6 +15,7 @@ void susfs_add_sus_kstat(void __user **user_info) {
 		info.err = -EFAULT;
 		goto out;
 	}
+	info.target_pathname[sizeof(info.target_pathname) - 1] = '\0';   /* nie ungeterminiert in kern_path() */
 	if (*info.target_pathname == '\0') { info.err = -EINVAL; goto out; }
 	info.err = kern_path(info.target_pathname, 0, &path);
 	if (info.err) goto out;
@@ -28,6 +30,7 @@ void susfs_add_sus_kstat(void __user **user_info) {
 	set_bit(AS_FLAGS_SUS_KSTAT, &inode->i_mapping->flags);
 	mutex_lock(&susfs_sus_kstat_mutex);
 	hash_add_rcu(susfs_sus_kstat_hlist, &new_entry->node, new_entry->target_ino);
+	added = true;
 	mutex_unlock(&susfs_sus_kstat_mutex);
 	info.err = 0;
 out_path:
@@ -35,7 +38,8 @@ out_path:
 out:
 	if (copy_to_user(&((struct st_susfs_sus_kstat __user*)*user_info)->err, &info.err, sizeof(info.err)))
 		info.err = -EFAULT;
-	if (info.err && new_entry)
+	/* nach hash_add_rcu() gehoert der Eintrag der Hashtabelle: nie freigeben */
+	if (info.err && new_entry && !added)
 		kfree(new_entry);
 }
 
@@ -47,6 +51,7 @@ void susfs_update_sus_kstat(void __user **user_info) {
 		info.err = -EFAULT;
 		goto out;
 	}
+	info.target_pathname[sizeof(info.target_pathname) - 1] = '\0';   /* nie ungeterminiert in kern_path() */
 	if (!info.target_ino) { info.err = -EINVAL; goto out; }
 	mutex_lock(&susfs_sus_kstat_mutex);
 	hash_for_each_possible(susfs_sus_kstat_hlist, entry, node, info.target_ino) {
