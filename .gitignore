@@ -136,3 +136,11 @@ anykernel/
 
 # kernel build artifacts (was accidentally tracked)
 /out/
+
+# patch backups + host test build output
+*.orig
+*.rej
+include/linux/*.orig
+fs/susfs/*.orig
+tools/k6a_gov_host_test/*.h.tmp
+tools/k6a_gov_host_test/extracted.h

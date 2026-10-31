@@ -1,20 +1,39 @@
 # Kernel Build Status
 
-## Current State (Stand 2026-10-29, Build 416)
-- **Repo**: `vandalsquad187/BadazzKernel` branch `main` @ **`8116a7c4`** (KSU fork bump:
-  ratelimit.h includes). Kette: `f48a2d428`/`a462761d0` (397/398) -> `2848b197b` (403
-  lockdep const-fix) -> `3adfb9001` (404: Fixes 11/12, **k6a_gov v1.6.2**) -> `f2b059635`
-  (CI-Hardening) -> `31fa12f95` (vermagic-Check) -> `6c0f61c6f` (README) -> `0e55e3d54`
-  (409: **v1.6.3**) -> `bffdcdc85`/`8116a7c4` (KSU Haertung+Fixes). Releases **NUR via
+## Current State (Stand 2026-10-31, Build 428)
+- **Repo**: `vandalsquad187/BadazzKernel` branch `main` @ **`7dbd5ce70`** (susfs round 2).
+  Kette: `1639f9514`/`8116a7c4a` (KSU 414/416-Fixes) -> `6355e9f47` (virt_addr_valid-Regression
+  revertiert, 416) -> `808e27158` (susfs namei refcount, 419) -> `3db83cdd4`/`6681496af`
+  (fork atomic_or, gitlink) -> `c82afac10` (v1.7.0, 421) -> `83a38074b` (AGENTS: Gate-Falle)
+  -> `bedfc232b`/`904a9bd29` (Host-Test + exec-bit) -> `e5d21b884` (SHA-Pinning+dependabot)
+  -> `f385b26e6` (susfs thin-core + out/ enttracked, 426) -> `7dbd5ce70` (round 2, 428).
+  Fork `dev-upstream-merge` @ **`79003ef8`** (DEL_SUS_PATH-Sync). Releases **NUR via
   `gh workflow run build-kernel.yml`** (dispatch-only); Push-Runs bauen ohne Release,
-  `paths-ignore: ['**.md','docs/**']`. Release-Nummer = interner Run-Zaehler (414, 416 —
-  Luecken durch fehlgeschlagene Runs normal). **Name ungleich Scope-Regel bleibt**: nur
-  `gh release list` + `build-info.txt` (`BUILD_NUMBER`/`COMMIT_SHA`) zaehlen. Flashen
-  ausdruecklich nur das **aosp-ZIP** (Geraet laeuft crDroid); Releases/Tags nur mit
-  explizitem OK.
-- **Geraet**: build416 (Latest) geflasht + verifiziert 2026-10-29: root OK, k6a_gov v1.6.3
-  aktiv, 0 Oops. **Am-Geraet-Beweis der A/B-Runden**: r60r-A (416 + Luefter) = gc med 565,
-  ktemp max 75; r60q (404, ohne Luefter) = gc med 355, ktemp max 81; r60j-Ref startet 37 °C.
+  `paths-ignore: ['**.md','docs/**']`; nur aosp-ZIP flashen (Geraet=crDroid); Releases/
+  Tags nur mit explizitem OK.
+- **Neu in CI (2026-10-31)**: Alle `uses:`-Stellen auf Commit-SHAs gepinnt (checkout v4.4.0,
+  cache v4.3.0, upload-artifact v4.6.2, download-artifact v4.3.0, gh-release v2.6.2) +
+  `.github/dependabot.yml` (wöchentlich, gruppiert); erster SHA-Run grün beweist
+  Verhaltensidentität. **Host-Test** (`tools/k6a_gov_host_test/`, 23 Checks 23/23 grün
+  lokal+CI, `host-test.yml` nur bei k6a_gov/test-Änderungen, `contents: read`) —
+  Validiert State-Machine/Hysterese/L4-Flapping/Battery-Guard-Latch/Cap-Rampen gegen den
+  ECHTEN k6a_gov.c-Code (Laufzeit-Extraktion), Zukunft: jede k6a-Änderung vor dem Flash
+  geprüft. `out/` enttracked + gitignored, `susfs*.v210` Altlasten weg.
+- **Geraet**: **build428** (Latest) geflasht + verifiziert 2026-10-31: root OK (`u:r:ksu:s0`),
+  k6a_gov **v1.7.0**, susfs-Init `git_hash 7dbd5ce7`. **SUSFS-KSU-Domain-Ausnahme am
+  Geraet bewiesen**: KSU-Shell SIEHT `/system/addon.d` (vorher blind), App-Shell ENOENT;
+  300x sus_path-Stress = 0 Warnings. v1.7.0-Nacht-Stress bewiesen: 9 h GAMING-Residency
+  (32.7M ms) ohne Oops, L4 nie beruehrt.
+- **Blackout 2026-10-31 (diagnostiziert)**: Nach Nacht mit offener CODM-Lobby — Display
+  blieb schwarz, Inputs tot, Force-Reboot noetig. Log-Forensik (`cod_run.log`-Gaps):
+  Kernel 10 h STABIL (5-s-Loop schrieb lueckenlos), kein Panic/Ramoops-Content, letzte
+  Suspend-Pause 00:04-00:24, danach Wachhalten durch Lobby-Wakelocks (~10 h, Dozings
+  05-06 Uhr, ab 06:17 gar keins mehr). **Verdikt**: fehlgeschlagener Display-Resume
+  (MIUI-Flake) nach ueberhitztem wachem Geraet — KEIN Kernel-Regression (k6a_gov/susfs
+  beruehren Display/PM nicht). **Lektion**: CODM vor dem Schlafen beenden; Lobbys
+  halten das Geraet wach (thermal peak 74 °C ueber Nacht). Ramoops-Leseversuch via
+  sus_path-Hiding (AI laeuft: console-ramoops ist sus_path) — Bind-Mount-Umgehung
+  scheiterte auch an find/filldir-Hooks.
 - **KSU-Regression build414 (Root Cause + Lektion)**: `virt_addr_valid`-Guards (mein
   "toten !page-Check ersetzt"-Fix) killten alle Syscall-Table-Hooks — auf arm64-4.14 deckt
   `virt_addr_valid` nur die **Linear Map** ab, `sys_call_table`/`ksu_syscall_table` liegen
@@ -47,15 +66,7 @@
       `gpu_reset()` restored das User-Max (vorher starr idx 0), Fail -> Retry next tick;
       `enforce_gpu_cap()` released, wenn `user_max >= best`; `k6a_gov_exit()` ruft
       `gpu_reset()`.
-  - **Post-Flash-Verify (offen — User flasht 398-aosp)**: `build_hash=` = `a462761d…` (neu,
-    nicht mehr `f91204d2`); `game_pid=`-Zeile im `status`; dmesg-Praefix `k6a_gov: `;
-    Fix-10-Semantik: `gpu levels`-`max_idx` == `/sys/class/kgsl/kgsl-3d0/max_pwrlevel`
-    (Patch-Doc-Frage, Live-Test beim ersten Runde-Setup); Smoke `k6a_gov: gpu cap released`.
-- **Geraet (sweet, crDroid/AOSP, Android 16)**: Kernel build396 (`f91204d2`) gesund
-  (r60j-Dauerproof). **build398-aosp-ZIP wird geflasht** (397 wird uebersprungen, 398
-  enthaelt alles). Root laeuft vollstaendig (KSU-Next, Probes `~/tmp/ksu_probe/`).
-  K6A-k6a-ctl-Kalibrierung nach dem Flash wieder aufnehmen.
-- **r60-Serie (Blackscreen, 2026-10-27)**: r60f + r60g Crash mit Sampler, 3 clean ohne,
+  - **r60-Serie (Blackscreen, 2026-10-27)**: r60f + r60g Crash mit Sampler, 3 clean ohne,
   r60i nur Match-Tail, **r60j = Voll-Datensatz** (1396 rows ueber die vollen 1500 s,
   Sampler 7854 s vor dem Match armiert, Fan-ON): GPU-Peak 800 MHz, maxbusy 99 %, MAXTEMP
   83 °C, Akku -24 %/25 min, klog sauber (nur Boot-`a615_zap`-Load) -> **Sampler exonerated**;
@@ -81,11 +92,7 @@
   `arm.sh` 1560-s-Fenster; **nie `fps_samp2.sh stop`** — trunciert `fps.log`) pausiert.
 - **A17**: Audit 2026-10-23 (Abschnitt unten) — 4.14 bleibt Legacy-Device-Path; SUSFS-
   Uname-Spoof und susfs-ABI v2.3.0 gueltig. **Tester-Kit pending** (`/sdcard/Download/cr17/`).
-- **Uncommitted nach diesem Commit**: `D include/linux/susfs.h.v210` / `susfs_def.h.v210`
-  (bewusst geloeschte v2.1.0-Backups, Build-394-Scope — als eigener Commit nachziehen);
-  Pre-Patch-Backup `~/tmp/opencode/kc14/k6a_gov.c.orig` (kc14-Dir kann gewipped werden —
-  dann neu anlegen).
-- **KSU-Next carry-over (unveraendert)**: Submodule `72f8cc626` (v3.3.0-311), UAPI=6,
+- **KSU-Next carry-over**: Submodule `79003ef8e8` (v3.3.0-311, fork-Kette s. Current State), UAPI=6,
   Runtime 35000+revcount (build387 = `38523`). su-Flow: `/system/bin/su` -> sucompat-
   Redirect `/data/adb/ksud` -> preexec-Escape (`ksu_preexec_ksud_escape`, beide Pfade) ->
   `escape_with_root_profile()`; das `kern_path("/data/adb/ksud")` laeuft unter
