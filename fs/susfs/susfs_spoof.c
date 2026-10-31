@@ -7,6 +7,8 @@ void susfs_set_uname(void __user **user_info) {
 		info.err = -EFAULT;
 		goto out;
 	}
+	info.release[sizeof(info.release) - 1] = '\0';
+	info.version[sizeof(info.version) - 1] = '\0';
 	if (*info.release == '\0' || *info.version == '\0') { info.err = -EFAULT; goto out; }
 	down_write(&uts_sem);
 	if (strcmp(info.release, "default"))
@@ -24,6 +26,9 @@ void susfs_spoof_uname(struct new_utsname* tmp) { }
 
 #ifdef CONFIG_KSU_SUSFS_SPOOF_CMDLINE_OR_BOOTCONFIG
 static char fake_cmdline[SUSFS_FAKE_CMDLINE_OR_BOOTCONFIG_SIZE];
+/* init/main.c legt saved_command_line mit exakt strlen(boot_command_line)+1 an:
+ * groesser darf der Puffer nie beschrieben werden (einmalig beim ersten Aufruf merken). */
+static size_t saved_cmdline_cap;
 DEFINE_STATIC_KEY_FALSE(susfs_is_cmdline_spoof_buffer_set);
 
 void susfs_set_cmdline_or_bootconfig(void __user **user_info) {
@@ -35,7 +40,11 @@ void susfs_set_cmdline_or_bootconfig(void __user **user_info) {
 	if (*info.fake_cmdline_or_bootconfig == '\0') { info.err = -EFAULT; goto out; }
 	memcpy(fake_cmdline, info.fake_cmdline_or_bootconfig, sizeof(fake_cmdline));
 	fake_cmdline[SUSFS_FAKE_CMDLINE_OR_BOOTCONFIG_SIZE - 1] = '\0';
-	strlcpy(saved_command_line, fake_cmdline, COMMAND_LINE_SIZE);
+	if (!saved_cmdline_cap)
+		saved_cmdline_cap = strlen(saved_command_line) + 1;
+	if (strlen(fake_cmdline) + 1 > saved_cmdline_cap)
+		pr_warn("susfs: fake cmdline truncated (%zu > %zu)\n", strlen(fake_cmdline) + 1, saved_cmdline_cap);
+	strlcpy(saved_command_line, fake_cmdline, saved_cmdline_cap);
 	if (!static_key_enabled(&susfs_is_cmdline_spoof_buffer_set))
 		static_branch_enable(&susfs_is_cmdline_spoof_buffer_set);
 	info.err = 0;

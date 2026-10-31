@@ -133,3 +133,6 @@ Android.bp
 
 # OurKernel build artefacts
 anykernel/
+
+# kernel build artifacts (was accidentally tracked)
+/out/

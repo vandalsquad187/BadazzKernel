@@ -14,6 +14,7 @@ void susfs_add_open_redirect(void __user **user_info) {
 		info.err = -EFAULT;
 		goto out;
 	}
+	info.target_pathname[sizeof(info.target_pathname) - 1] = '\0';   /* nie ungeterminiert in kern_path() */
 	if (*info.target_pathname == '\0') { info.err = -EINVAL; goto out; }
 	if (info.uid_scheme < UID_NON_APP_PROC || info.uid_scheme > UID_UMOUNTED_PROC) {
 		info.err = -EINVAL; goto out;
@@ -51,6 +52,7 @@ void susfs_add_sus_map(void __user **user_info) {
 		info.err = -EFAULT;
 		goto out;
 	}
+	info.target_pathname[sizeof(info.target_pathname) - 1] = '\0';   /* nie ungeterminiert in kern_path() */
 	info.err = kern_path(info.target_pathname, LOOKUP_FOLLOW, &path);
 	if (info.err) goto out;
 	inode = d_backing_inode(path.dentry);

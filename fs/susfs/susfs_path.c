@@ -7,12 +7,13 @@ static DEFINE_MUTEX(susfs_sus_path_loop_mutex);
 void susfs_add_sus_path_loop(void __user **user_info) {
 	struct st_susfs_sus_path info = {0};
 	struct st_susfs_sus_path_list *new_entry = NULL;
-	struct path path = {};
+	bool added = false;
 
 	if (copy_from_user(&info, (struct st_susfs_sus_path __user*)*user_info, sizeof(info))) {
 		info.err = -EFAULT;
 		goto out;
 	}
+	info.target_pathname[sizeof(info.target_pathname) - 1] = '\0';   /* nie ungeterminiert in kern_path() */
 	if (*info.target_pathname == '\0') { info.err = -EINVAL; goto out; }
 	new_entry = kzalloc(sizeof(*new_entry), GFP_KERNEL);
 	if (!new_entry) { info.err = -ENOMEM; goto out; }
@@ -20,13 +21,15 @@ void susfs_add_sus_path_loop(void __user **user_info) {
 	strscpy(new_entry->target_pathname, info.target_pathname, sizeof(new_entry->target_pathname));
 	mutex_lock(&susfs_sus_path_loop_mutex);
 	list_add_tail_rcu(&new_entry->list, &susfs_sus_path_loop_list);
+	added = true;
 	mutex_unlock(&susfs_sus_path_loop_mutex);
 	SUSFS_LOGI("Added path loop entry: %s\n", info.target_pathname);
 	info.err = 0;
 out:
 	if (copy_to_user(&((struct st_susfs_sus_path __user*)*user_info)->err, &info.err, sizeof(info.err)))
 		info.err = -EFAULT;
-	if (info.err && new_entry)
+	/* nach list_add_tail_rcu() gehoert der Eintrag der Liste: nie freigeben */
+	if (info.err && new_entry && !added)
 		kfree(new_entry);
 }
 
@@ -34,8 +37,9 @@ void susfs_run_sus_path_loop(void) {
 	struct st_susfs_sus_path_list *entry;
 	struct path path;
 
-	rcu_read_lock();
-	list_for_each_entry_rcu(entry, &susfs_sus_path_loop_list, list) {
+	/* kern_path()/path_put() koennen schlafen: Mutex statt rcu_read_lock() */
+	mutex_lock(&susfs_sus_path_loop_mutex);
+	list_for_each_entry(entry, &susfs_sus_path_loop_list, list) {
 		if (kern_path(entry->target_pathname, LOOKUP_FOLLOW, &path) == 0) {
 			struct inode *inode = d_backing_inode(path.dentry);
 			if (inode && inode->i_mapping)
@@ -43,7 +47,7 @@ void susfs_run_sus_path_loop(void) {
 			path_put(&path);
 		}
 	}
-	rcu_read_unlock();
+	mutex_unlock(&susfs_sus_path_loop_mutex);
 }
 
 void susfs_add_sus_path(void __user **user_info) {
@@ -55,6 +59,7 @@ void susfs_add_sus_path(void __user **user_info) {
 		info.err = -EFAULT;
 		goto out;
 	}
+	info.target_pathname[sizeof(info.target_pathname) - 1] = '\0';   /* nie ungeterminiert in kern_path() */
 	info.err = kern_path(info.target_pathname, LOOKUP_FOLLOW, &path);
 	if (info.err) goto out;
 	inode = d_backing_inode(path.dentry);
