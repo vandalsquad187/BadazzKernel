@@ -4,7 +4,7 @@
   <p>Gaming-optimized kernel for <b>SM7150 (sweet / sweet k6a)</b> — 4.14.369</p>
   <p>
     <img src="https://img.shields.io/badge/Kernel-4.14.369-blue?style=flat-square">
-    <img src="https://img.shields.io/badge/k6a__gov-1.6.2-orange?style=flat-square">
+    <img src="https://img.shields.io/badge/k6a__gov-1.7.0-orange?style=flat-square">
     <img src="https://img.shields.io/badge/KernelSU--Next-v3.3.0--311-green?style=flat-square">
     <img src="https://img.shields.io/badge/SUSFS-v2.3.0-success?style=flat-square">
     <img src="https://img.shields.io/badge/Android-13%20%E2%80%93%2016-lightgrey?style=flat-square">
@@ -15,7 +15,7 @@
 
 ## Overview
 
-BadazzKernel is a performance and gaming tuned kernel for **Redmi Note 12 Pro 4G (sweet / sweetin)**. Core is the in-kernel governor **k6a_gov v1.6.2** (loadable module, `CONFIG_K6A_GOV=m`, insmodded by k6a-ctl) — the perfect base for the companion module **[k6a-ctl](https://github.com/vandalsquad187/k6a-ctl)**. Both work hand-in-hand in delegated mode: kernel throttles, module controls.
+BadazzKernel is a performance and gaming tuned kernel for **Redmi Note 12 Pro 4G (sweet / sweetin)**. Core is the in-kernel governor **k6a_gov v1.7.0** (loadable module, `CONFIG_K6A_GOV=m`, insmodded by k6a-ctl) — the perfect base for the companion module **[k6a-ctl](https://github.com/vandalsquad187/k6a-ctl)**. Both work hand-in-hand in delegated mode: kernel throttles, module controls.
 
 🤌🏻 Join my Telegram channel: https://t.me/Badazz89
 
@@ -25,8 +25,8 @@ BadazzKernel is a performance and gaming tuned kernel for **Redmi Note 12 Pro 4G
 
 ```
 linux-4.14.369
-├── KernelSU-Next v3.3.0-311 (UAPI 6, 4.14 direct-patch) + SUSFS v2.3.0  # Root + Hide (submodule 72f8cc626)
-├── drivers/thermal/k6a_gov/k6a_gov.c v1.6.2     # In-kernel gaming governor (CONFIG_K6A_GOV=m)
+├── KernelSU-Next v3.3.0-311 (UAPI 6, 4.14 direct-patch) + SUSFS v2.3.0  # Root + Hide (submodule 79003ef8)
+├── drivers/thermal/k6a_gov/k6a_gov.c v1.7.0     # In-kernel gaming governor (CONFIG_K6A_GOV=m)
 ├── drivers/gpu/msm/kgsl_pwrctrl.c               # GPU pwrlevel export (k6a_gov)
 ├── drivers/devfreq/devfreq.c                    # BW floors (gpubw / llcc), 0 = release floor
 ├── drivers/gpu/msm/ + drivers/thermal/          # Thermal + cooling floors
@@ -38,7 +38,7 @@ linux-4.14.369
 
 | Area | Feature | Details |
 |------|---------|---------|
-| **Governor** | **k6a_gov v1.6.2** | Loadable module (`CONFIG_K6A_GOV=m`, `k6a_gov.ko` shipped in the zip and loaded by k6a-ctl), state machine OFF→GAMING→CD_L2/L3/L4, hysteresis, **immediate escalation** L2→L3→L4, entry dwell on GAMING, L4 flap margin (`peak + 3 K < cd_l4_temp`), `profile=0` forces OFF immediately, throttle history (16), boot default **schedutil** |
+| **Governor** | **k6a_gov v1.7.0** | Loadable module (`CONFIG_K6A_GOV=m`, `k6a_gov.ko` shipped in the zip and loaded by k6a-ctl), state machine OFF→GAMING→CD_L2/L3/L4, hysteresis, **immediate escalation** L2→L3→L4, entry dwell on GAMING, L4 flap margin (`peak + 3 K < cd_l4_temp`), `profile=0` forces OFF immediately, throttle history (16), **residency accounting (`residency_ms`) + live `gold_cap_now` with GPU-cap ramping (tighten 1 OPP/tick, release 1 OPP/4 ticks, L4/entry-immediate), `stats_reset` node**, boot default **schedutil** |
 | **CPU** | Gold clamp | `find_gold_cpu()` + `clamp_freq`, `enforce_max_freq` + `cpufreq_update_policy` (kthread only), hardened notifier, **released again on recovery/disable** |
 | **Temp** | Multi-zone | Max over 4 Gold zones `cpu-1-0..3-usr`, fallback `cpu-0-0-usr` → `xo-therm` → `soc-therm` → `thermal_zone0`; `temp_src`/`temp_valid` in status, holds the last state if no zone answers |
 | **GPU** | Native enforcement | `kgsl_k6a_get_levels` / `kgsl_k6a_set_max_level_idx`, caps per CD state |
@@ -46,7 +46,7 @@ linux-4.14.369
 | **Profiles** | 6 profiles | `off/gaming/battery/badazz/custom/badazz_safe` — temps, Gold/GPU/BW floors |
 | **Safety** | Battery guard + hash | `battery_guard` @`battery_guard_temp` (35..60 °C, default 45) → CD_L2, `poll_ms` 100..5000, `verify_build_hash` vs `k6a_features/git_hash` |
 | **Thermal** | Cooling device | `k6a_gov` as `thermal_cooling_device`, `cool_cur` locked, `K6A_CD_L4` clamp |
-| **Root** | KSU-Next + SUSFS | v3.3.0-311 **UAPI 6**, 4.14 direct-patch mode (submodule `72f8cc626`), SUSFS `v2.3.0` (sus_path/mount/kstat/map), `tamper_syscall_table` |
+| **Root** | KSU-Next + SUSFS | v3.3.0-311 **UAPI 6**, 4.14 direct-patch mode (submodule `79003ef8`), SUSFS `v2.3.0` round 2 (sus_path/mount/kstat/map, **dup-safe adds + caps, KSU-domain passthrough — root sees the truth, `del_sus_path` cmd**), `tamper_syscall_table` |
 | **USB** | DWC3 / QUSB2 | SM6150 clocks (`GCC/DISPCC/CAMCC`), `WAIT_FOR_LPM` clear, `bus_aggr`/`GCTL` 50ms, `is_a_peripheral` fix — PC bootloop gone since v1.3.2. Full device-mode enumeration works since Build 336 (Faults 1/4 fixed) — see [USB status](#usb-status) |
 | **Scheduler** | UCLAMP, SCHED_CASS | Latency/efficiency tuning |
 | **Memory** | KSM, LRU_GEN, ZRAM lz4 | Gaming stability |
@@ -73,6 +73,19 @@ Fixes 1–10, all in-tree: `build397` shipped 1–7 + unified `pr_fmt`, `build39
 | 9 | `profile=0/off` forces state OFF immediately (no more resurrection by `thresholds_user`) | `state_machine()`, `profile_store()` |
 | 10 | GPU cap: remembers the user `max_pwrlevel` (`gpu_cap_saved_max`) and restores it on release (was a hard idx 0) | `enforce_gpu_cap()`, `gpu_reset()` |
 
+### k6a_gov v1.7.0 + SUSFS round 1/2 (Builds 421–428, 2026-10-31)
+
+| # | Feature / Fix | Where |
+|---|-------|-------|
+| — | **Time-residency accounting**: `residency_ms=off,gaming,cd_l2..l4` in `status`, `stats_reset` node | `k6a_gov.c` |
+| — | **GPU-cap ramping** (thrash killer): tighten 1 OPP/tick, release 1 OPP/4 ticks (`K6A_RAMP_UP_TICKS=4`), L4/entry/table-miss immediate; `gold_cap_now` in `status`; notifier clamps to the *currently ramped* cap; `cap_now` reset at enable/profile/board-reset | `ramp_next_cap()` |
+| — | SUSFS round 1: UAF in `susfs_add_sus_kstat/add_sus_path_loop` (added-flag so the user-error path can no longer free published entries), `kern_path`/`path_put` out of RCU, string termination on all user-path fields + uname spoof, **cmdline overflow fix** (fake cmdline truncated to the real `saved_command_line` size) | `fs/susfs/*` |
+| — | SUSFS round 2: **KSU-domain passthrough** (sus_path/sus_mount/kstat-spoof see nothing hidden for `susfs_is_current_ksu_domain()` — root/ksud keep the truth, untrusted apps stay blind; **on-device proven**), `SUSFS_LOGI/LOGE` do-while(0), **dup-safe adds**: path-loop idempotent (cap 256, `-ENOSPC`), kstat 1024/`-EEXIST`, open-redirect 256; `update_sus_kstat` → `-ENOENT` on unknown inode; new `CMD_SUSFS_DEL_SUS_PATH` (0x55554) + `susfs_del_sus_path()` (fork wiring `79003ef8`) | `fs/susfs/*`, fork |
+| — | KSU fork hardening: atomic diag-bit ORs (`KSU_DIAG_SET`, 10 sites), `fd_idx < max_fds`, ratelimits/caps in supercall dispatch, 1/s throne gate, `linux/ratelimit.h` | fork |
+| — | CI: action refs pinned to commit SHAs + dependabot, host test (23 checks) in `tools/k6a_gov_host_test/` with `host-test.yml`, `out/` untracked (repo slimmer), `susfs*.v210` legacy removed | `.github/`, `tools/` |
+
+> Device note: The blackout of 2026-10-31 was diagnosed as a failed display-resume after the device was kept awake ~10 h by an open CODM lobby (kernel ran stable the whole night, L4 never engaged, `residency_ms` proved 9 h gaming state). Not a kernel regression; kill the game before sleeping.
+
 ### k6a_gov v1.6.1 / v1.6.2 (Builds 402–404, Oct 2026)
 
 | # | Fix | Where |
@@ -88,10 +101,10 @@ CPU side (Build 401): `cpu_cooling.c` thermal floor clamp + `k6a_thermal` sysfs 
 
 ## Companion: k6a-ctl
 
-Module **[k6a-ctl v1.3.1](https://github.com/vandalsquad187/k6a-ctl/releases)** is the userspace companion — it is what actually **loads `k6a_gov.ko`** at boot:
+Module **[k6a-ctl v1.4.6](https://github.com/vandalsquad187/k6a-ctl/releases)** is the userspace companion — it is what actually **loads `k6a_gov.ko`** at boot:
 
 ```
-k6a-ctl v1.3.1 (delegated=1)
+k6a-ctl v1.4.6 (delegated=1)
 ├── service.sh        # insmod k6a_gov.ko + three-stage version lock + watchdog
 ├── k6a-controller    # Game detection, schedutil, auto badazz_safe @85°C
 ├── k6a-lib.sh        # gov_write/gov_read helpers
@@ -158,7 +171,7 @@ Own clamp layer in `cpu_cooling.c`: under thermal pressure the CPU max level is 
    `/data/adb/k6a_gov.ko` (`/` is dm-verity read-only, so the module cannot live in `/system`).
    Do **not** use `ksud module install` for upgrades — `su -c` here runs with `CapBnd=0` and it
    fails with `Permission denied`; unpack and `mv` the files in as root instead.
-3.    Install **KernelSU-Next Manager** APK — one working build: CI run [`36750739326`](https://github.com/KernelSU-Next/KernelSU-Next/actions/runs/36750739326) (`2b31f718` → `v3.4.0-19-g2b31f718-spoofed`), **uapi 4** (our current kernel line runs **UAPI 6**, 4.14 direct-patch, submodule `72f8cc626`). The spoofed build ships a **randomised applicationId** (it has been `gojcms.hgelex.jabkht`), so `pm list packages | grep ksu` finds nothing — identify it by `versionName` instead. CI `34252913097` still needs the pending `88feb68` 4.14 port
+3.    Install **KernelSU-Next Manager** APK — one working build: CI run [`36750739326`](https://github.com/KernelSU-Next/KernelSU-Next/actions/runs/36750739326) (`2b31f718` → `v3.4.0-19-g2b31f718-spoofed`), **uapi 4** (our current kernel line runs **UAPI 6**, 4.14 direct-patch, submodule `79003ef8`). The spoofed build ships a **randomised applicationId** (it has been `gojcms.hgelex.jabkht`), so `pm list packages | grep ksu` finds nothing — identify it by `versionName` instead. CI `34252913097` still needs the pending `88feb68` 4.14 port
 4. (Required for auto-load) Install **[k6a-ctl](https://github.com/vandalsquad187/k6a-ctl/releases)**
    — `delegated=1`. Current release **v1.3.1**; without it nothing insmods `k6a_gov.ko` and the
    kernel falls back to the built-in legacy cooldown (thermal protection still works, just no
@@ -353,7 +366,7 @@ kernel documentation (6090 files) — kernel-internal API docs, nothing project-
 
 - **BadazZ89** — Kernel, k6a_gov
 - **vandalsquad187** — Base, CI
-- **KernelSU-Next / SUSFS** — Root/Hide (submodule `72f8cc626`, v3.3.0-311, UAPI 6, SUSFS `v2.3.0`)
+- **KernelSU-Next / SUSFS** — Root/Hide (submodule `79003ef8`, v3.3.0-311, UAPI 6, SUSFS `v2.3.0` round 2)
 - **AnyKernel3** — Flash template
 - **MiDoNaSR545** — Reference for MIUI/HOS (`sweet_k6a-r-oss`)
 
