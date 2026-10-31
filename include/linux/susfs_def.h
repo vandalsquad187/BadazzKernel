@@ -14,6 +14,7 @@
 #define CMD_SUSFS_SET_ANDROID_DATA_ROOT_PATH 0x55551 /* deprecated */
 #define CMD_SUSFS_SET_SDCARD_ROOT_PATH 0x55552 /* deprecated */
 #define CMD_SUSFS_ADD_SUS_PATH_LOOP 0x55553
+#define CMD_SUSFS_DEL_SUS_PATH 0x55554
 #define CMD_SUSFS_ADD_SUS_MOUNT 0x55560 /* deprecated */
 #define CMD_SUSFS_HIDE_SUS_MNTS_FOR_NON_SU_PROCS 0x55561
 #define CMD_SUSFS_UMOUNT_FOR_ZYGOTE_ISO_SERVICE 0x55562 /* deprecated */
@@ -35,6 +36,10 @@
 #define CMD_SUSFS_ADD_SUS_MAP 0x60020
 
 #define SUSFS_MAX_LEN_PATHNAME 256 // 256 should address many paths already unless you are doing some strange experimental stuff, then set your own desired length
+/* Obergrenzen je Liste/Hashtabelle (Eintraege kommen per sys_reboot, nur root): kein unbegrenztes Speicherwachstum */
+#define SUSFS_MAX_SUS_PATH_LOOP 256
+#define SUSFS_MAX_SUS_KSTAT 1024
+#define SUSFS_MAX_OPEN_REDIRECT 256
 #define SUSFS_FAKE_CMDLINE_OR_BOOTCONFIG_SIZE 8192 // 8192 is enough I guess
 #define SUSFS_ENABLED_FEATURES_SIZE 8192 // 8192 is enough I guess
 #define SUSFS_MAX_VERSION_BUFSIZE 16
@@ -66,9 +71,11 @@
 #define AS_FLAGS_OPEN_REDIRECT 36
 #define AS_FLAGS_SUS_MAP 39
 
+/* Mounts verstecken wir vor untrusted Apps, root/ksud (KSU-Domain) sehen alles */
 #define SUSFS_IS_INODE_SUS_MOUNT(inode) \
-		inode && inode->i_mapping && \
-		unlikely(test_bit(AS_FLAGS_SUS_MOUNT, &inode->i_mapping->flags))
+		((inode) && (inode)->i_mapping && \
+		unlikely(test_bit(AS_FLAGS_SUS_MOUNT, &(inode)->i_mapping->flags)) && \
+		!susfs_is_current_ksu_domain())
 
 #define ND_STATE_LOOKUP_LAST 32
 #define ND_STATE_OPEN_LAST 64

@@ -7,6 +7,9 @@
 #include <linux/hashtable.h>
 #include <linux/path.h>
 #include <linux/susfs_def.h>
+
+/* KernelSU-Next (built-in, CONFIG_KSU=y) liefert die Pruefung: current ist in der su/ksu-SELinux-Domain */
+extern bool susfs_is_current_ksu_domain(void);
 #include <linux/statfs.h>
 #include <linux/seq_file.h>
 
@@ -189,6 +192,7 @@ struct st_susfs_version {
 #ifdef CONFIG_KSU_SUSFS_SUS_PATH
 void susfs_add_sus_path(void __user **user_info);
 void susfs_add_sus_path_loop(void __user **user_info);
+void susfs_del_sus_path(void __user **user_info);
 void susfs_run_sus_path_loop(void);
 bool susfs_is_inode_sus_path(struct inode *inode);
 #endif

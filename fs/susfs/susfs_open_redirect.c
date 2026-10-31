@@ -3,10 +3,12 @@
 #ifdef CONFIG_KSU_SUSFS_OPEN_REDIRECT
 static DEFINE_MUTEX(susfs_mutex_lock_open_redirect);
 static DEFINE_HASHTABLE(OPEN_REDIRECT_HLIST, 10);
+static unsigned int susfs_open_redirect_cnt;   /* unter susfs_mutex_lock_open_redirect */
 
 void susfs_add_open_redirect(void __user **user_info) {
 	struct st_susfs_open_redirect info = {0};
-	struct st_susfs_open_redirect_hlist *new_entry = NULL;
+	struct st_susfs_open_redirect_hlist *new_entry = NULL, *e;
+	bool added = false, dup = false;
 	struct path target_path;
 	struct inode *target_inode = NULL;
 
@@ -29,11 +31,25 @@ void susfs_add_open_redirect(void __user **user_info) {
 	if (!new_entry) { info.err = -ENOMEM; goto out_path; }
 	new_entry->target_ino = target_inode->i_ino;
 	memcpy(&new_entry->info, &info, sizeof(info));
-	set_bit(AS_FLAGS_OPEN_REDIRECT, &target_inode->i_mapping->flags);
 	mutex_lock(&susfs_mutex_lock_open_redirect);
-	hash_add_rcu(OPEN_REDIRECT_HLIST, &new_entry->node, new_entry->target_ino);
+	hash_for_each_possible(OPEN_REDIRECT_HLIST, e, node, new_entry->target_ino) {
+		if (e->target_ino == new_entry->target_ino) { dup = true; break; }
+	}
+	if (dup) {
+		info.err = -EEXIST;
+	} else if (susfs_open_redirect_cnt >= SUSFS_MAX_OPEN_REDIRECT) {
+		info.err = -ENOSPC;
+	} else {
+		hash_add_rcu(OPEN_REDIRECT_HLIST, &new_entry->node, new_entry->target_ino);
+		susfs_open_redirect_cnt++;
+		added = true;
+		info.err = 0;
+	}
 	mutex_unlock(&susfs_mutex_lock_open_redirect);
-	info.err = 0;
+	if (added)
+		set_bit(AS_FLAGS_OPEN_REDIRECT, &target_inode->i_mapping->flags);
+	else
+		kfree(new_entry);                    /* nie in der Tabelle gewesen */
 out_path:
 	path_put(&target_path);
 out:
