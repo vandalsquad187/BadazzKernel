@@ -1831,7 +1831,7 @@ static void dwc3_restart_usb_work(struct work_struct *w)
 		dev_dbg(mdwc->dev, "%s bailing out in disconnect\n", __func__);
 		dwc->err_evt_seen = false;
 		mdwc->in_restart = false;
-		dev_err(mdwc->dev, "Build320: restart_usb_work ABORT (no vbus)\n");
+		dev_dbg(mdwc->dev, "Build320: restart_usb_work ABORT (no vbus)\n");
 		return;
 	}
 
@@ -1852,7 +1852,7 @@ static void dwc3_restart_usb_work(struct work_struct *w)
 	}
 
 	mdwc->in_restart = false;
-	dev_err(mdwc->dev,
+	dev_dbg(mdwc->dev,
 		"Build320: restart_usb_work LEAVE in_restart=0 vbus_active=%d\n",
 		mdwc->vbus_active);
 	/* Force reconnect only if cable is still connected */
@@ -3535,7 +3535,7 @@ static int dwc3_msm_vbus_notifier(struct notifier_block *nb,
 	struct extcon_nb *enb = container_of(nb, struct extcon_nb, vbus_nb);
 	struct dwc3_msm *mdwc = enb->mdwc;
 
-	pr_info("Build332: vbus_nb enter event=%lu\n", event);
+	pr_debug("Build332: vbus_nb enter event=%lu\n", event);
 
 	if (!edev || !mdwc)
 		return NOTIFY_DONE;
@@ -3548,7 +3548,7 @@ static int dwc3_msm_vbus_notifier(struct notifier_block *nb,
 		event, mdwc->vbus_active, dwc ? dwc->dr_mode : -1);
 
 	if (mdwc->vbus_active == event) {
-		pr_info("Build332: vbus_nb unchanged event=%lu active=%d\n",
+		pr_debug("Build332: vbus_nb unchanged event=%lu active=%d\n",
 			event, mdwc->vbus_active);
 		return NOTIFY_DONE;
 	}
@@ -4815,7 +4815,7 @@ static void dwc3_msm_dump_link(struct dwc3_msm *mdwc, const char *tag)
 	u2 = dwc3_readl(dwc->regs, DWC3_GUSB2PHYCFG(0));
 	u3 = dwc3_readl(dwc->regs, DWC3_GUSB3PIPECTL(0));
 
-	dev_err(mdwc->dev,
+	dev_dbg(mdwc->dev,
 		"Build313: LINK %s GCTL=%08x DCTL=%08x RS=%u DSTS=%08x HLT=%u LNKST=%u SPD=%u COREIDLE=%u RXEMPTY=%u DCFG=%08x DEVSPD=%u LPM=%u DALE=%08x U2PHY=%08x U2SUS=%u U2PSR=%u U2SLPM=%u U3PIPE=%08x U3SUS=%u U3PSR=%u HWP0=%08x hwmode=%u evbuf=%px GEVADRHI=%08x GEVSIZ=%08x gspd=%u gstate=%d lstate=%u vbus=%u inrst=%u indev=%u softconn=%u pullups=%u connected=%u inlpm=%d lpmfl=0x%lx GEVLO=%08x GECNT=%08x DEVTEN=%08x GEVTEN=%08x mspd=%d hws=%u ovr=%d ssprop=%d evdma=%llx\n",
 		tag, gctl, dctl, !!(dctl & DWC3_DCTL_RUN_STOP),
 		dsts, !!(dsts & DWC3_DSTS_DEVCTRLHLT),
@@ -4881,7 +4881,7 @@ static void b331_tick_fn(struct work_struct *work)
 {
 	if (!b331_armed)
 		return;
-	pr_info("Build331: tick n=%u jiffies=%lu\n", b331_ticks, jiffies);
+	pr_debug("Build331: tick n=%u jiffies=%lu\n", b331_ticks, jiffies);
 	b331_ticks++;
 	if (b331_ticks < 200)
 		schedule_delayed_work(&b331_tick, msecs_to_jiffies(20));
@@ -5023,7 +5023,7 @@ static int dwc3_otg_start_peripheral(struct dwc3_msm *mdwc, int on)
 		 * dwc->lock held, so this may sleep.
 		 */
 		if (dwc3_gadget_ensure_quiescent(dwc))
-			dev_err(mdwc->dev,
+			dev_dbg(mdwc->dev,
 				"Build320: starting gadget although the core never became quiescent\n");
 
 		b331_ticks = 0;
@@ -5031,7 +5031,7 @@ static int dwc3_otg_start_peripheral(struct dwc3_msm *mdwc, int on)
 		schedule_delayed_work(&b331_tick, msecs_to_jiffies(20));
 
 		pm_runtime_forbid(dwc->dev);
-		dev_err(mdwc->dev,
+		dev_dbg(mdwc->dev,
 			"Build331: rt-hold on usage=%d act=%d\n",
 			atomic_read(&dwc->dev->power.usage_count),
 			pm_runtime_active(dwc->dev));
@@ -5055,7 +5055,7 @@ static int dwc3_otg_start_peripheral(struct dwc3_msm *mdwc, int on)
 				msecs_to_jiffies(500));
 
 		if (dwc->err_evt_seen) {
-			dev_err(mdwc->dev, "Build313: clearing err_evt_seen\n");
+			dev_dbg(mdwc->dev, "Build313: clearing err_evt_seen\n");
 			dwc->err_evt_seen = false;
 		}
 
@@ -5063,7 +5063,7 @@ static int dwc3_otg_start_peripheral(struct dwc3_msm *mdwc, int on)
 		if (!(dctl & DWC3_DCTL_RUN_STOP)) {
 			int rs;
 
-			dev_err(mdwc->dev,
+			dev_dbg(mdwc->dev,
 				"Build313: pre-force DCTL=%08x DSTS=%08x DCFG=%08x DALE=%08x U3PIPE=%08x err_evt=%u softconn=%u pullups=%u connected=%u\n",
 				dctl,
 				dwc3_readl(dwc->regs, DWC3_DSTS),
@@ -5073,11 +5073,11 @@ static int dwc3_otg_start_peripheral(struct dwc3_msm *mdwc, int on)
 				dwc->err_evt_seen, dwc->softconnect,
 				dwc->pullups_connected, dwc->connected);
 
-			dev_err(mdwc->dev,
+			dev_dbg(mdwc->dev,
 				"Build313: forcing gadget run_stop=1\n");
 			rs = dwc3_force_gadget_run_stop(dwc);
 
-			dev_err(mdwc->dev,
+			dev_dbg(mdwc->dev,
 				"Build313: run_stop ret=%d DCTL=%08x DSTS=%08x\n",
 				rs,
 				dwc3_readl(dwc->regs, DWC3_DCTL),
@@ -5121,7 +5121,7 @@ static int dwc3_otg_start_peripheral(struct dwc3_msm *mdwc, int on)
 		usb_gadget_vbus_disconnect(&dwc->gadget);
 		pm_runtime_allow(dwc->dev);
 		b331_armed = false;
-		dev_err(mdwc->dev,
+		dev_dbg(mdwc->dev,
 			"Build331: rt-hold released usage=%d act=%d\n",
 			atomic_read(&dwc->dev->power.usage_count),
 			pm_runtime_active(dwc->dev));
@@ -5630,7 +5630,7 @@ static int dwc3_msm_runtime_suspend(struct device *dev)
 	struct dwc3 *dwc = platform_get_drvdata(mdwc->dwc3);
 	int ret;
 
-	pr_info("Build331: msm_rt_susp enter in_lpm=%d lpmfl=0x%lx host=%d dev=%d vbus=%d child=%d\n",
+	pr_debug("Build331: msm_rt_susp enter in_lpm=%d lpmfl=0x%lx host=%d dev=%d vbus=%d child=%d\n",
 		atomic_read(&dwc->in_lpm), mdwc->lpm_flags,
 		mdwc->in_host_mode, mdwc->in_device_mode, mdwc->vbus_active,
 		atomic_read(&dev->power.child_count));
@@ -5639,7 +5639,7 @@ static int dwc3_msm_runtime_suspend(struct device *dev)
 	dbg_event(0xFF, "RT Sus", 0);
 
 	ret = dwc3_msm_suspend(mdwc, false, true);
-	pr_info("Build331: msm_rt_susp done ret=%d\n", ret);
+	pr_debug("Build331: msm_rt_susp done ret=%d\n", ret);
 	return ret;
 }
 
@@ -5649,14 +5649,14 @@ static int dwc3_msm_runtime_resume(struct device *dev)
 	struct dwc3 *dwc = platform_get_drvdata(mdwc->dwc3);
 	int ret;
 
-	pr_info("Build331: msm_rt_resm enter in_lpm=%d\n",
+	pr_debug("Build331: msm_rt_resm enter in_lpm=%d\n",
 		atomic_read(&dwc->in_lpm));
 
 	dev_dbg(dev, "DWC3-msm runtime resume\n");
 	dbg_event(0xFF, "RT Res", 0);
 
 	ret = dwc3_msm_resume(mdwc);
-	pr_info("Build331: msm_rt_resm done ret=%d\n", ret);
+	pr_debug("Build331: msm_rt_resm done ret=%d\n", ret);
 	return ret;
 }
 #endif

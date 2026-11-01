@@ -403,7 +403,7 @@ int dwc3_send_gadget_ep_cmd(struct dwc3_ep *dep, unsigned cmd,
 	int			ret = -EINVAL;
 
 	if (dep->number <= 1)
-		dev_err(dwc->dev, "Build327: ep_cmd enter cmd=%08x speed=%u state=%u\n",
+		dev_dbg(dwc->dev, "Build327: ep_cmd enter cmd=%08x speed=%u state=%u\n",
 			cmd, dwc->gadget.speed, dwc->ep0state);
 
 	/*
@@ -460,7 +460,7 @@ int dwc3_send_gadget_ep_cmd(struct dwc3_ep *dep, unsigned cmd,
 	t0 = ktime_get();
 	dwc3_writel(dep->regs, DWC3_DEPCMD, cmd);
 	if (dep->number <= 1)
-		dev_err(dwc->dev,
+		dev_dbg(dwc->dev,
 			"Build327: ep_cmd wrote cmd=%08x u2phy=%08x saved=%08x\n",
 			cmd, dwc3_readl(dwc->regs, DWC3_GUSB2PHYCFG(0)),
 			saved_config);
@@ -576,7 +576,7 @@ int dwc3_send_gadget_ep_cmd(struct dwc3_ep *dep, unsigned cmd,
 	}
 
 	if (dep->number <= 1)
-		dev_err(dwc->dev, "Build327: ep_cmd done cmd=%08x ret=%d st=%d\n",
+		dev_dbg(dwc->dev, "Build327: ep_cmd done cmd=%08x ret=%d st=%d\n",
 			cmd, ret, cmd_status);
 
 	return ret;
@@ -2309,7 +2309,7 @@ done:
 	if (dwc->revision > DWC3_REVISION_194A)
 		dwc3_usb3_phy_suspend(dwc, true);
 
-	dev_err(dwc->dev,
+	dev_dbg(dwc->dev,
 		"Build319: post-softreset DSTS=%08x U3PIPE=%08x U2PHY=%08x\n",
 		dwc3_readl(dwc->regs, DWC3_DSTS),
 		dwc3_readl(dwc->regs, DWC3_GUSB3PIPECTL(0)),
@@ -2378,7 +2378,7 @@ int dwc3_gadget_ensure_quiescent(struct dwc3 *dwc)
 	}
 
 	dsts = dwc3_readl(dwc->regs, DWC3_DSTS);
-	dev_err(dwc->dev,
+	dev_dbg(dwc->dev,
 		"Build320: quiescent=%d reset_ret=%d DSTS=%08x COREIDLE=%u HLT=%u LNKST=%u U3PIPE=%08x\n",
 		quiescent, ret, dsts,
 		!!(dsts & DWC3_DSTS_COREIDLE),
@@ -2432,7 +2432,7 @@ static int dwc3_gadget_run_stop(struct dwc3 *dwc, int is_on, int suspend)
 		if (dwc->revision >= DWC3_REVISION_194A)
 			reg &= ~DWC3_DCTL_KEEP_CONNECT;
 
-		dev_err(dwc->dev,
+		dev_dbg(dwc->dev,
 			"Build313 PRESTART: DCTL=%08x DSTS=%08x GCTL=%08x DCFG=%08x mspd=%d hws=%u\n",
 			dwc3_readl(dwc->regs, DWC3_DCTL),
 			dwc3_readl(dwc->regs, DWC3_DSTS),
@@ -2731,7 +2731,7 @@ static void dwc3_gadget_enable_irq(struct dwc3 *dwc)
 		reg |= DWC3_DEVTEN_EOPFEN;
 
 	dwc3_writel(dwc->regs, DWC3_DEVTEN, reg);
-	dev_err(dwc->dev, "Build320: DEVTEN wrote=%08x read=%08x\n",
+	dev_dbg(dwc->dev, "Build320: DEVTEN wrote=%08x read=%08x\n",
 		reg, dwc3_readl(dwc->regs, DWC3_DEVTEN));
 }
 
@@ -3774,7 +3774,7 @@ static void dwc3_gadget_reset_interrupt(struct dwc3 *dwc)
 	reg &= ~(DWC3_DCFG_DEVADDR_MASK);
 	dwc3_writel(dwc->regs, DWC3_DCFG, reg);
 
-	dev_err(dwc->dev, "Build327: reset_done state=%u conn=%d softconn=%d\n",
+	dev_dbg(dwc->dev, "Build327: reset_done state=%u conn=%d softconn=%d\n",
 		dwc->ep0state, dwc->connected, dwc->softconnect);
 
 	dwc->gadget.speed = USB_SPEED_UNKNOWN;
@@ -3912,7 +3912,7 @@ static void dwc3_gadget_conndone_interrupt(struct dwc3 *dwc)
 
 	dwc3_notify_event(dwc, DWC3_CONTROLLER_CONNDONE_EVENT, 0);
 
-	dev_err(dwc->dev, "Build327: conndone done speed=%u dsts=%08x\n",
+	dev_dbg(dwc->dev, "Build327: conndone done speed=%u dsts=%08x\n",
 		dwc->gadget.speed, dwc3_readl(dwc->regs, DWC3_DSTS));
 
 	/*
@@ -4127,19 +4127,19 @@ static void dwc3_gadget_interrupt(struct dwc3 *dwc,
 {
 	switch (event->type) {
 	case DWC3_DEVICE_EVENT_DISCONNECT:
-		dev_err(dwc->dev, "Build313: DEVT DISCONNECT info=%x\n",
+		dev_dbg(dwc->dev, "Build313: DEVT DISCONNECT info=%x\n",
 			event->event_info);
 		dwc3_gadget_disconnect_interrupt(dwc);
 		dwc->dbg_gadget_events.disconnect++;
 		break;
 	case DWC3_DEVICE_EVENT_RESET:
-		dev_err(dwc->dev, "Build313: DEVT RESET info=%x\n",
+		dev_dbg(dwc->dev, "Build313: DEVT RESET info=%x\n",
 			event->event_info);
 		dwc3_gadget_reset_interrupt(dwc);
 		dwc->dbg_gadget_events.reset++;
 		break;
 	case DWC3_DEVICE_EVENT_CONNECT_DONE:
-		dev_err(dwc->dev, "Build313: DEVT CONNECT_DONE info=%x\n",
+		dev_dbg(dwc->dev, "Build313: DEVT CONNECT_DONE info=%x\n",
 			event->event_info);
 		dwc3_gadget_conndone_interrupt(dwc);
 		dwc->dbg_gadget_events.connect++;
@@ -4156,7 +4156,7 @@ static void dwc3_gadget_interrupt(struct dwc3 *dwc,
 		dwc3_gadget_hibernation_interrupt(dwc, event->event_info);
 		break;
 	case DWC3_DEVICE_EVENT_LINK_STATUS_CHANGE:
-		dev_err(dwc->dev, "Build313: DEVT LINK_STATUS_CHANGE info=%x\n",
+		dev_dbg(dwc->dev, "Build313: DEVT LINK_STATUS_CHANGE info=%x\n",
 			event->event_info);
 		dwc3_gadget_linksts_change_interrupt(dwc, event->event_info);
 		dwc->dbg_gadget_events.link_status_change++;
@@ -4206,7 +4206,7 @@ static void dwc3_process_event_entry(struct dwc3 *dwc,
 
 	if (!event->type.is_devspec) {
 		if (event->depevt.endpoint_number <= 1)
-			dev_err(dwc->dev, "Build328: ev ep=%u ev=%u st=%u\n",
+			dev_dbg(dwc->dev, "Build328: ev ep=%u ev=%u st=%u\n",
 				event->depevt.endpoint_number,
 				event->depevt.endpoint_event,
 				event->depevt.status);
@@ -4263,7 +4263,7 @@ static irqreturn_t dwc3_process_event_buf(struct dwc3_event_buffer *evt)
 		left -= 4;
 	}
 
-	dev_err(dwc->dev, "Build328: evbuf loop done left=%d cnt=%u\n",
+	dev_dbg(dwc->dev, "Build328: evbuf loop done left=%d cnt=%u\n",
 		left, evt->count);
 
 	dwc->bh_handled_evt_cnt[dwc->irq_dbg_index] += (evt->count / 4);
@@ -4275,23 +4275,23 @@ static irqreturn_t dwc3_process_event_buf(struct dwc3_event_buffer *evt)
 	reg &= ~DWC3_GEVNTSIZ_INTMASK;
 	dwc3_writel(dwc->regs, DWC3_GEVNTSIZ(0), reg);
 
-	dev_err(dwc->dev, "Build328: evbuf unmask\n");
-	dev_err(dwc->dev, "Build329: unmask post imod=%u siz=0x%08x act=%d\n",
+	dev_dbg(dwc->dev, "Build328: evbuf unmask\n");
+	dev_dbg(dwc->dev, "Build329: unmask post imod=%u siz=0x%08x act=%d\n",
 		dwc->imod_interval, dwc3_readl(dwc->regs, DWC3_GEVNTSIZ(0)),
 		pm_runtime_active(dwc->dev));
 
 	if (dwc->imod_interval) {
-		dev_err(dwc->dev, "Build329: imod pre cnt=0x%08x\n",
+		dev_dbg(dwc->dev, "Build329: imod pre cnt=0x%08x\n",
 			dwc3_readl(dwc->regs, DWC3_GEVNTCOUNT(0)));
 		dwc3_writel(dwc->regs, DWC3_GEVNTCOUNT(0), DWC3_GEVNTCOUNT_EHB);
 		dwc3_writel(dwc->regs, DWC3_DEV_IMOD(0), dwc->imod_interval);
-		dev_err(dwc->dev, "Build329: imod post siz=0x%08x\n",
+		dev_dbg(dwc->dev, "Build329: imod post siz=0x%08x\n",
 			dwc3_readl(dwc->regs, DWC3_GEVNTSIZ(0)));
 	}
 
 	/* Keep the clearing of DWC3_EVENT_PENDING at the end */
 	evt->flags &= ~DWC3_EVENT_PENDING;
-	dev_err(dwc->dev, "Build329: evbuf end ret=%d\n", ret);
+	dev_dbg(dwc->dev, "Build329: evbuf end ret=%d\n", ret);
 
 	return ret;
 }
@@ -4301,13 +4301,13 @@ void dwc3_bh_work(struct work_struct *w)
 	struct dwc3 *dwc = container_of(w, struct dwc3, bh_work);
 
 	pm_runtime_get_sync(dwc->dev);
-	dev_err(dwc->dev, "Build329: bh get act=%d usage=%d\n",
+	dev_dbg(dwc->dev, "Build329: bh get act=%d usage=%d\n",
 		pm_runtime_active(dwc->dev),
 		atomic_read(&dwc->dev->power.usage_count));
 	dwc3_thread_interrupt(dwc->irq, dwc->ev_buf);
-	dev_err(dwc->dev, "Build329: bh thread done\n");
+	dev_dbg(dwc->dev, "Build329: bh thread done\n");
 	pm_runtime_put(dwc->dev);
-	dev_err(dwc->dev, "Build329: bh put act=%d usage=%d\n",
+	dev_dbg(dwc->dev, "Build329: bh put act=%d usage=%d\n",
 		pm_runtime_active(dwc->dev),
 		atomic_read(&dwc->dev->power.usage_count));
 }
@@ -4425,7 +4425,7 @@ irqreturn_t dwc3_interrupt(int irq, void *_dwc)
 	if (ret == IRQ_WAKE_THREAD)
 		queue_work(dwc->dwc_wq, &dwc->bh_work);
 
-	dev_err(dwc->dev, "Build329: irq ret=%d\n", ret);
+	dev_dbg(dwc->dev, "Build329: irq ret=%d\n", ret);
 
 	return IRQ_HANDLED;
 }

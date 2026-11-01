@@ -86,7 +86,7 @@ static int dwc3_ep0_start_trans(struct dwc3_ep *dep)
 
 	dwc = dep->dwc;
 
-	dev_err(dwc->dev, "Build327: ep0_start_trans enter flags=%x state=%u\n",
+	dev_dbg(dwc->dev, "Build327: ep0_start_trans enter flags=%x state=%u\n",
 		dep->flags, dwc->ep0state);
 
 	memset(&params, 0, sizeof(params));
@@ -94,7 +94,7 @@ static int dwc3_ep0_start_trans(struct dwc3_ep *dep)
 	params.param1 = lower_32_bits(dwc->ep0_trb_addr);
 
 	ret = dwc3_send_gadget_ep_cmd(dep, DWC3_DEPCMD_STARTTRANSFER, &params);
-	dev_err(dwc->dev, "Build327: ep0_start_trans ret=%d\n", ret);
+	dev_dbg(dwc->dev, "Build327: ep0_start_trans ret=%d\n", ret);
 	if (ret < 0)
 		return ret;
 
@@ -102,7 +102,7 @@ static int dwc3_ep0_start_trans(struct dwc3_ep *dep)
 	dep->resource_index = dwc3_gadget_ep_get_transfer_index(dep);
 	dwc->ep0_next_event = DWC3_EP0_COMPLETE;
 
-	dev_err(dwc->dev, "Build328: ep0_start_trans ok flags=%x ridx=%u\n",
+	dev_dbg(dwc->dev, "Build328: ep0_start_trans ok flags=%x ridx=%u\n",
 		dep->flags, dep->resource_index);
 
 	return 0;
@@ -351,7 +351,7 @@ void dwc3_ep0_out_start(struct dwc3 *dwc)
 	struct dwc3_ep			*dep;
 	int				ret;
 
-	dev_err(dwc->dev, "Build327: ep0_out_start softconn=%d connected=%d state=%u\n",
+	dev_dbg(dwc->dev, "Build327: ep0_out_start softconn=%d connected=%d state=%u\n",
 		dwc->softconnect, dwc->connected, dwc->ep0state);
 
 	complete(&dwc->ep0_in_setup);
@@ -749,7 +749,7 @@ static int dwc3_ep0_set_config(struct dwc3 *dwc, struct usb_ctrlrequest *ctrl)
 
 	cfg = le16_to_cpu(ctrl->wValue);
 
-	dev_err(dwc->dev, "Build327: ep0_set_config cfg=%u state=%d conn=%d\n",
+	dev_dbg(dwc->dev, "Build327: ep0_set_config cfg=%u state=%d conn=%d\n",
 		cfg, state, dwc->connected);
 
 	switch (state) {
@@ -1006,7 +1006,7 @@ static void dwc3_ep0_inspect_setup(struct dwc3 *dwc,
 
 	trace_dwc3_ctrl_req(ctrl);
 
-	dev_err(dwc->dev,
+	dev_dbg(dwc->dev,
 		"Build327: SETUP %02x %02x val=%04x idx=%04x len=%04x conn=%d state=%u\n",
 		ctrl->bRequestType, ctrl->bRequest, le16_to_cpu(ctrl->wValue),
 		le16_to_cpu(ctrl->wIndex), le16_to_cpu(ctrl->wLength),
@@ -1032,7 +1032,7 @@ static void dwc3_ep0_inspect_setup(struct dwc3 *dwc,
 	if (ret == USB_GADGET_DELAYED_STATUS)
 		dwc->delayed_status = true;
 
-	dev_err(dwc->dev, "Build327: SETUP done req=%02x ret=%d delayed=%d\n",
+	dev_dbg(dwc->dev, "Build327: SETUP done req=%02x ret=%d delayed=%d\n",
 		ctrl->bRequest, ret, dwc->delayed_status);
 
 out:
@@ -1120,7 +1120,7 @@ static void dwc3_ep0_complete_status(struct dwc3 *dwc,
 	struct dwc3_trb		*trb;
 	u32			status;
 
-	dev_err(dwc->dev, "Build328: complete_status state=%u\n",
+	dev_dbg(dwc->dev, "Build328: complete_status state=%u\n",
 		dwc->ep0state);
 
 	dep = dwc->eps[0];
@@ -1161,7 +1161,7 @@ static void dwc3_ep0_xfer_complete(struct dwc3 *dwc,
 {
 	struct dwc3_ep		*dep = dwc->eps[event->endpoint_number];
 
-	dev_err(dwc->dev, "Build327: ep0_xfer_complete state=%u status=%u\n",
+	dev_dbg(dwc->dev, "Build327: ep0_xfer_complete state=%u status=%u\n",
 		dwc->ep0state, event->status);
 
 	dep->flags &= ~DWC3_EP_BUSY;
@@ -1293,7 +1293,7 @@ static void __dwc3_ep0_do_control_status(struct dwc3 *dwc, struct dwc3_ep *dep)
 	int ret;
 
 	ret = dwc3_ep0_start_control_status(dep);
-	dev_err(dwc->dev, "Build328: do_control_status ret=%d\n", ret);
+	dev_dbg(dwc->dev, "Build328: do_control_status ret=%d\n", ret);
 	if (WARN_ON_ONCE(ret))
 		dbg_event(dep->number, "ECTRLSTATUS", ret);
 }
@@ -1342,7 +1342,7 @@ static void dwc3_ep0_xfernotready(struct dwc3 *dwc,
 	epnum = event->endpoint_number;
 	dep = dwc->eps[epnum];
 
-	dev_err(dwc->dev, "Build327: ep0_xfernotready status=%u ep=%u state=%u\n",
+	dev_dbg(dwc->dev, "Build327: ep0_xfernotready status=%u ep=%u state=%u\n",
 		event->status, epnum, dwc->ep0state);
 
 	switch (event->status) {

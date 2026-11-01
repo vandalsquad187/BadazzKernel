@@ -51,16 +51,23 @@
 
 #define DWC3_DEFAULT_AUTOSUSPEND_DELAY	500 /* ms */
 
+/* Diagnose-Heartbeat: standardmaessig AUS (0). Ein dauerhafter 500-ms-Takt weckt die CPU
+ * zweimal pro Sekunde aus dem Idle und flutet den Kernel-Log. Bei Bedarf auf der
+ * Kernel-Cmdline einschalten: dwc3.b332_hb_ms=500 */
+static unsigned int b332_hb_ms;
+module_param(b332_hb_ms, uint, 0444);
+MODULE_PARM_DESC(b332_hb_ms, "Debug heartbeat interval in ms (0 = off)");
+
 static unsigned int b332_hb_n;
 
 static void b332_hb_fn(struct work_struct *work);
-static DECLARE_DELAYED_WORK(b332_hb, b332_hb_fn);
+static DECLARE_DEFERRABLE_WORK(b332_hb, b332_hb_fn);   /* deferrable: weckt kein schlafendes System */
 
 static void b332_hb_fn(struct work_struct *work)
 {
 	b332_hb_n++;
 	pr_info("Build332: hb n=%u jiffies=%lu\n", b332_hb_n, jiffies);
-	schedule_delayed_work(&b332_hb, msecs_to_jiffies(500));
+	schedule_delayed_work(&b332_hb, msecs_to_jiffies(b332_hb_ms));
 }
 
 static int count;
@@ -1400,7 +1407,8 @@ static int dwc3_probe(struct platform_device *pdev)
 	int			irq;
 	char			dma_ipc_log_ctx_name[40];
 
-	schedule_delayed_work(&b332_hb, msecs_to_jiffies(500));
+	if (b332_hb_ms)
+		schedule_delayed_work(&b332_hb, msecs_to_jiffies(b332_hb_ms));
 
 	if (count >= DWC_CTRL_COUNT) {
 		dev_err(dev, "Err dwc instance %d >= %d available\n",
@@ -1644,30 +1652,30 @@ static int dwc3_runtime_suspend(struct device *dev)
 	struct dwc3     *dwc = dev_get_drvdata(dev);
 	int		ret;
 
-	pr_info("Build330: rt_susp enter conn=%d pull=%d vbus=%d soft=%d gspd=%d\n",
+	pr_debug("Build330: rt_susp enter conn=%d pull=%d vbus=%d soft=%d gspd=%d\n",
 		dwc->connected, dwc->pullups_connected, dwc->vbus_active,
 		dwc->softconnect, dwc->gadget.speed);
 
 	/* Check if platform glue driver handling PM, if not then handle here */
 	if (!dwc3_notify_event(dwc, DWC3_CORE_PM_SUSPEND_EVENT, 0)) {
-		pr_info("Build330: rt_susp glue-owned\n");
+		pr_debug("Build330: rt_susp glue-owned\n");
 		return 0;
 	}
 
 	if (dwc3_runtime_checks(dwc)) {
-		pr_info("Build330: rt_susp blocked\n");
+		pr_debug("Build330: rt_susp blocked\n");
 		return -EBUSY;
 	}
 
 	ret = dwc3_suspend_common(dwc);
 	if (ret) {
-		pr_info("Build330: rt_susp common fail=%d\n", ret);
+		pr_debug("Build330: rt_susp common fail=%d\n", ret);
 		return ret;
 	}
 
 	device_init_wakeup(dev, false);
 
-	pr_info("Build330: rt_susp done\n");
+	pr_debug("Build330: rt_susp done\n");
 	return 0;
 }
 
@@ -1676,12 +1684,12 @@ static int dwc3_runtime_resume(struct device *dev)
 	struct dwc3     *dwc = dev_get_drvdata(dev);
 	int		ret;
 
-	pr_info("Build330: rt_resm enter conn=%d pull=%d vbus=%d\n",
+	pr_debug("Build330: rt_resm enter conn=%d pull=%d vbus=%d\n",
 		dwc->connected, dwc->pullups_connected, dwc->vbus_active);
 
 	/* Check if platform glue driver handling PM, if not then handle here */
 	if (!dwc3_notify_event(dwc, DWC3_CORE_PM_RESUME_EVENT, 0)) {
-		pr_info("Build330: rt_resm glue-owned\n");
+		pr_debug("Build330: rt_resm glue-owned\n");
 		return 0;
 	}
 
@@ -1689,7 +1697,7 @@ static int dwc3_runtime_resume(struct device *dev)
 
 	ret = dwc3_resume_common(dwc);
 	if (ret) {
-		pr_info("Build330: rt_resm common fail=%d\n", ret);
+		pr_debug("Build330: rt_resm common fail=%d\n", ret);
 		return ret;
 	}
 
@@ -1707,7 +1715,7 @@ static int dwc3_runtime_resume(struct device *dev)
 	pm_runtime_mark_last_busy(dev);
 	pm_runtime_put(dev);
 
-	pr_info("Build330: rt_resm done\n");
+	pr_debug("Build330: rt_resm done\n");
 	return 0;
 }
 
