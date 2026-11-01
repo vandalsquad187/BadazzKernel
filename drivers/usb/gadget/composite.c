@@ -1547,7 +1547,7 @@ static void composite_setup_complete(struct usb_ep *ep, struct usb_request *req)
 {
 	struct usb_composite_dev *cdev;
 
-	pr_err("Build328: setup_complete status=%d actual=%u len=%u\n",
+	pr_debug("Build328: setup_complete status=%d actual=%u len=%u\n",
 		req->status, req->actual, req->length);
 
 	if (req->status || req->actual != req->length)
@@ -1770,7 +1770,7 @@ composite_setup(struct usb_gadget *gadget, const struct usb_ctrlrequest *ctrl)
 	struct usb_function		*f = NULL;
 	u8				endp;
 
-	pr_err("Build327: composite_setup %02x %02x val=%04x idx=%04x len=%04x\n",
+	pr_debug("Build327: composite_setup %02x %02x val=%04x idx=%04x len=%04x\n",
 		ctrl->bRequestType, ctrl->bRequest, w_value, w_index, w_length);
 
 	if (w_length > USB_COMP_EP0_BUFSIZ) {

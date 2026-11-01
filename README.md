@@ -226,6 +226,16 @@ Healthy connect: `mtp,adb` with `f1/f2` endpoints and `dwc3_msm mtp,adb` bound.
 
 ## USB status
 
+### Charger SNK-only tradeoff (Build 3xx, in-tree)
+
+The Type-C role switch fix toggles **EN_SNK_ONLY_BIT** (Type-C off, 50 ms, on — current/voltage limits untouched). Side effect by design: **the device can no longer supply power over USB — USB-OTG devices and reverse charging are disabled.**
+
+### Debug breadrumbs rallied (Build 332 heartbeat, cleanup 2026-10-31)
+
+The `b332_hb_fn` heartbeat was a permanent 500 ms non-deferrable timer with one log line per tick (~170k wakeups/day; dmesg buffer overwritten in ~2 h). Now **off by default** and deferrable; hot-path `dev_err/pr_info` breadcrumbs are `dev_dbg/pr_debug` (compiled out with `CONFIG_DYNAMIC_DEBUG` off). Opt-in back temporarily on the cmdline: **`dwc3.b332_hb_ms=500`**. Idle target after flash: well below a few hundred dmesg lines/hour (`dmesg | wc -l` over half an hour must not grow).
+
+## USB status
+
 The v1.3.2 PC-bootloop fix landed. Builds 307–336 then worked through a chain of deeper faults.
 **The blocker is closed — full enumeration now works.**
 
