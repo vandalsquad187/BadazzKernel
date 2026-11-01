@@ -3524,8 +3524,7 @@ static int aw8622x_haptic_play_effect_seq(struct aw8622x *aw8622x,
 			aw8622x_haptic_play_repeat_seq(aw8622x, true);
 		}
 	}
-	pr_debug("%s: exit
-", __func__);
+	pr_debug("%s: exit\n", __func__);
 	return 0;
 }
 
