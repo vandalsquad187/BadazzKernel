@@ -24,6 +24,19 @@
   Geraet bewiesen**: KSU-Shell SIEHT `/system/addon.d` (vorher blind), App-Shell ENOENT;
   300x sus_path-Stress = 0 Warnings. v1.7.0-Nacht-Stress bewiesen: 9 h GAMING-Residency
   (32.7M ms) ohne Oops, L4 nie beruehrt.
+- **USB-/Charger-Review-Runde (2026-11-01, abgeschlossen)**: Reviewer-Patch
+  `usb_debug_cleanup.patch` (7 Dateien) — Hot-Path-Breadcrumbs dev_err/pr_info ->
+  dev_dbg/pr_debug (echte Anomalien bleiben Fehler-Level), aw8622x-Haptik-Build330-Logs
+  raus, f_fs %px -> %pK (44 Sites), Heartbeat `b332_hb_fn` standardmaessig AUS +
+  deferrable (Opt-in `dwc3.b332_hb_ms=500`); ~170k Wakeups/Tag + dmesg-Uberschrift in
+  2 h laufen jetzt an DYNAMIC_DEBUG=off leer. Ausgespart bewusst: 11 smb5-lib
+  Charger-IRQ pr_info + eine Build313-Dump-Zeile. **SNK-only-Tradeoff in README**
+  (USB-OTG/Reverse-Charging weg). **Worktree-Falle geloggt**: der Patch lag bereits
+  uncommitted im Tree (verlorene Session) — nach Apply-Konflikt erst
+  `git diff HEAD -- files | grep Muster` gegen Patch-Inhalt pruefen, nicht
+  blind -R annehmen. Post-Flash-Checks: `dmesg | wc -l` 30 min (Idle-Ziel < einige
+  hundert Zeilen/h), Laden/ADB/Enumeration sauber, ggf. Breadcrumbs via
+  DYNAMIC_DEBUG-Testbuild.
 - **Blackout 2026-10-31 (diagnostiziert)**: Nach Nacht mit offener CODM-Lobby — Display
   blieb schwarz, Inputs tot, Force-Reboot noetig. Log-Forensik (`cod_run.log`-Gaps):
   Kernel 10 h STABIL (5-s-Loop schrieb lueckenlos), kein Panic/Ramoops-Content, letzte
