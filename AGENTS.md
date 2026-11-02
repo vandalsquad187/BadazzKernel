@@ -24,6 +24,29 @@
   Geraet bewiesen**: KSU-Shell SIEHT `/system/addon.d` (vorher blind), App-Shell ENOENT;
   300x sus_path-Stress = 0 Warnings. v1.7.0-Nacht-Stress bewiesen: 9 h GAMING-Residency
   (32.7M ms) ohne Oops, L4 nie beruehrt.
+- **k6a-ctl v1.4.6 -> P1+P4-Haertung (2026-11-01, deployed)**: P1 =
+  `kver_ok()`-Hartgate (`1.5.*|1.6.*|1.7.*`-Liste) -> dynamisch
+  `1.[5-9].*` — Versions-Bumps kosten fortan KEINE service.sh-Aenderung mehr;
+  GOV_KO_VER nur noch Log-Nennung, Boot-Beweis am 01.11. 15:08:19 ("k6a_gov
+  1.7.0 geladen" ohne Warn). P4 = Stale-Watchdog in k6a-controller:
+  (state_age_ms|temp|state)-Tupel 5 Ticks eingefroren bei delegiert+GAMING ->
+  enable=0 -> einmal rmmod+insmod+Re-Apply(profile/thresholds/batt)->enable=1;
+  Misserfolg bleibt aus (60-Tick-Heartbeat-Log). Trigger-Grenze 5 Ticks
+  (User-Votum). Controller-restart ohne Reboot via kill -TERM + service.sh-
+  Watchdog-Respawn ✓. **2 Deploy-Fallen geloggt**: (a) `<<<`-Here-Strings sind
+  Bashismus — Modul laeuft mksh (`printf ... |` statt <<<); (b)
+  `cur=$(a)|$(b)` geparst als assignment+PIPE (leeres stdin) statt
+  String-Konlkat — ausloester: Timestamp-Leer-Trigger + unnötiges
+  rmmod+insmod (als FALSE-POSITIVE ausgelöst, ~15 s episoner Schaden,
+  Recovery-Pfad dafuer END-TO-END bewiesen: rmmod+insmod+Re-Apply+enable=1
+  ok). Backups: service.sh.bak-v146-dyngate,
+  bin/k6a-controller.bak-v146-p4watchdog. Lokale Referenzen ~/tmp/k6actl/.
+- **USB-Cleanup-Idle-Urteil (offen bis unplugged)**: dmesg-Wachstum
+  ~160 Zeilen/min WAHREND des Ladens = Charger-FG-Spam ([bq27z561]/
+  QCOM-STEPCHG/QG-K, bewusst belassen) — kein USB-Breadcrumb-Rest. Der
+  Reviewer-Check (30-min-Doppelsample, Idle < einige hundert Zeilen/h) muss
+  UNPLUGGED laufen. KernelSU-`sys_execve: su found`-Zeilen = Eigenrauschen
+  der Termux-Diagnose.
 - **USB-/Charger-Review-Runde (2026-11-01, abgeschlossen)**: Reviewer-Patch
   `usb_debug_cleanup.patch` (7 Dateien) — Hot-Path-Breadcrumbs dev_err/pr_info ->
   dev_dbg/pr_debug (echte Anomalien bleiben Fehler-Level), aw8622x-Haptik-Build330-Logs
