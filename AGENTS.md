@@ -1871,3 +1871,15 @@ wie er ist**, keine fürsche Kernel-Arbeit nötig. Konsequenzen/Items:
 - **Quelle**: `DarkKiller28/android_device_xiaomi_sm6150-common@182eb86`
 - **Ziel**: `device/xiaomi/sm6150-common` — `configs/audio/audio_policy_configuration.xml` (remove 3× `BT A2DP` ports + 3× `route`) + `sm6150.mk` (`PRODUCT_COPY_FILES` `bluetooth_audio_policy_configuration.xml → /vendor/etc/bluetooth_audio_policy_configuration_7.0.xml`) + `xi:include` nach `r_submix`
 - **Steps**: `git fetch DarkKiller28 182eb86 && git cherry-pick -x 182eb86` → `mka` → `adb ls /vendor/etc/bluetooth*.xml` + BT Pair
+
+## k6a-ctl v1.4.9 (2026-11-05, von P1.4.6/P4-Runde + Reviewer-Befund deployed)
+- **Anlass**: Reviewrundes Anti-Nachfrage (5 Befunde, geprüft, teils am Gerät gelöst):
+  1. Versionsgate im **Repo** (1.5.*|1.6.*) veraltet — am Gerät seit 2026-11-01 P1 (dynamisch 1.[5-9].*) bewiesen; **Repo-Sync steht noch aus** (local snapshot ~/tmp/k6actl/).
+  2. WebUI-ohne-Auth: localhost-Status toppen (`any app` mit INTERNET kann) → **Token-Gate** (`config/webui.token` root-only, `&k=` an jede state-changing route; `app.js` Fallback-Kette mit Token, `api()` single wrapper; sed-Bake durch service.sh beim Boot).
+  3. Controller-Hitze ~100 proc/s (36 Subshells + 46 pipes pro data.tx) → **Fork-Diet**: Status-while-read direkt (0 forks), cfg_load-Diet-Stat-Sig, direct Node-Reads (scaling_cur/battery/gov_read-ersatz), data.txt 2s-Takt (5s-Takt im daily, force bei State-Wechsel), nice 0.
+  4. setcfg-Misssteckbar in Cats → **`mv -f`-Atomik** (Fallback cat bleibt).
+  5. mode=auto gemäßReviewer: `pidof + /proc/<pid>/cgroup top-app` + Hysterese (2 Ticks rein, 10s ohne top-app raus → DAILY). am Gerät bewiesen: `-> DAILY` @ 11:56:53 beim Mode-Wechsel, enable=0, game_pid=0 ✓.
+- **device-deploy 11:53–11:57 (kein reboot)**: backups `.bak-v148-p9` (instant old prior `/bak-v146-*`), controller/webui-handler/service/app.js/module.prop settings `profile=badazz_safe` durch Test-GET (gleich mit R3-A-Profil), `mode=auto` verifiziert `→ settings` geschrieben.
+- **R3-arm-Kontext vor Spiel**: thresholds `96 99 102 93 1708800 1555200 1324800`, gpu_caps `585/430/305`, hysteresis `500/2000`, battery_guard_temp=47 / guard=off, mode=auto (residency misst jetzt nur echtes Game/top-app), cod_run.sh Sampler lebt.
+- **Watchout**: auto-Eval nutzt je Tick `pidof` (1 fork/1s im idle — ok); token-flush nicht zyklisch, bei Reboot erneuert service.sh nur wenn File fehlt; Controller-Enter setzt `profile=badazz_safe (idx5)` — valide bis R3 ABGESPIELT word (kein manuelles echo mehr nötig).
+- kQ-tests: handler `-n sh -n` via on-device sh-OK, handler OK via termux sh/na token-Tests: /ping 200 ohne; /mode /profile/Falsch-Token 403 richtig; Profil-Toggle mit k= 200 setzende-Tests sind echte Button — Profil+mode finals in settings (verifiziert).
