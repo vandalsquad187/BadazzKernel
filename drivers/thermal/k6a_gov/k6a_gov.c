@@ -29,7 +29,7 @@ extern int kgsl_k6a_set_min_level_idx(unsigned int level);
 extern int k6a_devfreq_get_bw(const char *name, u32 *cur, u32 *min, u32 *max);
 extern int k6a_devfreq_set_bw(const char *name, u32 min, u32 max);
 
-#define K6A_GOV_VERSION       "1.7.0"
+#define K6A_GOV_VERSION       "1.7.1"
 #define K6A_GOV_KTHREAD_SLEEP_MS   250
 #define K6A_GOV_MAX_FREQS     32
 #define K6A_HIST_N            16
@@ -85,6 +85,7 @@ struct k6a_gov {
     u32 bw_last_gpubw, bw_last_llcc;
     u32 hysteresis_fast, hysteresis_normal;
     s32 batt_temp_c;
+    u32 bt_live;
 
     u64 state_ts;
     u64 state_ms[5];       /* abgeschlossene Verweilzeit pro State (ms) */
@@ -811,15 +812,21 @@ static int read_bat_temp(int *celsius) {
 static void battery_guard_tick(void) {
     int bt;
 
-    if (!gov->battery_guard) {
-        gov->batt_latched = false;
-        gov->batt_temp_c = -1;
+    if (read_bat_temp(&bt)) {
+        if (!gov->battery_guard)
+            gov->batt_temp_c = -1;
         return;
     }
-    if (read_bat_temp(&bt))
-        return;   /* Lesefehler: Latch und letzten Wert behalten */
 
     gov->batt_temp_c = bt;
+    if (!gov->bt_live) {
+        gov->bt_live = 1;
+        pr_info("Build434: bt live %dC guard=%u\n", bt, gov->battery_guard);
+    }
+    if (!gov->battery_guard) {
+        gov->batt_latched = false;
+        return;
+    }
     if (bt >= (int)gov->battery_guard_temp)
         gov->batt_latched = true;
     else if (bt < (int)gov->battery_guard_temp - 5)
@@ -828,7 +835,7 @@ static void battery_guard_tick(void) {
     if (gov->batt_latched && gov->state == K6A_GAMING) {
         set_state_locked(K6A_CD_L2);
         gov->throttle_events++;
-        pr_warn_ratelimited("Build345: battery guard %dC -> CD_L2\n", bt);
+        pr_warn_ratelimited("Build434: battery guard %dC -> CD_L2\n", bt);
     }
 }
 
@@ -1660,6 +1667,7 @@ static int __init k6a_gov_init(void) {
     gov->gpu_floor_last = -1;
     gov->gpu_floor_saved_min = -1;
     gov->batt_temp_c = -1;
+    gov->bt_live = 0;
     gov->bw_last_gpubw = ~0u;
     gov->bw_last_llcc = ~0u;
 
