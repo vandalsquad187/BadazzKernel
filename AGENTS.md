@@ -1884,3 +1884,27 @@ wie er ist**, keine fürsche Kernel-Arbeit nötig. Konsequenzen/Items:
 - **Repo-Sync erledigt (2026-11-05)**: k6a-ctl GitHub repo `vandalsquad187/k6a-ctl` main @ `275aa4d` (= v1.4.9), Release `v1.4.9` + zip `k6a-ctl-v1.4.9.zip` (39.613 B, GATE OK 0 warns). Release-Defaults: repo settings.conf bleibt v1.4.8-Nummern mit mode=gaming + Auto-Doku-Kommentar; webroot/app.js im Release mit `const KTOKEN=''` (service.sh bäckt das gerätespezifische Token beim Boot). check_module.sh: mode-case akzeptiert auto + Version-Lock-Dynamik (`grep -qF '1.[5-9].*'` — grep-Klasse-Falle minus -F schlug bei literalen [5-9] fehl).
 - **Watchout**: auto-Eval nutzt je Tick `pidof` (1 fork/1s im idle — ok); token-flush nicht zyklisch, bei Reboot erneuert service.sh nur wenn File fehlt; Controller-Enter setzt `profile=badazz_safe (idx5)` — valide bis R3 ABGESPIELT word (kein manuelles echo mehr nötig).
 - kQ-tests: handler `-n sh -n` via on-device sh-OK, handler OK via termux sh/na token-Tests: /ping 200 ohne; /mode /profile/Falsch-Token 403 richtig; Profil-Toggle mit k= 200 setzende-Tests sind echte Button — Profil+mode finals in settings (verifiziert).
+## BRENE-SuSFS spoofs `uname` auf 6.12.0 (2026-11-08, am Gerät verifiziert)
+
+- **Befund**: Das Gerät läuft **BadazzKernel v4.14.369-badazz-build432**
+  (Code-Commit `a220c80d`, k6a_gov v1.7.0). `uname -a` zeigt aber
+  `6.12.0-android16-6.12-perf-g1d01cd293, Jan 26 2026` — **die
+  Uname-Zeile ist gespoofed**.
+- **Quelle**: das KernelSU-Modul `brene` = „BRENE - SuSFS" v0.0.72
+  (`/data/adb/modules/brene`, Autoren rrr333nnn333/simonpunk/KOWX712,
+  SuSFS-Backend). Es fälscht für Userspace `/proc/sys/kernel/osrelease`
+  + `/proc/sys/kernel/version` und versteckt Root-Artefakte.
+- **Verworrene Folge-Auswertung** (2026-11-08): der „kernel build 433
+  checken"-Befund sprach fälschlich von einer „anderen 6.12-Kernel-Linie".
+  Richtig ist: `uname` ist mit BRENE-Modul **nie** eine Kernel-Verifikation.
+  Die CI-Artifacts (`build433aosp`/`build433miui`, run 42436271342, kein
+  Auto-Release) und die Release-Chain `build416…432` sind unabhängige
+  Ketten; build433 enthält keinen Kernel-Code-Diff (HEAD nur Actions-
+  dependsabot-Bumps `c2c06e6f`; Code bleibt `a220c80d`).
+- **Zuverlässige Kernel-Verifikation am Gerät**:
+  1. `/sys/kernel/k6a_gov/status` → `version=1.7.0` + `build_hash=a220c80d`
+     (k6a_gov's eigener Build-Stempel, im Kernel verdrahtet),
+  2. `uname -a`/`/proc/version` = Userspace-ge-fälscht — nicht verwenden.
+- **Kernel-Side Follow-up** (Notbrems-Akku-Arm, k6a-ctl v1.5.4):
+  k6a_gov v1.7.1 füllt `bt` aus `power_supply/battery/temp` — sie
+  BadazzKernel-Issue #3, geplant für build434.
