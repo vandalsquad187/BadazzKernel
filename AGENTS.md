@@ -1906,5 +1906,24 @@ wie er ist**, keine fürsche Kernel-Arbeit nötig. Konsequenzen/Items:
      (k6a_gov's eigener Build-Stempel, im Kernel verdrahtet),
   2. `uname -a`/`/proc/version` = Userspace-ge-fälscht — nicht verwenden.
 - **Kernel-Side Follow-up** (Notbrems-Akku-Arm, k6a-ctl v1.5.4):
-  k6a_gov v1.7.1 füllt `bt` aus `power_supply/battery/temp` — sie
-  BadazzKernel-Issue #3, geplant für build434.
+  k6a_gov **v1.7.1** füllt `bt` aus `power_supply/battery/temp` —
+
+  **Build 434 (2026-11-08, gelandet, Commit `e9eef01cf`)**:
+  `battery_guard_tick()` liest die Akkutemp JEDEN Tick (auch
+  `battery_guard=0`), `bt_live`-Flag + Einmal-Log
+  `Build434: bt live %dC guard=%u`, Latch-Trip-Zeile auf
+  `Build434:` re-markiert, Version 1.7.0 -> 1.7.1 (`kver_ok`
+  dynamisch unverändert). Semantik-Erhalt: guard-off Lesefehler
+  -> `bt=-1` wie vorher; guard-on Lesefehler -> Latch + letzter
+  Wert behalten. Checks vor dem Push: Host-Test **23/23**
+  (S4-Battery-Latch-Case über die echte battery_guard_tick-
+  Referenz), clang-fsyntax-only Pristine-Vergleich
+  (Fehler-/Warnset byte-identisch, +7 Zeilenoffset).
+  CI-Run 42439679297 grün (Resync/aosp/miui, Release-Job
+  skipped per Definition), Artifacts `build434aosp` +
+  `build434miui` (kein Auto-Release, Latest bleibt build432).
+  Host-Test-Gate-Run 42439679366 grün direkt nach Push.
+  **Offen**: aosp-ZIP flashen + am Gerät verifizieren
+  (`bt=XX` != -1 im status, eine `Build434: bt live`-Zeile in
+  dmesg, k6a-ctl v1.5.4 Notbrems-Akku-Arm scharf); danach
+  Issue #3 schließen.
