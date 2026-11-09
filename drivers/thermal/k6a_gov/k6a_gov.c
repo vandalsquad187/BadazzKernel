@@ -1071,7 +1071,8 @@ static int cool_set(struct thermal_cooling_device *c, unsigned long s) {
     if (s > K6A_CD_L4) s = K6A_CD_L4;   /* thermal-core kann mehr fordern */
     if (s < K6A_GAMING) s = K6A_GAMING; /* Build353: OFF via cooling nicht erlaubt — Schutz kann nicht stillgelegt werden; enable=0 ist der einzige legale OFF-Pfad (mit voller Freigabe) */
     mutex_lock(&gov->lock);
-    set_state_locked((enum k6a_state)s);
+    if (gov->enabled)                  /* Build435: cool-Request zaehlt nicht bei enabled=0 — sonst Label-Ghost (state!=off ohne Machine, hist off>gaming nach Disable) */
+        set_state_locked((enum k6a_state)s);
     mutex_unlock(&gov->lock);
     return 0;
 }
