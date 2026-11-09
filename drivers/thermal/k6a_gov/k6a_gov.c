@@ -419,12 +419,12 @@ static int read_cached_temp(struct thermal_zone_device **slot, const char *name)
 
 /* KB8: 2nd-highest of the 4 Gold zones (cpu-1-0..3-usr) for the state
  * decision, the peak stays in temp_peak and arms the L4 emergency only. */
-static int read_temp(void) {
+static int read_temp(int *src_out, bool *valid_out, int *peak_out) {
     int i, t, max_t = 0, second_t = 0;
 
-    gov->temp_valid = false;
-    gov->temp_src = K6A_TSRC_NONE;
-    gov->temp_peak = 0;
+    *valid_out = false;
+    *src_out = K6A_TSRC_NONE;
+    *peak_out = 0;
 
     for (i = 0; i < 4; i++) {
         char name[16];
@@ -439,38 +439,38 @@ static int read_temp(void) {
     }
 
     if (max_t) {
-        gov->temp_valid = true;
-        gov->temp_src = K6A_TSRC_GOLD;
-        gov->temp_peak = max_t;
+        *valid_out = true;
+        *src_out = K6A_TSRC_GOLD;
+        *peak_out = max_t;
         return second_t ? second_t : max_t;
     }
 
     t = read_cached_temp(&gov->tz_silver, "cpu-0-0-usr");
     if (t) {
-        gov->temp_valid = true;
-        gov->temp_src = K6A_TSRC_SILVER;
-        gov->temp_peak = t;
+        *valid_out = true;
+        *src_out = K6A_TSRC_SILVER;
+        *peak_out = t;
         return t;
     }
     t = read_cached_temp(&gov->tz_xo, "xo-therm");
     if (t) {
-        gov->temp_valid = true;
-        gov->temp_src = K6A_TSRC_XO;
-        gov->temp_peak = t;
+        *valid_out = true;
+        *src_out = K6A_TSRC_XO;
+        *peak_out = t;
         return t;
     }
     t = read_cached_temp(&gov->tz_soc, "soc-therm");
     if (t) {
-        gov->temp_valid = true;
-        gov->temp_src = K6A_TSRC_SOC;
-        gov->temp_peak = t;
+        *valid_out = true;
+        *src_out = K6A_TSRC_SOC;
+        *peak_out = t;
         return t;
     }
     t = read_cached_temp(&gov->tz_zone0, "thermal_zone0");
     if (t) {
-        gov->temp_valid = true;
-        gov->temp_src = K6A_TSRC_ZONE0;
-        gov->temp_peak = t;
+        *valid_out = true;
+        *src_out = K6A_TSRC_ZONE0;
+        *peak_out = t;
         return t;
     }
     return 0;
@@ -823,10 +823,8 @@ static int read_bat_temp(int *celsius) {
 }
 
 /* caller holds gov->lock */
-static void battery_guard_tick(void) {
-    int bt;
-
-    if (read_bat_temp(&bt)) {
+static void battery_guard_apply(int bt_ok, int bt) {
+    if (!bt_ok) {
         if (!gov->battery_guard)
             gov->batt_temp_c = -1;
         return;
@@ -851,6 +849,12 @@ static void battery_guard_tick(void) {
         gov->throttle_events++;
         pr_warn_ratelimited("Build434: battery guard %dC -> CD_L2\n", bt);
     }
+}
+
+static void battery_guard_tick(void) {
+    int bt = 0;
+
+    battery_guard_apply(read_bat_temp(&bt) == 0, bt);
 }
 
 /* ── Kthread ─────────────────────────────────────────────────────── */
@@ -953,6 +957,11 @@ static int gov_thread(void *data) {
         unsigned int sleep_ms;
         bool do_hash, do_vendor;
         int r_hash = 0;
+        int t_src = K6A_TSRC_NONE;
+        bool t_valid = false;
+        int t_peak = 0;
+        int bt = 0;
+        bool bt_ok = false;
         char vsbuf[sizeof(gov->vendor_sconfig)];
         char vlbuf[sizeof(gov->vendor_cpu_limits)];
 
@@ -969,6 +978,8 @@ static int gov_thread(void *data) {
             read_one_node("/sys/class/thermal/thermal_message/cpu_limits",
                           vlbuf, sizeof(vlbuf));
         }
+        t = read_temp(&t_src, &t_valid, &t_peak);
+        bt_ok = (read_bat_temp(&bt) == 0);
         mutex_lock(&gov->lock);
         if (gov->enabled) {
             if (do_hash && hash_state == K6A_HASH_PENDING) {
@@ -986,10 +997,12 @@ static int gov_thread(void *data) {
                     pr_warn("Build345: hash verify gave up after %d tries\n", hash_tries);
                 }
             }
-            t = read_temp();
-            battery_guard_tick();
-            if (gov->temp_valid) {
+            battery_guard_apply(bt_ok, bt);
+            if (t_valid) {
                 gov->temp_celsius = t;
+                gov->temp_src = t_src;
+                gov->temp_valid = true;
+                gov->temp_peak = t_peak;
                 if (gov->temp_warned)
                     pr_info("Build340: temp source restored (src=%u)\n", gov->temp_src);
                 gov->temp_warned = false;
@@ -1160,7 +1173,7 @@ static ssize_t status_show(struct kobject *k, struct kobj_attribute *a, char *b)
     static const char *state_names[] = {"off","gaming","cd_l2","cd_l3","cd_l4"};
     unsigned int si;
     u32 temp, profile, legacy, enabled, gold_num, gold_max, gold_max_tbl, ticks;
-    u32 policy_max, temp_src, temp_valid;
+    u32 policy_max, temp_src, temp_valid, policy_peek;
     u32 batt_latched;
     u32 temp_peak, thresholds_user;
     char vendor_sconfig[sizeof(gov->vendor_sconfig)];
@@ -1177,6 +1190,13 @@ static ssize_t status_show(struct kobject *k, struct kobj_attribute *a, char *b)
     int i, hist_len, hist_pos;
     struct k6a_hist_entry hist[K6A_HIST_N];
 
+    {
+        int gcpu = find_gold_cpu_cached();
+        struct cpufreq_policy *pol = gcpu >= 0 ? cpufreq_cpu_get(gcpu) : NULL;
+
+        policy_peek = pol ? pol->max : 0;
+        if (pol) cpufreq_cpu_put(pol);
+    }
     mutex_lock(&gov->lock);
     si = gov->state;
     temp = gov->temp_celsius;
@@ -1200,13 +1220,7 @@ static ssize_t status_show(struct kobject *k, struct kobj_attribute *a, char *b)
     if (si < ARRAY_SIZE(res_ms))
         res_ms[si] += ktime_to_ms(ktime_get()) - max_t(u64, gov->state_ts, gov->res_start_ms);
     gold_cap_now = gov->cap_now;
-    {
-        int gcpu = find_gold_cpu_cached();
-        struct cpufreq_policy *pol = gcpu >= 0 ? cpufreq_cpu_get(gcpu) : NULL;
-
-        policy_max = pol ? pol->max : 0;
-        if (pol) cpufreq_cpu_put(pol);
-    }
+    policy_max = policy_peek;
     gpu_caps[0] = gov->cd_l2_gpu_max;
     gpu_caps[1] = gov->cd_l3_gpu_max;
     gpu_caps[2] = gov->cd_l4_gpu_max;

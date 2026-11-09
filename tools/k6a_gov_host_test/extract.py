@@ -35,7 +35,7 @@ out.append(block(r"^struct k6a_gov\s*\{", end_semicolon=True))
 out.append(block(r"^struct k6a_profile_def\s*\{", end_semicolon=True))
 out.append(block(r"^static const struct k6a_profile_def profiles\[\]\s*=\s*\{", end_semicolon=True))
 out.append("static struct k6a_gov *gov;")
-for fn in ("k6a_hist_push", "set_state_locked", "ramp_next_cap", "state_machine", "battery_guard_tick"):
+for fn in ("k6a_hist_push", "set_state_locked", "ramp_next_cap", "state_machine", "battery_guard_apply", "battery_guard_tick"):
     out.append(block(r"^static \w[\w\s\*]*\b" + fn + r"\("))
 open(sys.argv[2], "w").write("\n\n".join(out) + "\n")
 print("extracted ->", sys.argv[2])
