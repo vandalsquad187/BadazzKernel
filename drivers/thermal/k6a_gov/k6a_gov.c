@@ -853,8 +853,9 @@ static void battery_guard_apply(int bt_ok, int bt) {
 
 static void battery_guard_tick(void) {
     int bt = 0;
+    int ok = read_bat_temp(&bt) == 0;   /* Build435: unsequenced-UB vermeiden — Write(bt) und Read(bt) in einem Ausdruck liess gcc das Arg-Reihenfolge frei waelhlen (CI-S4-Fail: bt war Garbage) */
 
-    battery_guard_apply(read_bat_temp(&bt) == 0, bt);
+    battery_guard_apply(ok, bt);
 }
 
 /* ── Kthread ─────────────────────────────────────────────────────── */
