@@ -326,6 +326,7 @@ static void apply_policy(void) {
 }
 
 static void enforce_max_freq(void) {
+    static u32 last_notapp_seen, last_stuck_seen, last_stuck_hard;
     u32 max, seen = 0, hard = 0;
     int cpu;
     struct cpufreq_policy *p;
@@ -351,14 +352,19 @@ static void enforce_max_freq(void) {
     if (max) {
         if (seen > max) {
             gov->enforced_max = 0;
-            pr_err_ratelimited("Build345: gold cap %u not applied (policy_max=%u), retrying\n",
-                               max, seen);
+            if (seen != last_notapp_seen)
+                pr_err_ratelimited("Build345: gold cap %u not applied (policy_max=%u), retrying\n",
+                                   max, seen);
+            last_notapp_seen = seen;
             return;
         }
     } else if (hard && seen && seen < hard) {
         gov->enforced_max = seen;
-        pr_err_ratelimited("Build345: gold cap release stuck (policy_max=%u cpuinfo=%u), retrying\n",
-                           seen, hard);
+        if (seen != last_stuck_seen || hard != last_stuck_hard)
+            pr_err_ratelimited("Build345: gold cap release stuck (policy_max=%u cpuinfo=%u), retrying\n",
+                               seen, hard);
+        last_stuck_seen = seen;
+        last_stuck_hard = hard;
         return;
     }
     pr_info("Build345: gold cap %u Hz state=%u policy_max=%u\n",
