@@ -101,6 +101,7 @@ struct k6a_gov {
 
     u32 gold_freqs[K6A_GOV_MAX_FREQS];
     u32 gold_num;
+    int gold_cpu;
     u32 enforced_max;
     u32 cap_now;           /* aktuell angewendeter (gerampter) Gold-Cap, 0 = keiner */
     u32 ramp_up_wait;
@@ -207,6 +208,12 @@ static int find_gold_cpu(void) {
     return best_cpu;
 }
 
+static int find_gold_cpu_cached(void) {
+    if (gov && gov->gold_num && gov->gold_cpu >= 0)
+        return gov->gold_cpu;
+    return find_gold_cpu();
+}
+
 /* True only while the cached gold mask is populated (gold_num > 0 means
  * freq_init_worker already copied related_cpus under gov->lock). */
 static bool is_gold_policy(const struct cpufreq_policy *p) {
@@ -232,6 +239,7 @@ static void freq_init_worker(struct work_struct *work) {
         mutex_lock(&g->lock);
         cpumask_copy(&g->gold_mask, policy->related_cpus);
         g->gold_num = n;
+        g->gold_cpu = gold_cpu;
         mutex_unlock(&g->lock);
         pr_info("Build345: gold cluster cpu %d related=%*pbl freqs=%u\n",
                 gold_cpu, cpumask_pr_args(policy->related_cpus), n);
@@ -320,7 +328,7 @@ static u32 ramp_next_cap(u32 cur, u32 target) {
 }
 
 static void apply_policy(void) {
-    int cpu = find_gold_cpu();
+    int cpu = find_gold_cpu_cached();
     if (cpu >= 0)
         cpufreq_update_policy(cpu);
 }
@@ -338,7 +346,7 @@ static void enforce_max_freq(void) {
     gov->enforced_max = max;
     apply_policy();
 
-    cpu = find_gold_cpu();
+    cpu = find_gold_cpu_cached();
     p = cpu >= 0 ? cpufreq_cpu_get(cpu) : NULL;
     if (p) {
         seen = p->max;
@@ -1193,7 +1201,7 @@ static ssize_t status_show(struct kobject *k, struct kobj_attribute *a, char *b)
         res_ms[si] += ktime_to_ms(ktime_get()) - max_t(u64, gov->state_ts, gov->res_start_ms);
     gold_cap_now = gov->cap_now;
     {
-        int gcpu = find_gold_cpu();
+        int gcpu = find_gold_cpu_cached();
         struct cpufreq_policy *pol = gcpu >= 0 ? cpufreq_cpu_get(gcpu) : NULL;
 
         policy_max = pol ? pol->max : 0;
