@@ -1,6 +1,43 @@
 # Kernel Build Status
 
-## Current State (Stand 2026-10-31, Build 428)
+## Current State (Stand 2026-11-09, Build 438)
+- **Repo**: `vandalsquad187/BadazzKernel` branch `main` @ **`e120f655`** (build438-Merge, k6a_gov v1.7.2).
+  Kette: `e9eef01cf` (Build 434, v1.7.1 live-bt-feed) -> `f388cac8f` (P3 cap-Log-Diet) ->
+  `49a330bc8` (P1 gold-cpu-Cache) -> `89f7bd24f` (P2 Lock-Fenster + host-test-Extraktion
+  um battery_guard_apply) -> `257f04897` (v1.7.2-Bump) -> `e07178b7d` (P6 cool_set
+  enabled-Gate) -> `012a80f8c` (P6b battery_guard_tick unsequenced-UB) ->
+  `abfa83b06` (Merge nach main, Trigger).
+- **Build 438 geflasht + verifiziert (2026-11-09)**: banner `...build438-aosp`,
+  `k6a_features git_hash=e120f655`, ko 67 040 B in `/data/adb` UND module-dir,
+  `k6a_gov v1.7.2 loaded (legacy=1)`, status `hash_verified=1 hash_state=1
+  build_hash=e120f655`, schedutil cpu0/4/6/7 hl=90/hf=0, ctl v1.6.0 -> DAILY clean.
+  **P6 in vivo bewiesen**: cdev `k6a_gov` (cooling_device11) — `cur_state=3`-Write
+  bei `enabled=0` -> `state=off` BLEIBT off (vorher: GAMING-Label-Ghost des r3/-
+  "letzter GAMING-Write-Race"), Restore cur=0 sauber.
+- **Neue Funde der build438-Kette**:
+  1. **CI-S4-Fund (P6b)**: host-test schlug in CI (gcc) 3x S4-Battery-Latch, lokal
+     (clang) 23/23 5x gruen — Root Cause: C-UB in `battery_guard_tick()`:
+     `battery_guard_apply(read_bat_temp(&bt) == 0, bt)` schreibt `bt` (1. Arg)
+     und liest es (2. Arg) im selben Ausdruck — argument evaluation order ist
+     unsequenced (UB), gcc waelhlt anders als clang -> bt war Garbage -> Latch
+     blieb aus. Fix: `ok`/`bt` vorab sequenzieren. **Lektion**: Calls mit
+     Out-Params immer in Variablen sequenzieren, nicht inline in der Arg-List
+     koppeln; nur weil lokal clang gruen ist, ist die Semantik nicht bewiesen
+     (gcc-Beweis via CI).
+  2. **miui "Install toolchain"-Hang** (dispatch-run 42695863799): miui leg hing
+     >15 min still im Toolchain-Download-Step, aosp leg success — cancel +
+     re-dispatch (42698349846) -> beide Legs + Release gruen. Resueme: toolchain-
+     Flakes sind mit cancel+redispatch behebbar, kein Workflow-Defekt.
+  3. **Release-Automatik bestätigt**: Push nach main (PAT) -> Build+Artifacts
+     OHNE Release (release-Job `if: workflow_dispatch`); dispatch-RUN erzeugt
+     Tag `v4.14.369-badazz-build438` mit aosp/miui/SHA256SUMS;
+     `build-info.txt`: `K6A_GOV_VERSION=1.7.2`, `BUILD_NUMBER=438`,
+     `COMMIT_SHA=e120f655…`; ko vermagic `...build438-aosp`.
+- **Offen**: r4-Hang (mid-ROUND SYSTEMHANG 2026-11-09, kein Panic gerammt)
+  bleibt in Beobachtung (1/2 Runden; r4b lief clean). Exit-Test PASSED in r4b
+  (Residual-PID 19316 ueberlebt swipe, ctl exitete ALLEIN in ~25 s — v1.6.0-(a)-Semantik).
+
+
 - **Repo**: `vandalsquad187/BadazzKernel` branch `main` @ **`7dbd5ce70`** (susfs round 2).
   Kette: `1639f9514`/`8116a7c4a` (KSU 414/416-Fixes) -> `6355e9f47` (virt_addr_valid-Regression
   revertiert, 416) -> `808e27158` (susfs namei refcount, 419) -> `3db83cdd4`/`6681496af`
