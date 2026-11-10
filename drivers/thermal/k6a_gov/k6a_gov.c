@@ -1722,7 +1722,10 @@ static int __init k6a_gov_init(void) {
         goto err_cpufreq;
     }
 
-    gov->enabled = true;
+    /* Build439: Boot beginnt OFF — Kernel spielt erst, wenn k6a-ctl enable=1 schreibt.
+     * Vorher: enabled=true bei Probe -> ~27 s GAMING-Window vor dem ersten ctl-Kontakt
+     * (hist off>gaming@~12.8 s + gaming>off@~40 s auf JEDEM Boot). */
+    gov->enabled = false;
     gov->kthread = kthread_run(gov_thread, gov, "k6a_gov");
     if (IS_ERR(gov->kthread)) {
         pr_err("kthread creation failed\n");
