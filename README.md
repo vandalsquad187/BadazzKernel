@@ -26,6 +26,7 @@ BadazzKernel is a performance and gaming tuned kernel for **Redmi Note 12 Pro 4G
 ```
 linux-4.14.369
 ├── KernelSU-Next v3.3.0-311 (UAPI 6, 4.14 direct-patch) + SUSFS v2.3.0  # Root + Hide (submodule 79003ef8)
+├── fs/nomount — NoMount v22 (dev 8f05de7)      # VFS path redirection — zero-mount module injection (CONFIG_NOMOUNT=y)
 ├── drivers/thermal/k6a_gov/k6a_gov.c v1.7.0     # In-kernel gaming governor (CONFIG_K6A_GOV=m)
 ├── drivers/gpu/msm/kgsl_pwrctrl.c               # GPU pwrlevel export (k6a_gov)
 ├── drivers/devfreq/devfreq.c                    # BW floors (gpubw / llcc), 0 = release floor
@@ -47,6 +48,7 @@ linux-4.14.369
 | **Safety** | Battery guard + hash | `battery_guard` @`battery_guard_temp` (35..60 °C, default 45) → CD_L2, `poll_ms` 100..5000, `verify_build_hash` vs `k6a_features/git_hash` |
 | **Thermal** | Cooling device | `k6a_gov` as `thermal_cooling_device`, `cool_cur` locked, `K6A_CD_L4` clamp |
 | **Root** | KSU-Next + SUSFS | v3.3.0-311 **UAPI 6**, 4.14 direct-patch mode (submodule `79003ef8`), SUSFS `v2.3.0` round 2 (sus_path/mount/kstat/map, **dup-safe adds + caps, KSU-domain passthrough — root sees the truth, `del_sus_path` cmd**), `tamper_syscall_table` |
+| **Injection** | NoMount v22 | Built-in VFS path-redirection subsystem (`CONFIG_NOMOUNT=y`, dev `8f05de7`), control channel `add_key("nomount")` — the **NoMount metamodule** (v2.2.0) injects installed KSU modules as VFS operations instead of mounts: **`/proc/mounts` stays clean**, fully transparent to apps, UID isolation for exclusions. Verified live in Build 441 |
 | **USB** | DWC3 / QUSB2 | SM6150 clocks (`GCC/DISPCC/CAMCC`), `WAIT_FOR_LPM` clear, `bus_aggr`/`GCTL` 50ms, `is_a_peripheral` fix — PC bootloop gone since v1.3.2. Full device-mode enumeration works since Build 336 (Faults 1/4 fixed) — see [USB status](#usb-status) |
 | **Scheduler** | UCLAMP, SCHED_CASS | Latency/efficiency tuning |
 | **Memory** | KSM, LRU_GEN, ZRAM lz4 | Gaming stability |

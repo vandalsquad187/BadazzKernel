@@ -27,6 +27,8 @@ static void trace_k6a_state(unsigned from, unsigned to, int temp) {
     if (tr_n < 4096) tr_log[tr_n++] = (struct tr){ fake_ms, from, to, temp };
 }
 
+struct power_supply;   /* Build441: nur Pointer im struct k6a_gov */
+
 static int fake_batt_c = 30; static int fake_batt_err;
 static int read_bat_temp(int *c) { if (fake_batt_err) return -1; *c = fake_batt_c; return 0; }
 
