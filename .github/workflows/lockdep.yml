@@ -37,6 +37,21 @@ jobs:
           sudo apt-get install -y bc bison build-essential ccache clang curl flex \
             gcc-aarch64-linux-gnu gcc-arm-linux-gnueabihf libncurses-dev libssl-dev lzop
 
+      # -------------------------------------------------------
+      # Schritt 1b: NoMount-Subsystem integrieren (pinned SHA)
+      # Wie build-kernel.yml: setup.sh klont NoMount, symlinkt
+      # fs/nomount und patcht fs/Makefile + fs/Kconfig. Muss vor
+      # dem Configure-Step laufen, sonst fehlt fs/nomount/Kconfig
+      # beim olddefconfig (seit NoMount 8f05de7 built-in).
+      # -------------------------------------------------------
+      - name: Integrate NoMount
+        run: |
+          NOMOUNT_REF=8f05de794901a637e554c6566866be893748df69
+          curl -fsSL "https://raw.githubusercontent.com/maxsteeel/nomount/${NOMOUNT_REF}/kernel/setup.sh" | bash -s "${NOMOUNT_REF}"
+          test -f fs/nomount/nomount.c || { echo "::error::NoMount integration failed — fs/nomount/nomount.c missing"; exit 1; }
+          grep -q 'obj-$(CONFIG_NOMOUNT) += nomount/' fs/Makefile || { echo "::error::fs/Makefile missing nomount obj line"; exit 1; }
+          grep -q 'source "fs/nomount/Kconfig"' fs/Kconfig || { echo "::error::fs/Kconfig missing nomount source"; exit 1; }
+
       - name: Cache ccache
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
