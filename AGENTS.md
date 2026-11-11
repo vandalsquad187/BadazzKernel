@@ -1,6 +1,41 @@
 # Kernel Build Status
 
-## Current State (Stand 2026-11-11, Build 440)
+## Current State (Stand 2026-11-11, Build 441)
+- **Repo**: `vandalsquad187/BadazzKernel` branch `main` @ **`831efce8a`** (NoMount-Integration).
+  Kette: build440 `deeac297f` -> `831efce8a` (NoMount 8f05de7 built-in (=y) + pinned CI step).
+  CI-Run `42931511991` GRUEN (aosp + miui, Release skipped per Design), Artifacts
+  `build441aosp`/`build441miui`. **Kein 4.14-Fix noetig** — Prognose exakt getroffen.
+- **NoMount-Integration (Build 441, geflasht + verifiziert 2026-11-11)**:
+  - **Was**: NoMount VFS path-redirection subsystem, dev `8f05de7` (NOMOUNT_BASE_VERSION 22,
+    commit count 691), built-in `CONFIG_NOMOUNT=y` (sweet_defconfig neben KSU/SUSFS-Block).
+    Integriert via `kernel/setup.sh` (pinned): Symlink `fs/nomount` -> `NoMount/kernel/src`,
+    `fs/Makefile` `obj-$(CONFIG_NOMOUNT)`, `fs/Kconfig` source vor dem aeusseren endmenu (Zeile 323).
+    **NoMount-Clone + Symlink bleiben UNTRACKED** (nested .git = kaputter Gitlink) — der CI-Step
+    rendert beide frisch.
+  - **CI (build-kernel.yml)**: Step "Integrate NoMount" (Schritt 1b, vor Configure) mit
+    `NOMOUNT_REF=8f05de7…df69` + 3 Gates (nomount.c, Makefile-Zeile, Kconfig-Source);
+    `CONFIG_NOMOUNT=y` in REQUIRED_CONFIGS; Post-Build-Check `fs/nomount/nomount.o` (61 448 B).
+  - **Am Geraet bewiesen**: dmesg `[0.53s] Key type nomount registered` + `NoMount: Loaded
+    successfully`; Metamodule v2.2.0 (605, `/data/adb/modules/nomount`) macht Boot-Hijacks
+    @8.9 s (Superblock 0xfd00029/0/1, parent dirs ino 665/315, xattr handlers) = **ABI
+    v2.2.0-Userspace <-> dev-Kernel kompatibel**; `nm version` -> `22 (691)` via `su -c`
+    (funktioniert — die alte CapBnd=0-Sorge gilt hier NICHT); **`/proc/mounts`: 0**
+    Modul-/Overlay-Mounts (rezygisk/brene/tricky_store laufen rein per VFS-Injection);
+    brene uname-Spoof unveraengert; k6a/KSU/susfs intakt (`git_hash=831efce8` via
+    k6a_features, k6a_gov v1.7.2, KSU 38532); 0 Oops/Panic (7 Grep-Hits = ramoops-Wortfunde).
+  - **Fallbacks/Trivia**: ohne konfigurierte Regeln inert (`fs_initcall` registriert nur den
+    "nomount"-Key-Type, `add_key`-Kontrollkanal braucht CONFIG_KEYS=y+KEYS_COMPAT=y — beide da).
+    `add_key` aus App-UID (Termux ohne su) wird von Android-seccomp mit SIGSYS gekillt
+    (Python-ctypes-Probe starb mit "Unknown signal 31") — Beweisfuehrung immer via dmesg/`nm`.
+    dmesg-Anker: `Key type nomount registered`, `NoMount: Loaded successfully`,
+    `NoMount: [DEBUG] … hijacked`.
+  - **Upgrade-Pfad**: naechstes Release-Tag (v2.3.0, sobald dev-Änderungen drin) → `NOMOUNT_REF`
+    in CI-Step + lokal `bash -s <tag>` neu ausfuehren; setup.sh ist idempotent (grep-guards).
+  - **4.14-Kompatibilitaet (vorab gegen torvalds v4.14 verifiziert)**: `full_name_hash(salt,…)`
+    3-arg (fs/namei.c:1921), `swap()` (kernel.h:917), `d_u.d_alias` hlist,
+    `take_dentry_name_snapshot` (<5.3-Guard), `iterate_shared` (4.7+), `dentry_open(cred)`,
+    `DCACHE_OP_WEAK_REVALIDATE`, xattr-`__get`-Split per Makefile-Autodetect aus,
+    `get_user_pages_fast` FOLL_WRITE als write=1.
 - **Repo**: `vandalsquad187/BadazzKernel` branch `main` @ **`deeac297f`** (build440-Merge, P7 insmod-STARTS-OFF).
   Kette: build438-Merge `e120f655` (v1.7.2: P1 gold-cpu-Cache, P2 Lock-Fenster, P3 cap-Log-Diet,
   P6 cool_set enabled-Gate, P6b battery_guard_tick unsequenced-UB) -> `777c5f15b`
@@ -254,11 +289,13 @@
   folgen dem MIUI-Profil;unksollte main-Änderungen fließen normal ein. Harte
   Merge-Fails brechen den Job sichtbar (manueller merge erforderlich).
 - ccache-Keys pro Variante (`-aosp` / `-miui`) — untereinander nicht verdrängend.
-- Config-Pfad: `make sweet_defconfig` (aosp) / `merge_config.sh sweet_defconfig sweet_miui.config`
+- Config-Pfad: "Integrate NoMount"-Step (pinned `NOMOUNT_REF`, rendert `fs/nomount` frisch)
+  → `make sweet_defconfig` (aosp) / `merge_config.sh sweet_defconfig sweet_miui.config`
   (miui) → inject `CONFIG_LOCALVERSION=…-build${run_number}-${variant}` → `olddefconfig`
   → validate required configs (`KSU`, `KSU_SUSFS`, `KSU_TAMPER_SYSCALL_TABLE`, `K6A_GOV`,
-  `NFC_NQ_PN80T`, `PHY_QCOM_QUSB2`) → `make Image.gz dtb.img dtbo.img`
+  `NOMOUNT`, `NFC_NQ_PN80T`, `PHY_QCOM_QUSB2`) → `make Image.gz dtb.img dtbo.img`
   → verify `CONFIG_PHY_QCOM_QUSB2` survived + `phy-qcom-qusb2.o` was built
+  + `fs/nomount/nomount.o` built (NoMount built-in)
   → zips `Badazz-kernel-sweet-v${VERSION}-build${run_number}-aosp.zip` / `…-miui.zip`
   (inkl. `build-info.txt` mit `VARIANT=`) → beide als artifacts — ⚠️ Stolperstein:
   die *artifact-NAMES* müssen `${{ matrix.variant }}` enthalten, sonst haben beide
