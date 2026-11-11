@@ -99,6 +99,20 @@ jobs:
           ref: ${{ matrix.ref }}
 
       # -------------------------------------------------------
+      # Schritt 1b: NoMount-Subsystem integrieren (pinned SHA)
+      # setup.sh klont NoMount, symlinkt fs/nomount und patcht
+      # fs/Makefile + fs/Kconfig. Muss vor dem Configure-Step
+      # laufen, sonst fehlt fs/nomount/Kconfig beim defconfig.
+      # -------------------------------------------------------
+      - name: Integrate NoMount
+        run: |
+          NOMOUNT_REF=8f05de794901a637e554c6566866be893748df69
+          curl -fsSL "https://raw.githubusercontent.com/maxsteeel/nomount/${NOMOUNT_REF}/kernel/setup.sh" | bash -s "${NOMOUNT_REF}"
+          test -f fs/nomount/nomount.c || { echo "::error::NoMount integration failed — fs/nomount/nomount.c missing"; exit 1; }
+          grep -q 'obj-$(CONFIG_NOMOUNT) += nomount/' fs/Makefile || { echo "::error::fs/Makefile missing nomount obj line"; exit 1; }
+          grep -q 'source "fs/nomount/Kconfig"' fs/Kconfig || { echo "::error::fs/Kconfig missing nomount source"; exit 1; }
+
+      # -------------------------------------------------------
       # Schritt 2: Cross-Compiler + Build-Tools installieren
       # Toolchain auf ubuntu-24.04 gepinnt; gcc-Version landet in
       # build-info.txt, damit Builds reproduzierbar dokumentiert sind.
@@ -185,6 +199,7 @@ jobs:
             "CONFIG_KSU_SUSFS=y"
             "CONFIG_KSU_TAMPER_SYSCALL_TABLE=y"
             "CONFIG_K6A_GOV=m"
+            "CONFIG_NOMOUNT=y"
             "CONFIG_NFC_NQ_PN80T=y"
             "CONFIG_PHY_QCOM_QUSB2=y"
           )
@@ -263,6 +278,17 @@ jobs:
             *) echo "::error::vermagic mismatch — k6a_gov.ko would NOT load on device"; exit 1 ;;
           esac
           echo "::notice::k6a_gov.ko verified"
+          echo "=== nomount built-in check ==="
+          if ! grep -q "^CONFIG_NOMOUNT=y$" .config; then
+            echo "::error::CONFIG_NOMOUNT is not =y in post-build .config"
+            exit 1
+          fi
+          if [ ! -f fs/nomount/nomount.o ]; then
+            echo "::error::fs/nomount/nomount.o was not built"
+            exit 1
+          fi
+          ls -la fs/nomount/nomount.o
+          echo "::notice::NoMount built-in verified"
 
       # -------------------------------------------------------
       # Schritt 8: AnyKernel3-flashbares ZIP + Metadaten erstellen
