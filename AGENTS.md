@@ -1,10 +1,55 @@
 # Kernel Build Status
 
-## Current State (Stand 2026-11-11, Build 441)
-- **Repo**: `vandalsquad187/BadazzKernel` branch `main` @ **`831efce8a`** (NoMount-Integration).
-  Kette: build440 `deeac297f` -> `831efce8a` (NoMount 8f05de7 built-in (=y) + pinned CI step).
-  CI-Run `42931511991` GRUEN (aosp + miui, Release skipped per Design), Artifacts
-  `build441aosp`/`build441miui`. **Kein 4.14-Fix noetig** — Prognose exakt getroffen.
+## Current State (Stand 2026-11-11, Build 445)
+- **Repo**: `vandalsquad187/BadazzKernel` branch `main` @ **`784a55541`** (Kernel-Optimierungen + CI-Lockdep-Fix).
+  Kette: build441 `831efce8a` (NoMount) -> `456be5f7d` (k6a_gov: GPU-OPP-Cache + kgsl_k6a_get_idx-Export +
+  freq_worker no-giveup + psy-Cache) -> `784a55541` (CI lockdep: NoMount-Step nachgezogen).
+  Release **v4.14.369-badazz-build445** (Run 43099154854) — geflasht + verifiziert 2026-11-11.
+- **Kernel-Optimierungen (Build 445, `456be5f7d`, live bewiesen am Geraet)**:
+  1. **GPU-OPP-Cache**: `gpu_freqs[]`/`gpu_num` im Struct, gefuellt im freq_init_worker
+     (einmaliger Log `gpu levels=8 cur_idx=4` beim Fill, danach 0 weitere); lazy
+     `gpu_table_locked()` + `gpu_idx_read()`-Helper; `enforce_gpu_cap()`/`enforce_gpu_floor()`/
+     `gpu_floor_reset()` lesen die Cache-Tabelle + Index-Readback via neuem Export
+     `kgsl_k6a_get_idx()` (kgsl_pwrctrl.c: nur Live-Indizes, KEIN Tabellen-Walk, selbe Locking)
+     — Steady-State 0 OPP-Walks/Tick, deutlich weniger Zeit unter `gov->lock`.
+  2. **freq_init_worker no-giveup**: vorher 30x500ms -> gold_num=0 -> Enforcement still tot
+     bei spaetem cpufreq. Jetzt 30x500ms, dann dauerhaft 2s-Retry (freq_init_warned-Flag,
+     Gold-Load-Log einmalig im Gold-Block).
+  3. **psy-Handle-Cache** in `read_bat_temp()`: `power_supply_get_by_name("battery")`
+     nicht mehr pro Tick (List-Walk unter Spinlock), Handle gecacht, bei Fehler
+     (-ENODEV) Drop-and-Requery, `power_supply_put()` im exit.
+  4. Host-Test 23/23 (struct power_supply-Forward-Stub in harness.c).
+- **build445 geflasht + verifiziert (2026-11-11 ~22:23)**: Banner `...build445-aosp`,
+  `k6a_features git_hash=784a5554`, ko **66 744 B** (kleiner als 440er-67 040 — OPP-Cache-Refactor),
+  Upgrade-Pfad 441->445 sichtbar (fsck-f2fs-Linie), NoMount `22 (691)` intakt, **P7 aktiv**
+  (`hist=` leer nach Boot, `hash_verified=0 hash_state=0 bt=-1` bis zum ersten GAMING),
+  nach r7: `hash_verified=1 hash_state=1 bt=42` = Feed-Seed exakt wie dokumentiert.
+- **r7 (2026-11-11, Loggers nicht gearmt — Verifizierung via hb-Stamps + kernel-hist,
+  granularer als Logger-Logs)**: 2 GAMING-Fenster (386s->1211s ~13:45 pid 29326 hit=354;
+  1222s->1907s ~11:25 pid 6074 hit=318), **miss=0 in beiden**, beide sauber `gaming>off`,
+  **kein Residual** (pidof leer). Kernel-Temp-Peak 75, ctl-Peak 88 (Fenster 2 heisser).
+  Caveat: `badazz_safe` setzt `gpu_cap=0` (kein Cap) -> OPP-Enforce-Pfad kaum belastet;
+  hang-watch gueltig, Enforce-Stresstest (Cap aktiv) steht noch aus.
+- **Hang-Serie**: r4 HANG -> r4b/r5a/r5b/r6/r7 = **5 Folgerunden hangfrei**.
+- **k6a-ctl v1.6.1 released + deployed (2026-11-11)**: k6a-ctl `684b535` — P0-Fixe:
+  silver-hispeed aus SILVER-Tabelle (`silver_at_pct 90`, vorher gold_at_pct 90 ≈ 2,07 GHz
+  > SILVER_MAX 1,8 GHz -> schedutil-Snap auf Max), stale-recovery ko-Suche in
+  service.sh-Reihenfolge (/data/adb -> /system/lib/modules -> /vendor), bw-Bound 30000
+  (Kernel-Paritaet), `_load_gov` grep-a-Fallback ohne strings, Controller-Case 1.10+
+  (`1.[5-9].*|1.[1-9][0-9].*`). GOV_KO_VER bewusst BEHALTEN (check_module.sh-Gate braucht es).
+  Gate OK 0 warns, Release-Zip 53 268 B, 5 Dateien deployed (md5-Doppelcheck), Restart ohne
+  Reboot. **Hotfix `c0b8a81`**: Start-Banner hatte hartes `v1.6.0`-Literal (684b535 vergass
+  den Bump) -> liest jetzt `_MODVER` aus module.prop. **Lektion nc/PATH**: manueller
+  service.sh-Start aus Termux-SU verliert den KSU-PATH -> webui `nc: not found`, 2s-Restart-
+  Loop; Fix: `PATH=/data/adb/ksu/bin:/system/bin:...` beim manuellen Start setzen.
+- **CI-Funde der 456be5f7d-Kette**: lockdep.yml hatte den "Integrate NoMount"-Step NICHT
+  (build-kernel.yml hatte ihn) -> olddefconfig brach an `fs/Kconfig:323: can't open file
+  fs/nomount/Kconfig` — VORgelagerter Bug aus der NoMount-Integration, NICHT durch die
+  Kernel-Aenderungen. Fix `784a55541` (gleicher Step + 3 Gates wie build-kernel.yml).
+  **GitHub-Artifact-API-Outage** (2026-11-11 ~20:2x): upload-artifact scheiterte beide Legs
+  5x (`Unexpected token '<', "<!DOCTYPE "...`), Builds/ZIPs selbst gruen, Run blieb zombie-
+  in_progress (cancel-API: "completed", status-API: in_progress, rerun --failed blocked
+  "already running") — Ausweg: frischer Dispatch (43099154854) lief durch.
 - **NoMount-Integration (Build 441, geflasht + verifiziert 2026-11-11)**:
   - **Was**: NoMount VFS path-redirection subsystem, dev `8f05de7` (NOMOUNT_BASE_VERSION 22,
     commit count 691), built-in `CONFIG_NOMOUNT=y` (sweet_defconfig neben KSU/SUSFS-Block).
@@ -77,11 +122,12 @@
      `build-info.txt`: `K6A_GOV_VERSION=1.7.2`, `BUILD_NUMBER=438`,
      `COMMIT_SHA=e120f655…`; ko vermagic `...build438-aosp`.
 - **Offen**: r4-Hang (mid-ROUND SYSTEMHANG 2026-11-09, kein Panic gerammt) bleibt in
-  Beobachtung. Nach der build438-Serie: r4b OK + **r5a (Mit Luefter) OK + r5b (Ohne
-  Luefter, Ladestrom, 93-Grad-ctl-Peak) OK = 3 Folgerunden hangfrei**; das Hang-Muster
-  reproduziert NICHT. Exit-Test PASSED (Residual lebt, ctl exitiert allein ~25 s,
-  v1.6.0-(a)-Semantik). Monitor 100 % hit/miss=0 in r5a+rb. Kernel-Throttle feuerte
-  nie (throttle_events=0). Details: `~/tmp/k6a-ctl-buglog.md` r5-Phase.
+  Beobachtung. Stand nach r7: r4b/r5a/r5b/r6/**r7 OK = 5 Folgerunden hangfrei**; das
+  Hang-Muster reproduziert NICHT (r6+r7 sogar ohne Residual-Prozess). Monitor miss=0 in
+  r5a/r5b/r6/r7. Kernel-Throttle feuerte nie (throttle_events=0). Verblieben: OPP-Enforce-
+  Stresstest (Cap aktiv, `badazz_safe` cappt `gpu_cap=0`), Roadmap-Posten (KGSL-I/O aus
+  `gov->lock`, status_compact, adaptive GAMING-Polling, webui-Backoff). Details:
+  `~/tmp/k6a-ctl-buglog.md` r5-Phase + r6/r7 + v1.6.1-Rollout.
 
 
 - **Repo**: `vandalsquad187/BadazzKernel` branch `main` @ **`7dbd5ce70`** (susfs round 2).
