@@ -24,6 +24,7 @@
 #include "trace.h"
 
 extern int kgsl_k6a_get_levels(u32 *out, u32 max_n, u32 *cur_idx, u32 *max_idx, u32 *min_idx);
+extern int kgsl_k6a_get_idx(u32 *cur_idx, u32 *max_idx, u32 *min_idx);
 extern int kgsl_k6a_set_max_level_idx(unsigned int level);
 extern int kgsl_k6a_set_min_level_idx(unsigned int level);
 extern int k6a_devfreq_get_bw(const char *name, u32 *cur, u32 *min, u32 *max);
@@ -108,6 +109,14 @@ struct k6a_gov {
     cpumask_t gold_mask;
     bool batt_latched;
 
+    /* Build441: GPU-OPP-Tabelle cachen — die Frequenzen sind statisch,
+     * pro Tick reicht der Index-Readback (kgsl_k6a_get_idx). */
+    u32 gpu_freqs[K6A_GOV_MAX_FREQS];
+    u32 gpu_num;
+
+    /* Build441: psy-Handle cachen statt power_supply_get_by_name pro Tick */
+    struct power_supply *bat_psy;
+
     struct thermal_zone_device *tz_gold[4];
     struct thermal_zone_device *tz_silver;
     struct thermal_zone_device *tz_xo;
@@ -118,6 +127,7 @@ struct k6a_gov {
 
     struct delayed_work freq_init_work;
     int freq_init_retries;
+    bool freq_init_warned;
 };
 
 static struct k6a_gov *gov;
@@ -243,35 +253,49 @@ static void freq_init_worker(struct work_struct *work) {
         mutex_unlock(&g->lock);
         pr_info("Build345: gold cluster cpu %d related=%*pbl freqs=%u\n",
                 gold_cpu, cpumask_pr_args(policy->related_cpus), n);
+        pr_info("freq tables loaded: Gold=%u\n", n);
     }
     if (policy) cpufreq_cpu_put(policy);
 
-    {
+    /* Build441: GPU-OPP-Tabelle cachen — KGSL liest pro Tick nur noch die
+     * pwrlevel-Indizes; die Frequenzen aendern sich nach dem Boot nie. */
+    if (!g->gpu_num) {
         u32 gtab[K6A_GOV_MAX_FREQS]; u32 gn = 0, tl = 0, tmin = 0;
         int tl_ret = kgsl_k6a_get_levels(gtab, K6A_GOV_MAX_FREQS, &gn, &tl, &tmin);
-        if (tl_ret > 0)
+        if (tl_ret > 0) {
+            mutex_lock(&g->lock);
+            memcpy(g->gpu_freqs, gtab, sizeof(gtab));
+            g->gpu_num = (u32)tl_ret;
+            mutex_unlock(&g->lock);
             pr_info("Build389: gpu levels=%u cur_idx=%u max_idx=%u min_idx=%u\n",
                     tl_ret, gn, tl, tmin);
-        else
+        } else if (g->freq_init_retries == 0) {
             pr_info("gpu levels read failed (%d)\n", tl_ret);
+        }
     }
 
     mutex_lock(&g->lock);
     if (g->gold_num > 0) {
         clamp_cd_freqs();
-        pr_info("freq tables loaded: Gold=%u\n", g->gold_num);
         if (g->state != K6A_OFF && g->enabled && g->legacy_mode)
             enforce_max_freq();
-        mutex_unlock(&g->lock);
-        return;
     }
+    n = (g->gold_num > 0 && g->gpu_num > 0);
     mutex_unlock(&g->lock);
+    if (n)
+        return;
 
-    if (++g->freq_init_retries < 30) {
-        schedule_delayed_work(&g->freq_init_work, msecs_to_jiffies(500));
-    } else {
-        pr_warn("freq init failed after 30 retries, using defaults\n");
+    /* Build441: nicht mehr aufgeben — sonst bleibt Enforcement dauerhaft
+     * tot, wenn cpufreq/kgsl erst spaeter hochkommt. Erst 30x/500 ms,
+     * danach dauerhaft alle 2 s weiterlangsam retryen. */
+    g->freq_init_retries++;
+    if (g->freq_init_retries >= 30 && !g->freq_init_warned) {
+        g->freq_init_warned = true;
+        pr_warn("freq init slow after %d retries — keep retrying every 2 s\n",
+                g->freq_init_retries);
     }
+    schedule_delayed_work(&g->freq_init_work,
+                          msecs_to_jiffies(g->freq_init_retries < 30 ? 500 : 2000));
 }
 
 /* ── CPU Freq Enforcement ────────────────────────────────────────── */
@@ -612,20 +636,46 @@ static u32 get_cd_gpu_cap(void) {
     }
 }
 
+/* Build441: GPU-OPP-Tabelle aus dem Cache; 0 = nicht verfuegbar. Der Cache
+ * wird im freq_init_worker gefuellt, faellt der nach, fuellt dieser Pfad
+ * lazily nach — danach ist der Tick walk-frei. Caller haelt gov->lock. */
+static u32 gpu_table_locked(void) {
+    u32 gtab[K6A_GOV_MAX_FREQS], gn = 0, tl = 0, tmin = 0;
+    int n;
+
+    if (gov->gpu_num)
+        return gov->gpu_num;
+    n = kgsl_k6a_get_levels(gtab, K6A_GOV_MAX_FREQS, &gn, &tl, &tmin);
+    if (n <= 0)
+        return 0;
+    memcpy(gov->gpu_freqs, gtab, sizeof(gtab));
+    gov->gpu_num = (u32)n;
+    return gov->gpu_num;
+}
+
+/* Live-Indizes (cur/max/min) ohne Tabellen-Walk — nur der kurze kgsl-Device-
+ * Mutex. Findet externe Loesungen (opp_notify) weiterhin pro Tick. */
+static int gpu_idx_read(u32 *cur_idx, u32 *max_idx, u32 *min_idx) {
+    return kgsl_k6a_get_idx(cur_idx, max_idx, min_idx);
+}
+
 static void enforce_gpu_cap(void) {
-    u32 tab[K6A_GOV_MAX_FREQS], cur_idx = 0, max_idx = 0, min_idx = 0, cap;
-    int n, i, best = -1, user_max;
+    u32 cur_idx = 0, max_idx = 0, min_idx = 0, cap, n;
+    int i, best = -1, user_max;
 
     if (!gov || !gov->enabled || !gov->legacy_mode) { gpu_reset(); return; }
     cap = get_cd_gpu_cap();
     if (!cap) { gpu_reset(); return; }
 
-    n = kgsl_k6a_get_levels(tab, K6A_GOV_MAX_FREQS, &cur_idx, &max_idx, &min_idx);
-    if (n <= 0) return;
+    n = gpu_table_locked();
+    if (!n) return;
+    if (gpu_idx_read(&cur_idx, &max_idx, &min_idx))
+        return;
 
     /* highest available level freq that still fits under the cap */
     for (i = 0; i < n; i++)
-        if (tab[i] <= cap && (best < 0 || tab[i] > tab[best]))
+        if (gov->gpu_freqs[i] <= cap &&
+            (best < 0 || gov->gpu_freqs[i] > gov->gpu_freqs[best]))
             best = i;
     if (best < 0) best = n - 1;   /* nothing fits: lowest level */
 
@@ -663,13 +713,14 @@ static void enforce_gpu_cap(void) {
  */
 static void gpu_floor_reset(void) {
     int saved = gov->gpu_floor_saved_min;
-    u32 tab[K6A_GOV_MAX_FREQS], cur_idx = 0, max_idx = 0, min_idx = 0;
+    u32 cur_idx = 0, max_idx = 0, min_idx = 0;
 
     if (gov->gpu_floor_last < 0) return;
     /* never leave kgsl pinned at a k6a-chosen floor */
     if (saved < 0) {
-        int n = kgsl_k6a_get_levels(tab, K6A_GOV_MAX_FREQS, &cur_idx, &max_idx, &min_idx);
-        if (n <= 0) return;   /* table unavailable: retry next tick */
+        /* Build441: nur Indizes, kein Tabellen-Walk mehr */
+        if (gpu_idx_read(&cur_idx, &max_idx, &min_idx))
+            return;   /* kgsl unavailable: retry next tick */
         saved = (int)min_idx;
         gov->gpu_floor_saved_min = saved;
     }
@@ -680,14 +731,16 @@ static void gpu_floor_reset(void) {
 }
 
 static void enforce_gpu_floor(void) {
-    u32 tab[K6A_GOV_MAX_FREQS], cur_idx = 0, max_idx = 0, min_idx = 0;
-    int n, i, best = -1, user_min;
+    u32 cur_idx = 0, max_idx = 0, min_idx = 0, n;
+    int i, best = -1, user_min;
 
     if (!gov || !gov->enabled || !gov->legacy_mode) { gpu_floor_reset(); return; }
     if (gov->state != K6A_GAMING || !gov->gpu_floor) { gpu_floor_reset(); return; }
 
-    n = kgsl_k6a_get_levels(tab, K6A_GOV_MAX_FREQS, &cur_idx, &max_idx, &min_idx);
-    if (n <= 0) return;
+    n = gpu_table_locked();
+    if (!n) return;
+    if (gpu_idx_read(&cur_idx, &max_idx, &min_idx))
+        return;
 
     /* Min-Level des Users: solange wir pinnen, der gemerkte Wert,
      * sonst das, was kgsl gerade meldet */
@@ -695,7 +748,7 @@ static void enforce_gpu_floor(void) {
 
     /* lowest level whose freq still satisfies the floor */
     for (i = n - 1; i >= 0; i--)
-        if (tab[i] >= gov->gpu_floor) { best = i; break; }
+        if (gov->gpu_freqs[i] >= gov->gpu_floor) { best = i; break; }
     if (best < 0) best = 0;   /* floor above the whole table: top level */
 
     if (user_min <= best) {   /* user min already covers this */
@@ -807,17 +860,24 @@ static void apply_limits(void) {
 }
 
 /* ── Battery Guard ─────────────────────────────────────────────── */
-/* 0 = ok, sonst Fehlercode; *celsius nur bei Erfolg gesetzt */
+/* Build441: psy-Handle cachen — power_supply_get_by_name walkt die psy-Liste
+ * unter Spinlock, pro Tick zu teuer. Bei Registrierungswechsel (Fehler)
+ * wird der Handle verworfen und beim naechsten Tick neu gesucht.
+ * 0 = ok, sonst Fehlercode; *celsius nur bei Erfolg gesetzt */
 static int read_bat_temp(int *celsius) {
-    struct power_supply *psy;
     union power_supply_propval val;
     int ret;
 
-    psy = power_supply_get_by_name("battery");
-    if (!psy) return -ENODEV;
-    ret = power_supply_get_property(psy, POWER_SUPPLY_PROP_TEMP, &val);
-    power_supply_put(psy);
-    if (ret) return ret;
+    if (!gov->bat_psy) {
+        gov->bat_psy = power_supply_get_by_name("battery");
+        if (!gov->bat_psy) return -ENODEV;
+    }
+    ret = power_supply_get_property(gov->bat_psy, POWER_SUPPLY_PROP_TEMP, &val);
+    if (ret) {
+        power_supply_put(gov->bat_psy);
+        gov->bat_psy = NULL;
+        return ret;
+    }
     *celsius = val.intval / 10;  /* Zehntelgrad -> Celsius */
     return 0;
 }
@@ -1781,6 +1841,12 @@ static void __exit k6a_gov_exit(void) {
     if (gov->gpu_last_idx >= 0 || gov->gpu_floor_last >= 0)
         pr_warn("gpu limits could not be released at unload\n");
     mutex_unlock(&gov->lock);
+
+    /* Build441: gecachten psy-Handle wieder freigeben */
+    if (gov->bat_psy) {
+        power_supply_put(gov->bat_psy);
+        gov->bat_psy = NULL;
+    }
 
     kfree(gov);
     gov = NULL;

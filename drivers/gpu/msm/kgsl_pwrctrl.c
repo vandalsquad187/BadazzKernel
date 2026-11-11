@@ -3366,6 +3366,33 @@ int kgsl_k6a_get_levels(u32 *out, u32 max_n, u32 *cur_idx, u32 *max_idx, u32 *mi
 }
 EXPORT_SYMBOL(kgsl_k6a_get_levels);
 
+/* ── k6a-gov interface: read only the live pwrlevel indices (Build441) ──
+ * Same locking as kgsl_k6a_get_levels, but without copying the (static)
+ * frequency table — the governor caches the table and reads the indices
+ * every tick. Returns the number of valid entries, < 0 on error. */
+int kgsl_k6a_get_idx(u32 *cur_idx, u32 *max_idx, u32 *min_idx)
+{
+	struct kgsl_device *device = kgsl_get_device(KGSL_DEVICE_3D0);
+	struct kgsl_pwrctrl *pwr;
+	if (!device)
+		return -ENODEV;
+	pwr = &device->pwrctrl;
+	mutex_lock(&device->mutex);
+	if (pwr->num_pwrlevels < 2) {
+		mutex_unlock(&device->mutex);
+		return -ENODEV;
+	}
+	if (cur_idx)
+		*cur_idx = pwr->active_pwrlevel;
+	if (max_idx)
+		*max_idx = pwr->thermal_pwrlevel;
+	if (min_idx)
+		*min_idx = pwr->min_pwrlevel;
+	mutex_unlock(&device->mutex);
+	return (int)pwr->num_pwrlevels - 1;
+}
+EXPORT_SYMBOL(kgsl_k6a_get_idx);
+
 /* ── k6a-gov interface: set GPU max pwrlevel idx (BadazzKernel) ────
  * Same locking/context as the thermal_pwrlevel sysfs store path.
  * level 0 = no limit (highest freq). Callable from process context only.
