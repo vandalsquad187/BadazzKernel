@@ -320,6 +320,7 @@ config FILE_TABLE_DEBUG
 	help
 	  This option enables debug of the open files using a global filetable
 
+source "fs/nomount/Kconfig"
 endmenu
 
 config BLOCK_UNWANTED_FILES

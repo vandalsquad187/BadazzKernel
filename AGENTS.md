@@ -1,12 +1,20 @@
 # Kernel Build Status
 
-## Current State (Stand 2026-11-09, Build 438)
-- **Repo**: `vandalsquad187/BadazzKernel` branch `main` @ **`e120f655`** (build438-Merge, k6a_gov v1.7.2).
-  Kette: `e9eef01cf` (Build 434, v1.7.1 live-bt-feed) -> `f388cac8f` (P3 cap-Log-Diet) ->
-  `49a330bc8` (P1 gold-cpu-Cache) -> `89f7bd24f` (P2 Lock-Fenster + host-test-Extraktion
-  um battery_guard_apply) -> `257f04897` (v1.7.2-Bump) -> `e07178b7d` (P6 cool_set
-  enabled-Gate) -> `012a80f8c` (P6b battery_guard_tick unsequenced-UB) ->
-  `abfa83b06` (Merge nach main, Trigger).
+## Current State (Stand 2026-11-11, Build 440)
+- **Repo**: `vandalsquad187/BadazzKernel` branch `main` @ **`deeac297f`** (build440-Merge, P7 insmod-STARTS-OFF).
+  Kette: build438-Merge `e120f655` (v1.7.2: P1 gold-cpu-Cache, P2 Lock-Fenster, P3 cap-Log-Diet,
+  P6 cool_set enabled-Gate, P6b battery_guard_tick unsequenced-UB) -> `777c5f15b`
+  (P7 enabled=false bei Probe) -> `deeac297f` (Merge, CI gruen, Release build440).
+- **Build 440 geflasht + verifiziert (2026-11-11)**: banner `...build440-aosp`, ko 67 040 B
+  in `/data/adb` UND module-dir, ctl v1.6.0 -> DAILY clean. **P7 in vivo bewiesen**:
+  `hist=` LEER nach Boot (vorher: auf JEDEM Boot ein ~27-s-GAMING-Window
+  `off>gaming@~12.8 s` -> `gaming>off@~40 s` vor dem ersten ctl-Kontakt) — Kernel
+  bleibt OFF bis k6a-ctl enable=1 schreibt.
+- **P7-Nebenwirkung (bewusst, benign)**: Feeds/Seed initialisieren spaeter:
+  `hash_state=0`, `bt=-1`, `temp=0` direkt nach Boot — der bt-live-Feed
+  (`Build434: bt live`-Banner) und das State-Hash seeden erst beim ERSTEN
+  GAMING-Eintritt (den es jetzt ohne Boot-Window nicht mehr sofort gibt).
+  Akzeptanz-Check naechste Runde: hash_state=1 + bt-live-Banner beim ersten GAMING.
 - **Build 438 geflasht + verifiziert (2026-11-09)**: banner `...build438-aosp`,
   `k6a_features git_hash=e120f655`, ko 67 040 B in `/data/adb` UND module-dir,
   `k6a_gov v1.7.2 loaded (legacy=1)`, status `hash_verified=1 hash_state=1
@@ -33,9 +41,12 @@
      Tag `v4.14.369-badazz-build438` mit aosp/miui/SHA256SUMS;
      `build-info.txt`: `K6A_GOV_VERSION=1.7.2`, `BUILD_NUMBER=438`,
      `COMMIT_SHA=e120f655…`; ko vermagic `...build438-aosp`.
-- **Offen**: r4-Hang (mid-ROUND SYSTEMHANG 2026-11-09, kein Panic gerammt)
-  bleibt in Beobachtung (1/2 Runden; r4b lief clean). Exit-Test PASSED in r4b
-  (Residual-PID 19316 ueberlebt swipe, ctl exitete ALLEIN in ~25 s — v1.6.0-(a)-Semantik).
+- **Offen**: r4-Hang (mid-ROUND SYSTEMHANG 2026-11-09, kein Panic gerammt) bleibt in
+  Beobachtung. Nach der build438-Serie: r4b OK + **r5a (Mit Luefter) OK + r5b (Ohne
+  Luefter, Ladestrom, 93-Grad-ctl-Peak) OK = 3 Folgerunden hangfrei**; das Hang-Muster
+  reproduziert NICHT. Exit-Test PASSED (Residual lebt, ctl exitiert allein ~25 s,
+  v1.6.0-(a)-Semantik). Monitor 100 % hit/miss=0 in r5a+rb. Kernel-Throttle feuerte
+  nie (throttle_events=0). Details: `~/tmp/k6a-ctl-buglog.md` r5-Phase.
 
 
 - **Repo**: `vandalsquad187/BadazzKernel` branch `main` @ **`7dbd5ce70`** (susfs round 2).
