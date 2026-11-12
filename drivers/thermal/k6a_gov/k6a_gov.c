@@ -699,9 +699,14 @@ static u32 gpu_table_locked(void) {
 
 /* Live-Indizes (cur/max/min) ohne Tabellen-Walk — nur der kurze kgsl-Device-
  * Mutex. Build446: laeuft nur noch im Commit ausserhalb von gov->lock; der
- * Plan entscheidet mit dem 1-Tick-Snapshot (gpu_live_max/min). */
+ * Plan entscheidet mit dem 1-Tick-Snapshot (gpu_live_max/min).
+ * Bugfix (r8b-Befund): kgsl_k6a_get_idx gibt die Anzahl der Eintraege
+ * (>=0, hier 7) bzw. <0 bei Fehler zurueck — roh durchgereicht lasst
+ * jeden ERFOLG wie einen Fehler wirken ("!7" == 0). Normiert auf
+ * 0 = ok / 1 = Fehler. Der gleiche Bug liess den GPU-Cap-Pfad in
+ * build445 still bleiben (Readback-Erfolg wurde als Abort gezaehlt). */
 static int gpu_idx_read(u32 *cur_idx, u32 *max_idx, u32 *min_idx) {
-    return kgsl_k6a_get_idx(cur_idx, max_idx, min_idx);
+    return kgsl_k6a_get_idx(cur_idx, max_idx, min_idx) < 0;
 }
 
 /* GPU-Cap-Plan — caller haelt gov->lock, schreibt nichts */
