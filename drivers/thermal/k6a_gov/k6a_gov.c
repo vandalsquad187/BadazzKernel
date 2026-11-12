@@ -83,6 +83,8 @@ struct k6a_gov {
     u32 gpu_floor;
     s32 gpu_floor_last;
     s32 gpu_floor_saved_min;
+    s32 gpu_live_max;      /* Build446: 1-Tick-Snapshot des kgsl max_idx, -1 = unbekannt */
+    s32 gpu_live_min;      /* Build446: 1-Tick-Snapshot des kgsl min_idx, -1 = unbekannt */
     u32 bw_last_gpubw, bw_last_llcc;
     u32 hysteresis_fast, hysteresis_normal;
     s32 batt_temp_c;
@@ -612,19 +614,61 @@ done:
     return;
 }
 
-/* ── Apply Limits ────────────────────────────────────────────────── */
-/* GPU cap via native KGSL interface (KB10R-2). Kthread = process
- * context, same locking as kgsl's own sysfs store path. */
+/* ── Apply Limits (Build446: Plan/Commit/Latch) ────────────────────
+ * KGSL-/Devfreq-I/O laeuft NICHT mehr unter gov->lock (Muster wie
+ * Build408/filp_open): Plan = reine Mathe unter dem Lock, Commit = I/O
+ * ohne Lock, Latch = kurze Re-Lock-Phase am Tick-Ende. Damit existiert
+ * die Lock-Kante gov->lock -> kgsl device->mutex/devfreq-Locks nicht
+ * mehr — der Risikopfad "kgsl verzweigt in den Thermal-Core, der unser
+ * Cooling-Device beruehrt" kann keine Inversion mehr bauen. Der Plan
+ * entscheidet mit dem 1-Tick-Snapshot (gpu_live_max/min), der Commit
+ * frischt ihn nach jedem I/O auf ("Write ohne Lock, Readback dann
+ * naechster Tick"). */
+#define K6A_W_NONE    0
+#define K6A_W_RELEASE 1
+#define K6A_W_APPLY   2
+
+struct k6a_gpu_work {
+    int action;
+    int target;      /* APPLY: pwrlevel-Index */
+    bool save_live;  /* APPLY: User-Level erst im Commit-Readback merken */
+    s32 ref;         /* Log-Arg: Cap-/Floor-Hz */
+};
+struct k6a_gpu_res {
+    int ok;          /* 1 = I/O ok oder nichts zu tun */
+    bool live_have;  /* Commit-Readback gelungen */
+    u32 live_cur, live_max, live_min;
+    bool save_have;
+    u32 save_idx;
+};
+struct k6a_bw_work { int gpubw, llcc; };   /* <0 = nichts tun */
+struct k6a_bw_res  { int ok_gpubw, ok_llcc; };
+struct k6a_limits_work {
+    struct k6a_gpu_work gpu;
+    struct k6a_gpu_work floor;
+    struct k6a_bw_work bw;
+    bool any;
+};
+struct k6a_limits_res {
+    struct k6a_gpu_res gpu;
+    struct k6a_gpu_res floor;
+    struct k6a_bw_res bw;
+};
+
+static void gpu_cap_exec(const struct k6a_gpu_work *w, struct k6a_gpu_res *r);
+static void gpu_cap_latch(const struct k6a_gpu_work *w, const struct k6a_gpu_res *r);
+static void gpu_floor_exec(const struct k6a_gpu_work *w, struct k6a_gpu_res *r);
+static void gpu_floor_latch(const struct k6a_gpu_work *w, const struct k6a_gpu_res *r);
+
+/* GPU cap via native KGSL interface (KB10R-2). Seltene Pfade (enable=0,
+ * exit) synchron unter dem Lock; der Tick-Hot-Pfad nutzt Plan/Commit/Latch. */
 static void gpu_reset(void) {
-    unsigned int restore;
+    const struct k6a_gpu_work w = { K6A_W_RELEASE, 0, false, 0 };
+    struct k6a_gpu_res r;
 
     if (gov->gpu_last_idx < 0) return;
-    restore = gov->gpu_cap_saved_max >= 0 ? (unsigned int)gov->gpu_cap_saved_max : 0;
-    if (kgsl_k6a_set_max_level_idx(restore))
-        return;   /* Fehler: naechster Tick versucht es erneut */
-    pr_info("gpu cap released (user max idx %u)\n", restore);
-    gov->gpu_last_idx = -1;
-    gov->gpu_cap_saved_max = -1;
+    gpu_cap_exec(&w, &r);
+    gpu_cap_latch(&w, &r);
 }
 
 static u32 get_cd_gpu_cap(void) {
@@ -654,52 +698,104 @@ static u32 gpu_table_locked(void) {
 }
 
 /* Live-Indizes (cur/max/min) ohne Tabellen-Walk — nur der kurze kgsl-Device-
- * Mutex. Findet externe Loesungen (opp_notify) weiterhin pro Tick. */
+ * Mutex. Build446: laeuft nur noch im Commit ausserhalb von gov->lock; der
+ * Plan entscheidet mit dem 1-Tick-Snapshot (gpu_live_max/min). */
 static int gpu_idx_read(u32 *cur_idx, u32 *max_idx, u32 *min_idx) {
     return kgsl_k6a_get_idx(cur_idx, max_idx, min_idx);
 }
 
-static void enforce_gpu_cap(void) {
-    u32 cur_idx = 0, max_idx = 0, min_idx = 0, cap, n;
+/* GPU-Cap-Plan — caller haelt gov->lock, schreibt nichts */
+static void gpu_cap_plan(struct k6a_gpu_work *w) {
+    u32 cap, n;
     int i, best = -1, user_max;
 
-    if (!gov || !gov->enabled || !gov->legacy_mode) { gpu_reset(); return; }
+    w->action = K6A_W_NONE;
+    w->target = 0;
+    w->save_live = false;
+    w->ref = 0;
+    if (!gov->enabled || !gov->legacy_mode) { w->action = K6A_W_RELEASE; return; }
     cap = get_cd_gpu_cap();
-    if (!cap) { gpu_reset(); return; }
+    if (!cap) { w->action = K6A_W_RELEASE; return; }
 
     n = gpu_table_locked();
-    if (!n) return;
-    if (gpu_idx_read(&cur_idx, &max_idx, &min_idx))
-        return;
-
-    /* highest available level freq that still fits under the cap */
-    for (i = 0; i < n; i++)
+    if (!n) return;   /* Tabelle fehlt: nichts planbar, naechster Tick erneut */
+    for (i = 0; i < (int)n; i++)
         if (gov->gpu_freqs[i] <= cap &&
             (best < 0 || gov->gpu_freqs[i] > gov->gpu_freqs[best]))
             best = i;
-    if (best < 0) best = n - 1;   /* nothing fits: lowest level */
+    if (best < 0) best = (int)n - 1;   /* nothing fits: lowest level */
 
     /* Max-Level des Users: solange wir cappen, der gemerkte Wert,
-     * sonst das, was kgsl gerade meldet */
-    user_max = gov->gpu_last_idx >= 0 ? gov->gpu_cap_saved_max : (int)max_idx;
+     * sonst der 1-Tick-Snapshot vom letzten Commit (Build446 statt des
+     * Live-Reads unter dem Lock; erster Tick nach Boot liest im Commit). */
+    user_max = gov->gpu_last_idx >= 0 ? gov->gpu_cap_saved_max : gov->gpu_live_max;
 
     if (user_max >= best) {   /* user max already at or below our cap */
-        gpu_reset();
+        w->action = K6A_W_RELEASE;
         return;
     }
     if (best == gov->gpu_last_idx) {
         /* Cap steht: unsere Grenze oder eine strengere (z. B. opp_notify) */
-        if ((int)max_idx >= best)
+        if (gov->gpu_live_max >= best)
             return;
-        pr_info_ratelimited("gpu cap idx %d was lowered externally (max_idx=%u), re-applying\n",
-                            best, max_idx);
+        pr_info_ratelimited("Build446: gpu cap idx %d was lowered externally (live_max=%d), re-applying\n",
+                            best, gov->gpu_live_max);
     } else if (gov->gpu_last_idx < 0) {
-        gov->gpu_cap_saved_max = user_max;   /* vor dem ersten Cap merken */
+        w->save_live = true;   /* vor dem ersten Cap merken (Commit-Readback) */
     }
+    w->action = K6A_W_APPLY;
+    w->target = best;
+    w->ref = (s32)cap;
+}
 
-    if (!kgsl_k6a_set_max_level_idx((unsigned int)best)) {
-        gov->gpu_last_idx = best;
-        pr_info("Build389: gpu cap %uHz -> lvl %d (of %u) min=%u\n", cap, best, n, min_idx);
+/* GPU-Cap-Commit — KEIN gov->lock; kgsl device->mutex nur hier */
+static void gpu_cap_exec(const struct k6a_gpu_work *w, struct k6a_gpu_res *r) {
+    unsigned int restore;
+
+    memset(r, 0, sizeof(*r));
+    r->ok = 1;
+    if (w->action == K6A_W_NONE) return;
+    if (w->action == K6A_W_RELEASE) {
+        if (gov->gpu_last_idx < 0) return;
+        restore = gov->gpu_cap_saved_max >= 0 ? (unsigned int)gov->gpu_cap_saved_max : 0;
+        r->ok = !kgsl_k6a_set_max_level_idx(restore);
+        if (r->ok)
+            pr_info("Build446: gpu cap released (user max idx %u)\n", restore);
+        return;
+    }
+    if (!READ_ONCE(gov->enabled)) {   /* APPLY nach enable=0: der Store hat selbst released */
+        r->ok = 0;
+        return;
+    }
+    if (w->save_live) {
+        r->save_have = !gpu_idx_read(&r->live_cur, &r->live_max, &r->live_min);
+        if (r->save_have)
+            r->save_idx = r->live_max;
+    }
+    r->ok = !kgsl_k6a_set_max_level_idx((unsigned int)w->target);
+    /* Build446: Readback frischt den 1-Tick-Snapshot fuer den naechsten
+     * Plan auf — ausserhalb des Locks */
+    r->live_have = !gpu_idx_read(&r->live_cur, &r->live_max, &r->live_min);
+}
+
+/* Latch — caller haelt gov->lock */
+static void gpu_cap_latch(const struct k6a_gpu_work *w, const struct k6a_gpu_res *r) {
+    if (w->action == K6A_W_NONE) return;
+    if (r->live_have)
+        gov->gpu_live_max = (int)r->live_max;
+    if (w->action == K6A_W_RELEASE) {
+        if (r->ok) {
+            gov->gpu_last_idx = -1;
+            gov->gpu_cap_saved_max = -1;
+        }
+        return;
+    }
+    if (r->ok) {
+        gov->gpu_last_idx = w->target;
+        if (w->save_live && r->save_have && gov->gpu_cap_saved_max < 0)
+            gov->gpu_cap_saved_max = (int)r->save_idx;
+        pr_info("Build446: gpu cap %uHz -> lvl %d (of %u) min=%u\n",
+                (u32)w->ref, w->target, gov->gpu_num, r->live_min);
     }
 }
 
@@ -711,65 +807,116 @@ static void enforce_gpu_cap(void) {
  * On-device proof (Build389): min_pwrlevel=2 pins gpuclk at 565 MHz,
  * restoring the previous index returns the DCVS to 355.
  */
-static void gpu_floor_reset(void) {
-    int saved = gov->gpu_floor_saved_min;
-    u32 cur_idx = 0, max_idx = 0, min_idx = 0;
-
-    if (gov->gpu_floor_last < 0) return;
-    /* never leave kgsl pinned at a k6a-chosen floor */
-    if (saved < 0) {
-        /* Build441: nur Indizes, kein Tabellen-Walk mehr */
-        if (gpu_idx_read(&cur_idx, &max_idx, &min_idx))
-            return;   /* kgsl unavailable: retry next tick */
-        saved = (int)min_idx;
-        gov->gpu_floor_saved_min = saved;
-    }
-    if (kgsl_k6a_set_min_level_idx((unsigned int)saved)) return;
-    pr_info("Build389: gpu floor released (user min idx %d)\n", saved);
-    gov->gpu_floor_last = -1;
-    gov->gpu_floor_saved_min = -1;
-}
-
-static void enforce_gpu_floor(void) {
-    u32 cur_idx = 0, max_idx = 0, min_idx = 0, n;
+/* GPU-Floor-Plan — caller haelt gov->lock, schreibt nichts */
+static void gpu_floor_plan(struct k6a_gpu_work *w) {
+    u32 n;
     int i, best = -1, user_min;
 
-    if (!gov || !gov->enabled || !gov->legacy_mode) { gpu_floor_reset(); return; }
-    if (gov->state != K6A_GAMING || !gov->gpu_floor) { gpu_floor_reset(); return; }
+    w->action = K6A_W_NONE;
+    w->target = 0;
+    w->save_live = false;
+    w->ref = 0;
+    if (!gov->enabled || !gov->legacy_mode ||
+        gov->state != K6A_GAMING || !gov->gpu_floor) {
+        w->action = K6A_W_RELEASE;
+        return;
+    }
 
     n = gpu_table_locked();
     if (!n) return;
-    if (gpu_idx_read(&cur_idx, &max_idx, &min_idx))
-        return;
-
-    /* Min-Level des Users: solange wir pinnen, der gemerkte Wert,
-     * sonst das, was kgsl gerade meldet */
-    user_min = gov->gpu_floor_last >= 0 ? gov->gpu_floor_saved_min : (int)min_idx;
-
-    /* lowest level whose freq still satisfies the floor */
-    for (i = n - 1; i >= 0; i--)
+    for (i = (int)n - 1; i >= 0; i--)
         if (gov->gpu_freqs[i] >= gov->gpu_floor) { best = i; break; }
     if (best < 0) best = 0;   /* floor above the whole table: top level */
 
+    user_min = gov->gpu_floor_last >= 0 ? gov->gpu_floor_saved_min : gov->gpu_live_min;
+
     if (user_min <= best) {   /* user min already covers this */
-        gpu_floor_reset();
+        w->action = K6A_W_RELEASE;
         return;
     }
     if (best == gov->gpu_floor_last) {
         /* Floor steht: unsere Grenze oder eine strengere */
-        if ((int)min_idx <= best)
+        if (gov->gpu_live_min <= best)
             return;
-        pr_info_ratelimited("gpu floor idx %d was loosened externally (min_idx=%u), re-applying\n",
-                            best, min_idx);
+        pr_info_ratelimited("Build446: gpu floor idx %d was loosened externally (live_min=%d), re-applying\n",
+                            best, gov->gpu_live_min);
     } else if (gov->gpu_floor_last < 0) {
-        gov->gpu_floor_saved_min = user_min;   /* vor dem ersten Pin merken */
+        w->save_live = true;   /* vor dem ersten Pin merken (Commit-Readback) */
     }
+    w->action = K6A_W_APPLY;
+    w->target = best;
+    w->ref = (s32)gov->gpu_floor;
+}
 
-    if (!kgsl_k6a_set_min_level_idx((unsigned int)best)) {
-        gov->gpu_floor_last = best;
-        pr_info("Build389: gpu floor %uHz -> min idx %d (user min %d)\n",
-                gov->gpu_floor, best, user_min);
+/* GPU-Floor-Commit — KEIN gov->lock; kgsl device->mutex nur hier */
+static void gpu_floor_exec(const struct k6a_gpu_work *w, struct k6a_gpu_res *r) {
+    unsigned int restore;
+
+    memset(r, 0, sizeof(*r));
+    r->ok = 1;
+    if (w->action == K6A_W_NONE) return;
+    if (w->action == K6A_W_RELEASE) {
+        if (gov->gpu_floor_last < 0) return;
+        /* never leave kgsl pinned at a k6a-chosen floor; Build446:
+         * Live-Readback fuer den Restore ausserhalb des Locks */
+        if (gov->gpu_floor_saved_min < 0) {
+            if (gpu_idx_read(&r->live_cur, &r->live_max, &r->live_min))
+                return;   /* kgsl unavailable: retry next tick */
+            r->live_have = true;
+            restore = r->live_min;
+        } else
+            restore = (unsigned int)gov->gpu_floor_saved_min;
+        r->ok = !kgsl_k6a_set_min_level_idx(restore);
+        if (r->ok)
+            pr_info("Build446: gpu floor released (user min idx %d)\n", (int)restore);
+        return;
     }
+    if (!READ_ONCE(gov->enabled)) {   /* APPLY nach enable=0: der Store hat selbst released */
+        r->ok = 0;
+        return;
+    }
+    if (w->save_live) {
+        r->save_have = !gpu_idx_read(&r->live_cur, &r->live_max, &r->live_min);
+        if (r->save_have)
+            r->save_idx = r->live_min;
+    }
+    r->ok = !kgsl_k6a_set_min_level_idx((unsigned int)w->target);
+    r->live_have = !gpu_idx_read(&r->live_cur, &r->live_max, &r->live_min);
+}
+
+/* Latch — caller haelt gov->lock */
+static void gpu_floor_latch(const struct k6a_gpu_work *w, const struct k6a_gpu_res *r) {
+    if (w->action == K6A_W_NONE) return;
+    if (r->live_have)
+        gov->gpu_live_min = (int)r->live_min;
+    if (w->action == K6A_W_RELEASE) {
+        if (r->ok) {
+            gov->gpu_floor_last = -1;
+            gov->gpu_floor_saved_min = -1;
+        }
+        return;
+    }
+    if (r->ok) {
+        int user_min = w->save_live
+            ? (r->save_have ? (int)r->save_idx : -1)
+            : gov->gpu_floor_saved_min;
+
+        gov->gpu_floor_last = w->target;
+        if (w->save_live && r->save_have && gov->gpu_floor_saved_min < 0)
+            gov->gpu_floor_saved_min = (int)r->save_idx;
+        pr_info("Build446: gpu floor %uHz -> min idx %d (user min %d)\n",
+                (u32)w->ref, w->target, user_min);
+    }
+}
+
+/* sync-Variante fuer seltene Pfade (enable=0, exit) — unter dem Lock */
+static void gpu_floor_reset(void) {
+    const struct k6a_gpu_work w = { K6A_W_RELEASE, 0, false, 0 };
+    struct k6a_gpu_res r;
+
+    if (gov->gpu_floor_last < 0) return;
+    gpu_floor_exec(&w, &r);
+    gpu_floor_latch(&w, &r);
 }
 
 static void get_cd_bw_floors(u32 *gpubw, u32 *llcc) {
@@ -813,17 +960,65 @@ static void bw_apply(const char *name, u32 want, u32 *last, bool *changed) {
     *changed = true;
 }
 
-static void enforce_bw_floors(void) {
+/* BW-Floors-Plan — caller haelt gov->lock, schreibt nichts */
+static void bw_floors_plan(struct k6a_bw_work *w) {
+    u32 gpubw, llcc;
+
+    w->gpubw = -1;
+    w->llcc = -1;
+    if (!gov->enabled || !gov->legacy_mode) {
+        w->gpubw = 0;
+        w->llcc = 0;
+        return;
+    }
+    get_cd_bw_floors(&gpubw, &llcc);
+    if (gpubw != gov->bw_last_gpubw) w->gpubw = (int)gpubw;
+    if (llcc != gov->bw_last_llcc) w->llcc = (int)llcc;
+}
+
+/* BW-Floors-Commit — KEIN gov->lock; devfreq-Liste/df->lock nur hier */
+static void bw_floors_exec(const struct k6a_bw_work *w, struct k6a_bw_res *r) {
+    u32 cur = 0, mn = 0, mx = 0;
+
+    r->ok_gpubw = r->ok_llcc = 1;
+    if ((w->gpubw > 0 || w->llcc > 0) && !READ_ONCE(gov->enabled)) {
+        r->ok_gpubw = r->ok_llcc = 0;
+        return;   /* APPLY nach enable=0: der Store hat selbst released */
+    }
+    if (w->gpubw >= 0) {
+        if (k6a_devfreq_set_bw("gpubw", (u32)w->gpubw, 0)) {
+            pr_err_ratelimited("Build446: set_bw %s=%u failed\n", "gpubw", (u32)w->gpubw);
+            r->ok_gpubw = 0;
+        } else if (k6a_devfreq_get_bw("gpubw", &cur, &mn, &mx) || mn != (u32)w->gpubw) {
+            pr_err_ratelimited("Build446: set_bw %s=%u not reflected (min=%u)\n",
+                               "gpubw", (u32)w->gpubw, mn);
+            r->ok_gpubw = 0;
+        }
+    }
+    if (w->llcc >= 0) {
+        if (k6a_devfreq_set_bw("cpu-llcc-ddr-bw", (u32)w->llcc, 0)) {
+            pr_err_ratelimited("Build446: set_bw %s=%u failed\n", "cpu-llcc-ddr-bw", (u32)w->llcc);
+            r->ok_llcc = 0;
+        } else if (k6a_devfreq_get_bw("cpu-llcc-ddr-bw", &cur, &mn, &mx) || mn != (u32)w->llcc) {
+            pr_err_ratelimited("Build446: set_bw %s=%u not reflected (min=%u)\n",
+                               "cpu-llcc-ddr-bw", (u32)w->llcc, mn);
+            r->ok_llcc = 0;
+        }
+    }
+}
+
+/* Latch — caller haelt gov->lock */
+static void bw_floors_latch(const struct k6a_bw_work *w, const struct k6a_bw_res *r) {
     u32 gpubw, llcc;
     bool changed = false;
 
-    if (!gov || !gov->enabled || !gov->legacy_mode) { reset_bw_floors(); return; }
-    get_cd_bw_floors(&gpubw, &llcc);
-    bw_apply("gpubw", gpubw, &gov->bw_last_gpubw, &changed);
-    bw_apply("cpu-llcc-ddr-bw", llcc, &gov->bw_last_llcc, &changed);
-    if (changed)
-        pr_info("Build345: bw floors gpubw=%u llcc=%u state=%u\n",
+    if (w->gpubw >= 0 && r->ok_gpubw) { gov->bw_last_gpubw = (u32)w->gpubw; changed = true; }
+    if (w->llcc >= 0 && r->ok_llcc) { gov->bw_last_llcc = (u32)w->llcc; changed = true; }
+    if (changed) {
+        get_cd_bw_floors(&gpubw, &llcc);
+        pr_info("Build446: bw floors gpubw=%u llcc=%u state=%u\n",
                 gpubw, llcc, gov->state);
+    }
 }
 
 static void reset_bw_floors(void) {
@@ -840,7 +1035,10 @@ static void reset_bw_floors(void) {
         pr_info("Build345: bw floors released\n");
 }
 
-static void apply_limits(void) {
+/* Plan — caller haelt gov->lock; schreibt nichts. Der seltene Komatallback
+ * (!legacy) bleibt synchron unter dem Lock, wie vor Build446. */
+static void plan_limits(struct k6a_limits_work *w) {
+    w->any = false;
     if (!gov) return;
     if (!gov->legacy_mode) {
         if (gov->enforced_max) {
@@ -853,10 +1051,40 @@ static void apply_limits(void) {
         reset_bw_floors();
         return;
     }
+    w->any = true;
     enforce_max_freq();
-    enforce_gpu_cap();
-    enforce_gpu_floor();
-    enforce_bw_floors();
+    gpu_cap_plan(&w->gpu);
+    gpu_floor_plan(&w->floor);
+    bw_floors_plan(&w->bw);
+}
+
+/* Build446: RELEASE-Self-Heal — plant die Freigabe fuer den Tick, falls ein
+ * Commit hinter einem enable=0-Write nachlaeuft (Mid-Commit-Race). enable_store
+ * released normalerweise selbst unter dem Lock; dies ist der Fallback. */
+static void plan_release(struct k6a_limits_work *w) {
+    w->gpu.action = K6A_W_RELEASE;
+    w->floor.action = K6A_W_RELEASE;
+    w->bw.gpubw = 0;
+    w->bw.llcc = 0;
+    w->any = gov->gpu_last_idx >= 0 || gov->gpu_floor_last >= 0 ||
+             (gov->bw_last_gpubw != 0 && gov->bw_last_gpubw != ~0u) ||
+             (gov->bw_last_llcc != 0 && gov->bw_last_llcc != ~0u);
+}
+
+/* Commit — OHNE gov->lock; kgsl device->mutex / devfreq-Locks nur hier */
+static void commit_limits(const struct k6a_limits_work *w, struct k6a_limits_res *r) {
+    if (!w->any) return;
+    gpu_cap_exec(&w->gpu, &r->gpu);
+    gpu_floor_exec(&w->floor, &r->floor);
+    bw_floors_exec(&w->bw, &r->bw);
+}
+
+/* Latch — caller haelt gov->lock */
+static void latch_limits(const struct k6a_limits_work *w, const struct k6a_limits_res *r) {
+    if (!w->any) return;
+    gpu_cap_latch(&w->gpu, &r->gpu);
+    gpu_floor_latch(&w->floor, &r->floor);
+    bw_floors_latch(&w->bw, &r->bw);
 }
 
 /* ── Battery Guard ─────────────────────────────────────────────── */
@@ -1025,6 +1253,8 @@ static int gov_thread(void *data) {
         bool bt_ok = false;
         char vsbuf[sizeof(gov->vendor_sconfig)];
         char vlbuf[sizeof(gov->vendor_cpu_limits)];
+        struct k6a_limits_work lw;
+        struct k6a_limits_res lr;
 
         /* Build408: filp_open laeuft ausserhalb von gov->lock — unter dem
          * Lock blockiert File-I/O sysfs-Handler fuer ms. Snapshot-Entscheidungen
@@ -1076,7 +1306,9 @@ static int gov_thread(void *data) {
                 memcpy(gov->vendor_sconfig, vsbuf, sizeof(gov->vendor_sconfig));
                 memcpy(gov->vendor_cpu_limits, vlbuf, sizeof(gov->vendor_cpu_limits));
             }
-            apply_limits();
+            plan_limits(&lw);
+        } else {
+            plan_release(&lw);   /* Build446: RELEASE-Self-Heal */
         }
         gov->ticks++;
         {
@@ -1108,6 +1340,15 @@ static int gov_thread(void *data) {
             sleep_ms = sm;
         }
         mutex_unlock(&gov->lock);
+
+        /* Build446: KGSL-/Devfreq-I/O ausserhalb von gov->lock; Latch danach
+         * unter kurzem Re-Lock */
+        if (lw.any) {
+            commit_limits(&lw, &lr);
+            mutex_lock(&gov->lock);
+            latch_limits(&lw, &lr);
+            mutex_unlock(&gov->lock);
+        }
 
         /* weckbar durch kthread_stop(); Muster ist race-frei */
         set_current_state(TASK_INTERRUPTIBLE);
@@ -1756,6 +1997,8 @@ static int __init k6a_gov_init(void) {
     gov->gpu_floor = 0;
     gov->gpu_floor_last = -1;
     gov->gpu_floor_saved_min = -1;
+    gov->gpu_live_max = -1;
+    gov->gpu_live_min = -1;
     gov->batt_temp_c = -1;
     gov->bt_live = 0;
     gov->bw_last_gpubw = ~0u;
