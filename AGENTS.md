@@ -2154,3 +2154,31 @@ wie er ist**, keine fürsche Kernel-Arbeit nötig. Konsequenzen/Items:
 - **Verblieben (Roadmap)**: adaptive GAMING-Polling, webui-Backoff, Micro-
   Optimierungen, CI-Hygiene-Posten (paths-Filter Status unklar — Doku-Push feuerte
   keinen Build, Code-Push schon; pruefen ob AGENTS.md-Ignore existiert).
+
+## Build 452-453 Scope (adaptive GAMING-Polling + webui-Backoff, 2026-11-12)
+- **Adaptive GAMING-Polling (`52917a18e`, Run 452-Grün, Release build453)**:
+  Build402-far_cool-Maschinerie (slow-poll-Latch, slow_base, +3K-Steig-Reset,
+  1000ms-Floor — gab es nur fuer OFF/BATTERY-far) um GAMING-far erweitert:
+  `(state==GAMING && temp+5 < cd_l2_temp)` — gleiches Margin-Shape wie der
+  bewiesene BATTERY-Fall. GAMING weit unterm L2-Schwellwert pollt jetzt 1 Hz
+  statt 4 Hz; der Steig-Reset holt die schnelle Rate zurueck, sobald die Temp
+  anfaengt zu steigen. 5-K-Luft = mathematische Garantie: eine Schwellwert-
+  Kreuzung ohne vorherigen Reset ist unmoeglich (Reset feuert bei
+  recent_min+3). CD-States bleiben IMMER bei poll_ms (dwell_out/Escape-Latenz).
+  Worst-Case-Latenz: Flat-Soak innerhalb der 5-K-Bande (<=91 °C bei L2=96)
+  — dort ist Polling schon schnell. Unterhalb: 3K-Reset innerhalb 1 slow-Tick
+  (1 s) laesst >=2 s Reserve bei 0,5-K/s-Rampen. `poll_adaptive` bleibt
+  default 1 (Kick-off-Toggle). Verifizierung nach Flash: `ticks=`-Delta
+  (10 s) im kuehlen GAMING ≈ 1/s statt ≈ 4/s, nahe Schwellen/CD → 4/s.
+- **Webui-Backoff (k6a-ctl v1.6.3, `b28d01d`)**: fetchData alle 2 s sichtbar,
+  10 s im hidden-Tab (`document.visibilitychange` + dynamisches Interval).
+  Spart nc-Traffic + Controller-CPU im Idle. Gate OK 0 warns, ZIP 53 907 B.
+- **CI-Hygiene: bereits sauber, nichts zu tun** — build-kernel.yml hat
+  paths-ignore `**.md`/`docs/**` (Doku-Pushs feuern keinen Build — bestaetigt
+  durch die stille 1e6cb235f/a106b1635-Pushs), host-test.yml paths
+  k6a_gov/**+tools/**, lockdep.yml paths drivers/thermal|gpu-msm|locking.
+- **Micro-Optimierungen: kein konkreter Posten identifiziert** — Kernel-Shape
+  nach Build446/450/452 gut; Item bewusst deferred (keine erfundene Arbeit).
+- **Roadmap danach leer**: alle gebuchten Posten abgearbeitet (KGSL-I/O,
+  status_compact, adaptive Polling, webui-Backoff, CI-Hygiene geklaert,
+  Micro-Ops deferred). Naechste Kernel-Runde = neue Scope-Entscheidung.
