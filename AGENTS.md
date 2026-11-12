@@ -1,10 +1,19 @@
 # Kernel Build Status
 
-## Current State (Stand 2026-11-11, Build 445)
-- **Repo**: `vandalsquad187/BadazzKernel` branch `main` @ **`784a55541`** (Kernel-Optimierungen + CI-Lockdep-Fix).
-  Kette: build441 `831efce8a` (NoMount) -> `456be5f7d` (k6a_gov: GPU-OPP-Cache + kgsl_k6a_get_idx-Export +
-  freq_worker no-giveup + psy-Cache) -> `784a55541` (CI lockdep: NoMount-Step nachgezogen).
-  Release **v4.14.369-badazz-build445** (Run 43099154854) — geflasht + verifiziert 2026-11-11.
+## Current State (Stand 2026-11-12, Build 449)
+- **Repo**: `vandalsquad187/BadazzKernel` branch `main` @ **`cd02a1f4e`** (Plan/Commit/Latch + gpu_idx_read-Fix).
+  Kette: build441 `831efce8a` (NoMount) -> `456be5f7d` (GPU-OPP-Cache + kgsl_k6a_get_idx + psy-Cache)
+  -> `784a55541` (CI lockdep: NoMount-Step) -> `5bdd119ac` (Build446: Plan/Commit/Latch — KGSL/Devfreq-I/O
+  aus `gov->lock`) -> `cd02a1f4e` (gpu_idx_read-Return-Value-Bugfix, r8b-Fund).
+  Releases **v4.14.369-badazz-build447** (Run 43127438219) und **v4.14.369-badazz-build449** (Run
+  43255030399) — beide geflasht; build449 live verifiziert 2026-11-12 (`git_hash=cd02a1f4`, ko 68 608 B).
+- **KGSL-I/O aus `gov->lock` (Build446, `5bdd119ac`) — implementiert + in vivo bewiesen (r8c)**:
+  Plan/Commit/Latch-Muster: alle KGSL/Devfreq-Schreib-Readbacks laufen im Commit ausserhalb von
+  `gov->lock` (Work-Structs `k6a_gpu_work/k6a_gpu_res/k6a_bw_work/k6a_bw_res/k6a_limits_work/.any`),
+  Plan trifft Entscheidungen mit dem 1-Tick-Snapshot (`gpu_live_max/min` im Struct, Init -1),
+  latch überträgt Readbacks zurück, `gpu_reset`/`gpu_floor_reset` = sync-Wrapper (enable=0/exit/
+  Komatallback), `plan_release` = RELEASE-Self-Heal bei enabled=0-Ticks. Lockdep-Run grün
+  (43125320613). Details unten im Scope-Abschnitt Build 446-449.
 - **Kernel-Optimierungen (Build 445, `456be5f7d`, live bewiesen am Geraet)**:
   1. **GPU-OPP-Cache**: `gpu_freqs[]`/`gpu_num` im Struct, gefuellt im freq_init_worker
      (einmaliger Log `gpu levels=8 cur_idx=4` beim Fill, danach 0 weitere); lazy
@@ -29,7 +38,7 @@
   1222s->1907s ~11:25 pid 6074 hit=318), **miss=0 in beiden**, beide sauber `gaming>off`,
   **kein Residual** (pidof leer). Kernel-Temp-Peak 75, ctl-Peak 88 (Fenster 2 heisser).
   Caveat: `badazz_safe` setzt `gpu_cap=0` (kein Cap) -> OPP-Enforce-Pfad kaum belastet;
-  hang-watch gueltig, Enforce-Stresstest (Cap aktiv) steht noch aus.
+  hang-watch gueltig, Enforce-Stresstest = **erledigt via r8b/r8c (siehe Build-446-449-Abschnitt unten)**.
 - **Hang-Serie**: r4 HANG -> r4b/r5a/r5b/r6/r7 = **5 Folgerunden hangfrei**.
 - **k6a-ctl v1.6.1 released + deployed (2026-11-11)**: k6a-ctl `684b535` — P0-Fixe:
   silver-hispeed aus SILVER-Tabelle (`silver_at_pct 90`, vorher gold_at_pct 90 ≈ 2,07 GHz
@@ -2058,3 +2067,62 @@ wie er ist**, keine fürsche Kernel-Arbeit nötig. Konsequenzen/Items:
   (`bt=XX` != -1 im status, eine `Build434: bt live`-Zeile in
   dmesg, k6a-ctl v1.5.4 Notbrems-Akku-Arm scharf); danach
   Issue #3 schließen.
+
+## Build 446-449 Scope (Plan/Commit/Latch + gpu_idx_read-Fix, 2026-11-12)
+- **Build446 (`5bdd119ac`, Release build447, Run 43127438219)** — KGSL/Devfreq-I/O aus
+  `gov->lock` via Plan/Commit/Latch:
+  1. Struct: `+s32 gpu_live_max, gpu_live_min` (Init -1) = 1-Tick-Snapshot der kgsl-Indizes.
+  2. Neue Work-Structs `k6a_gpu_work/k6a_gpu_res`, `k6a_bw_work/k6a_bw_res`,
+     `k6a_limits_work` (mit `.any`) / `k6a_limits_res`; Defines `K6A_W_NONE/RELEASE/APPLY`;
+     Header-Kommentar "── Apply Limits (Build446: Plan/Commit/Latch)".
+  3. Trios `gpu_cap_plan/exec/latch`, `gpu_floor_plan/exec/latch`,
+     `bw_floors_plan/exec/latch`; `plan_limits` (Sync-Plan unter Lock für !legacy-Komatallback),
+     **`plan_release`** (RELEASE-Self-Heal bei enabled=0-Ticks), `commit_limits` (ohne Lock),
+     `latch_limits` (Re-Lock). Exec-Guards: RELEASE läuft immer, APPLY nur bei
+     `READ_ONCE(gov->enabled)`. `gpu_reset`/`gpu_floor_reset` = sync-Wrapper (exec+latch) für
+     enable=0/exit/!legacy-Komatallback unter Lock.
+  4. `gov_thread`: plan unter Lock -> unlock -> commit -> Re-Lock -> latch.
+  5. Checks: clang -fsyntax-only rc=0 (Warnset byte-identisch zum Pristine), Host-Test 23/23,
+     CI 3 Runs grün (Host 43125320571, Build 43125320510, **Lockdep 43125320613** = Restruktur
+     lockdep-sauber). ko 68 608 B (+1,9 KB).
+- **r8/r8b (Enforce-Stresstest, Schwellen 65/70/75/60 + gpu_cap=585)**:
+  1. **k6a-ctl-Clobber-Lektion**: `_enter_gaming()` (bin/k6a-controller :614+) läuft
+     `_apply_caps_gaming` -> **`_apply_cd_thresholds`** (schreibt Config-CDT via gov_write,
+     :456; Idempotenz-Check `[ "$cur" = "$CDT" ]`) -> `gov_write enable 1`. Kernel-seitig
+     gesetzte Test-Schwellen werden beim GAMING-Entry vom Config-Wert überschrieben. Fix-Wege:
+     settings.conf-Edit (`/data/adb/modules/k6a-ctl/config/settings.conf`, Key `cd_thresholds=`)
+     + Controller-Restart, ODER Schwellen nach dem GAMING-Entry direkt schreiben. Config wird
+     nur bei cfg_load gelesen -> Restart nötig. **TERM-Handler des Controllers schreibt beim
+     Cleanup die alten Schwellen zurück** (17:23:57-Fund); Watchdog-Respawn dauert ~2-4 min
+     (`ps` zeigt Scripte als `sh` — pidfile-Check nutzen). `cd_thresholds`-Node ist LESBAR
+     (Direct-Verify), Kernel-`status` hat KEINE cd_l*_temp-Keys. Batch-Fallback: `printf` bricht
+     bei `%`-Zeichen -> Batch-Datei + `cat file | su`.
+  2. **r8 (leere Runde, kein Kernel-Bug)**: 22 min enabled, 0 CD-Transitions — `_enter_gaming`
+     clobberte die Schwellen auf 96/99/102/93 (Config), Kernel-Peak 74 < 96 -> nie CD. Temp-Pfad
+     gesund (temp=74 src=1 valid=1, bt=39, hash_verified=1).
+  3. **r8b (Storm, Root-Cause-Daten)**: 22,2 min (530 Samples), 44 throttle_events,
+     L2->L3->L4-Zyklen, Gold-Caps sauber (enforce_max_freq-Keep unter Lock funktioniert).
+     **Storm**: `Build446: gpu cap` = 6014 Applies (~1/256ms-Tick), `was lowered externally
+     (live_max=-1)` = 2003 (pr_info_ratelimited ~1,5/s), 1 released, bw floors 86x (0 fails),
+     0 Oops. Funktional korrekt (idempotente Re-Applies hielten den Cap), aber Readback
+     konvergierte nie.
+- **gpu_idx_read-Return-Value-Bug (`cd02a1f4e`, Release build449, Run 43255030399)**:
+  `kgsl_k6a_get_idx()` gibt bei Erfolg die **Anzahl der Einträge >= 0** (hier 7) zurück,
+  `< 0` nur bei Fehler — `gpu_idx_read` reichte roh durch, alle Caller behandelten
+  **jeden Wert != 0 als Fehler** (`!gpu_idx_read()` -> `!7 == 0` -> `live_have=false` auf
+  Erfolg). **Der Bug war schon im Pristine build445 (`456be5f7d`) drin** —
+  enforce_gpu_cap/enforce_gpu_floor brachen direkt nach dem Index-Read ab -> build445s
+  GPU-Enforcement war still toter Code (surfaced nie: r7 gpu_cap=0, r8 kein CD).
+  Fix: `return kgsl_k6a_get_idx(...) < 0;` (0=ok/1=fail), Caller unverändert. Host-Test
+  23/23, CI grün. Post-Flash-Verify build449: banner, `git_hash=cd02a1f4`, ko 68 608 B,
+  NoMount `22 (691)`, 0 Oops, P7-Muster exakt.
+- **r8c (Acceptance, Fix bewiesen)**: Logger dieden beim Flash-Reboot (Muster: Logger
+  sterben an Reboot) — Auswertung via main-dmesg-Ring (enthält nur r8c) + kernel-hist:
+  **54 Applies ≈ 1 pro State-Change** (27 throttle_events + Level-Wechsel), **0x
+  "was lowered externally"**, 1 Release sauber (`gpu_last_idx=-1` am Ende), bw floors 53x
+  (0 fails/0 not-reflected), temp_peak 66, hist `off>gaming→cd_l2→cd_l3→cd_l4` mit Zyklen,
+  0 Oops. Readback konvergiert (`gpu_live_max` gelatcht -> Plan schweigt) — Re-Apply-Storm
+  weg, Roadmap-Posten **KGSL-I/O aus dem Lock: abgeschlossen**.
+- **Verblieben (Roadmap)**: status_compact, adaptive GAMING-Polling, webui-Backoff,
+  Micro-Optimierungen, CI-Hygiene-Posten. Details: `~/tmp/k6a-ctl-buglog.md` r5/r6/r7 +
+  r8/r8b/r8c-Phase (Build-446-449-Abschnitt).
