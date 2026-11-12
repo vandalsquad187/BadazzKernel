@@ -30,7 +30,7 @@ extern int kgsl_k6a_set_min_level_idx(unsigned int level);
 extern int k6a_devfreq_get_bw(const char *name, u32 *cur, u32 *min, u32 *max);
 extern int k6a_devfreq_set_bw(const char *name, u32 min, u32 max);
 
-#define K6A_GOV_VERSION       "1.7.2"
+#define K6A_GOV_VERSION       "1.7.3"
 #define K6A_GOV_KTHREAD_SLEEP_MS   250
 #define K6A_GOV_MAX_FREQS     32
 #define K6A_HIST_N            16
@@ -1494,9 +1494,8 @@ static ssize_t status_show(struct kobject *k, struct kobj_attribute *a, char *b)
     pid_t game_pid;
     u32 bw_floors_gpubw[3], bw_floors_llcc[3];
     u32 bwc, bwmn, bwmx;
+    u32 l2t, l3t, l4t, rec;
     size_t len;
-    int i, hist_len, hist_pos;
-    struct k6a_hist_entry hist[K6A_HIST_N];
 
     {
         int gcpu = find_gold_cpu_cached();
@@ -1543,9 +1542,10 @@ static ssize_t status_show(struct kobject *k, struct kobj_attribute *a, char *b)
     bw_floors_llcc[0] = gov->cd_l2_bw_llcc;
     bw_floors_llcc[1] = gov->cd_l3_bw_llcc;
     bw_floors_llcc[2] = gov->cd_l4_bw_llcc;
-    hist_len = gov->hist_len;
-    hist_pos = gov->hist_pos;
-    memcpy(hist, gov->hist, sizeof(hist));
+    l2t = gov->cd_l2_temp;
+    l3t = gov->cd_l3_temp;
+    l4t = gov->cd_l4_temp;
+    rec = gov->cd_recover;
     mutex_unlock(&gov->lock);
 
     if (si > K6A_CD_L4) si = K6A_OFF;
@@ -1622,10 +1622,15 @@ static ssize_t status_show(struct kobject *k, struct kobj_attribute *a, char *b)
     len += scnprintf(b + len, PAGE_SIZE - len,
         "temp_peak=%u\n"
         "thresholds_source=%s\n"
+        "cd_l2_temp=%u\n"
+        "cd_l3_temp=%u\n"
+        "cd_l4_temp=%u\n"
+        "cd_recover=%u\n"
         "vendor_sconfig=%s\n"
         "vendor_cpu_limits=%s\n",
         temp_peak,
         thresholds_user ? "user" : "profile",
+        l2t, l3t, l4t, rec,
         vendor_sconfig,
         vendor_cpu_limits);
 
@@ -1634,8 +1639,28 @@ static ssize_t status_show(struct kobject *k, struct kobj_attribute *a, char *b)
         "residency_ms=off:%llu,gaming:%llu,cd_l2:%llu,cd_l3:%llu,cd_l4:%llu\n",
         gold_cap_now, res_ms[0], res_ms[1], res_ms[2], res_ms[3], res_ms[4]);
 
-    /* KB7: throttle history, oldest first */
-    len += scnprintf(b + len, PAGE_SIZE - len, "hist=");
+    /* Build450: hist ausgelagert in eigenen Node /sys/kernel/k6a_gov/hist —
+     * status ist damit klein und fix-gross (1s-Controller-Heartbeat + 2s-Webui
+     * lesen es staendig); der Ring kann nach langen Sessions sonst
+     * ~500 B anhaengen. Diagnose-Keys cd_l*_temp/cd_recover dafuer neu in
+     * status (r8-Fund: Schwellen mussten bisher ueber cd_thresholds
+     * nachgelesen werden). */
+    return len;
+}
+
+static ssize_t hist_show(struct kobject *k, struct kobj_attribute *a, char *b) {
+    static const char *state_names[] = {"off","gaming","cd_l2","cd_l3","cd_l4"};
+    struct k6a_hist_entry hist[K6A_HIST_N];
+    int hist_len, hist_pos;
+    size_t len = 0;
+    int i;
+
+    mutex_lock(&gov->lock);
+    hist_len = gov->hist_len;
+    hist_pos = gov->hist_pos;
+    memcpy(hist, gov->hist, sizeof(hist));
+    mutex_unlock(&gov->lock);
+
     for (i = 0; i < hist_len && len < PAGE_SIZE - 48; i++) {
         struct k6a_hist_entry *e;
         unsigned int hi = (hist_pos + K6A_HIST_N - hist_len + i)
@@ -1916,6 +1941,7 @@ static ssize_t stats_reset_store(struct kobject *k, struct kobj_attribute *a, co
 static struct kobj_attribute attr_enable      = __ATTR_RW(enable);
 static struct kobj_attribute attr_profile     = __ATTR_RW(profile);
 static struct kobj_attribute attr_status      = __ATTR_RO(status);
+static struct kobj_attribute attr_hist        = __ATTR_RO(hist);
 static struct kobj_attribute attr_pid         = __ATTR_RW(game_pid);
 static struct kobj_attribute attr_legacy      = __ATTR_RW(legacy);
 static struct kobj_attribute attr_hysteresis  = __ATTR_RW(hysteresis);
@@ -1933,6 +1959,7 @@ static struct attribute *gov_attrs[] = {
     &attr_enable.attr,
     &attr_profile.attr,
     &attr_status.attr,
+    &attr_hist.attr,
     &attr_pid.attr,
     &attr_legacy.attr,
     &attr_hysteresis.attr,
