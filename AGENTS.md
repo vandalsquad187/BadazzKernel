@@ -2126,3 +2126,31 @@ wie er ist**, keine fürsche Kernel-Arbeit nötig. Konsequenzen/Items:
 - **Verblieben (Roadmap)**: status_compact, adaptive GAMING-Polling, webui-Backoff,
   Micro-Optimierungen, CI-Hygiene-Posten. Details: `~/tmp/k6a-ctl-buglog.md` r5/r6/r7 +
   r8/r8b/r8c-Phase (Build-446-449-Abschnitt).
+
+## Build 450-451 Scope (status_compact, 2026-11-12)
+- **status_compact (`d0fdae972`, k6a_gov v1.7.2 -> v1.7.3, Release build451, Run
+  43272556530) — geflasht + verifiziert 2026-11-12**:
+  1. hist aus `status` ausgelagert in eigenen Node `/sys/kernel/k6a_gov/hist`
+     (gleiche Render-Semantik: ms-since-insmod:temp:from>to, aeltester zuerst,
+     leer ohne Transitions; from/to > K6A_CD_L4 skip wie vorher). status ist damit
+     klein/fix-gross (1s-Controller-Heartbeat + 2s-Webui lesen es staendig).
+  2. status hat die r8-Diagnose-Gap-Keys neu: `cd_l2_temp/cd_l3_temp/cd_l4_temp/
+     cd_recover` (Capture unter gov->lock, neben thresholds_source). `cd_thresholds`-
+     Node bleibt die 7-Werte-Schreib-Schnittstelle.
+  3. k6a-ctl **v1.6.2** (`fd5f25b`, Gate OK 0 warns, ZIP 53 681 B, Release gepusht):
+     hist-Seed beim Controller-Start aus dem Node (roh-cat + Guard gegen r()-"0"-
+     Fallback), **eigener erster hist-Eintrag ohne Kernel-Seed** (Tick-Logic:
+     leeres _HIST + Transition -> Eigen-Entry statt nur Kernel-Seed-Abhaengigkeit);
+     alter Kernel (hist= in status) bleibt via _SHIST-Seed abgedeckt (beide Richtungen
+     kompatibel). Start-Banner-Fallback v1.6.1 -> v1.6.2 (c0b8a81-Trap-Muster).
+     WebUI-Hist-Tile zeigt jetzt wall-clock-Epochen (vorher: Kernel-Seed-Rows
+     ms-falsch-skaliert = 1970er-Zeiten, bestehendes kosmetisches Muster).
+  4. Verify am Geraet: banner `build451-aosp`, `git_hash=d0fdae97`, ko 69 384 B,
+     NoMount 22 (691), 0 Oops, status version=1.7.3 + cd_l*_temp-Keys, hist= aus
+     status raus (0 Treffer), hist-Node live (`40113:57:off>gaming`), Controller
+     v1.6.2-Zyklus, `gov_hist=` mit Epoch-Timestamps = eigener-Erster-Eintrag-Pfad
+     bewiesen. Kein Authoring-Log-Marker (Feature ohne neue Logzeilen), Comment-
+     Marker `Build450:`.
+- **Verblieben (Roadmap)**: adaptive GAMING-Polling, webui-Backoff, Micro-
+  Optimierungen, CI-Hygiene-Posten (paths-Filter Status unklar — Doku-Push feuerte
+  keinen Build, Code-Push schon; pruefen ob AGENTS.md-Ignore existiert).
