@@ -1323,9 +1323,17 @@ static int gov_thread(void *data) {
                 /* Build402: OFF / BATTERY weit unter den Schwellen duerfen
                  * langsam pollen; steigt die Temp oder naht eine Aktion,
                  * sofort wieder benutzer-poll_ms */
+                /* Build452: GAMING auch — weit unterm L2-Schwellwert (>=5 K
+                 * Luft) ist kein State-Wechsel moeglich, die +3K-Steig-Reset-
+                 * Logik holt die schnelle Rate zurueck sobald die Temp
+                 * anfaengt zu steigen (die 5-K-Luft verhindern eine
+                 * Schwellwert-Kreuzung ohne vorherigen Reset). CD-States
+                 * bleiben immer bei poll_ms — dwell_out/Escape-Latenz. */
                 bool far_cool = (gov->state == K6A_OFF) ||
                     (gov->profile == K6A_PROFILE_BATTERY &&
                      !gov->batt_latched &&
+                     (s32)gov->temp_celsius + 5 < (s32)gov->cd_l2_temp) ||
+                    (gov->state == K6A_GAMING &&
                      (s32)gov->temp_celsius + 5 < (s32)gov->cd_l2_temp);
                 if (!far_cool)
                     gov->slow_poll = false;
