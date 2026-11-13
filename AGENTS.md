@@ -2202,3 +2202,18 @@ wie er ist**, keine fürsche Kernel-Arbeit nötig. Konsequenzen/Items:
   k6a_gov-KASAN-Check (Workflow-Config-Tweak).
 - **r9 (heute Abend) steht aus**: adaptive slow-poll × CD-Interplay verifizieren
   (ticks-Delta-Muster, L2-Entry-Latenz, L3↔L4-Flip-Rate als r10-Damping-Basis).
+
+## r9/r9b (2026-11-13, config-only Kalibrierung — Vendor-Cliff-Fund)
+- **r9-Fund**: Default-Schwellen 96/99/102/93 sind für die KB8-Temp-Quelle
+  (2nd-highest der 4 Gold-CPU-Zonen) im echten Gaming NICHT erreichbar genug
+  (r9-Peak 87) → Stack passiv (0 throttle_events), Vendor-thermal-engine
+  drosselt selbst (70→16 fps-Bounce, teils unspielbar). Der Design-Intent
+  (präventive GPU-Caps vor der Vendor-Engine) braucht kernel-sensor-gerechte
+  Schwellen.
+- **Fix = settings.conf-Kalibrierung** (65/70/75/60, r8c-bewiesen, User-approved)
+  + Controller-Restart — kein Kernel-Flash. r9b: Peak 77, GPU-Zonen 70.6/67.4,
+  Vendor nur tp=2/3 mild, 109 throttle_events, externally=0, 0 Oops, User
+  "angenehmer" ✓. thresholds_source=user.
+- gpu_caps-Node beim Custom-Profil: 800/565/430 (L3=565 lvl2, L4=430 lvl3).
+- Offen/Tuning: L2↔L3-Flip-Damping (falls bemerkt), kalibrierte Defaults in
+  ctl-Template + kernel profiles[] (nächste Kernel-Runde), KASAN ohne qcacld.
