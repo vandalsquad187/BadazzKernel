@@ -30,7 +30,7 @@ extern int kgsl_k6a_set_min_level_idx(unsigned int level);
 extern int k6a_devfreq_get_bw(const char *name, u32 *cur, u32 *min, u32 *max);
 extern int k6a_devfreq_set_bw(const char *name, u32 min, u32 max);
 
-#define K6A_GOV_VERSION       "1.7.3"
+#define K6A_GOV_VERSION       "1.7.4"
 #define K6A_GOV_KTHREAD_SLEEP_MS   250
 #define K6A_GOV_MAX_FREQS     32
 #define K6A_HIST_N            16
@@ -57,6 +57,7 @@ struct k6a_gov {
     u8 temp_src;
     bool temp_valid;
     bool temp_warned;
+    u32 invalid_ticks;     /* Build454: aufeinanderfolgende Ticks ohne Temp-Quelle */
     u32 profile;
     bool thresholds_user;
     char vendor_sconfig[16];
@@ -130,6 +131,7 @@ struct k6a_gov {
     struct delayed_work freq_init_work;
     int freq_init_retries;
     bool freq_init_warned;
+    bool zone_init_logged; /* Build454: Zonen-Spiegel einmalig ins Log */
 };
 
 static struct k6a_gov *gov;
@@ -256,6 +258,24 @@ static void freq_init_worker(struct work_struct *work) {
         pr_info("Build345: gold cluster cpu %d related=%*pbl freqs=%u\n",
                 gold_cpu, cpumask_pr_args(policy->related_cpus), n);
         pr_info("freq tables loaded: Gold=%u\n", n);
+        /* Build454: alle Temp-Quellen einmalig mit Typ spiegeln — eine
+         * Firmware-Aenderung an den Namen sieht man dann in der ersten dmesg,
+         * nicht erst am Symptom. */
+        if (!g->zone_init_logged) {
+            static const char *zn[] = {
+                "cpu-1-0-usr", "cpu-1-1-usr", "cpu-1-2-usr", "cpu-1-3-usr",
+                "cpu-0-0-usr", "xo-therm", "soc-therm", "thermal_zone0"
+            };
+            unsigned int zi;
+            for (zi = 0; zi < ARRAY_SIZE(zn); zi++) {
+                struct thermal_zone_device *tz = thermal_zone_get_zone_by_name(zn[zi]);
+                if (IS_ERR(tz))
+                    pr_info("Build454: zone %s: not found (yet)\n", zn[zi]);
+                else
+                    pr_info("Build454: zone %s: id=%u type=%s\n", zn[zi], tz->id, tz->type);
+            }
+            g->zone_init_logged = true;
+        }
     }
     if (policy) cpufreq_cpu_put(policy);
 
@@ -374,6 +394,15 @@ static void enforce_max_freq(void) {
 
     cpu = find_gold_cpu_cached();
     p = cpu >= 0 ? cpufreq_cpu_get(cpu) : NULL;
+    /* Build454: cached CPU kann offline sein (Hotplug) — dann frisch aufloesen,
+     * sonst sieht der Readback p==NULL, seen=0 und schweigt still. */
+    if (!p && cpu >= 0) {
+        cpu = find_gold_cpu();
+        if (cpu >= 0) {
+            gov->gold_cpu = cpu;
+            p = cpufreq_cpu_get(cpu);
+        }
+    }
     if (p) {
         seen = p->max;
         hard = p->cpuinfo.max_freq;
@@ -1245,6 +1274,21 @@ static void read_one_node(const char *path, char *dst, size_t cap) {
     snprintf(dst, cap, "%s", len ? buf : "none");
 }
 
+/* Build454: Sensor-Tod = Eskalations-fail-open — die State Machine haelt den
+ * letzten State, und war das GAMING, kann kein CD-Einstieg mehr feuern waehrend
+ * das Geraet heizt. Nach 10 aufeinanderfolgenden invalid Ticks (2,5 s bei
+ * poll_ms=250) wird deshalb CD_L2 erzwungen; nur der ungedrosselte GAMING-Fall
+ * ist gefaehrlich, ein gehaltener CD_L2/L3/L4 ist schon konservativ. Recovery
+ * ist automatisch: sobald eine Quelle wieder liefert, nimmt die State Machine
+ * den CD_L2-Zustand normal auf. Caller haelt gov->lock. */
+static void sensor_failsafe_tick(void) {
+    gov->invalid_ticks++;
+    if (gov->invalid_ticks < 10 || gov->state != K6A_GAMING) return;
+    pr_warn("Build454: sensor fail-safe after %u invalid ticks, forcing CD_L2\n",
+            gov->invalid_ticks);
+    set_state_locked(K6A_CD_L2);
+}
+
 static int gov_thread(void *data) {
     while (!kthread_should_stop()) {
         int t;
@@ -1302,10 +1346,14 @@ static int gov_thread(void *data) {
                 if (gov->temp_warned)
                     pr_info("Build340: temp source restored (src=%u)\n", gov->temp_src);
                 gov->temp_warned = false;
+                gov->invalid_ticks = 0;
                 state_machine();
-            } else if (!gov->temp_warned) {
-                gov->temp_warned = true;
-                pr_warn("Build340: no temperature source, holding state %u\n", gov->state);
+            } else {
+                if (!gov->temp_warned) {
+                    gov->temp_warned = true;
+                    pr_warn("Build340: no temperature source, holding state %u\n", gov->state);
+                }
+                sensor_failsafe_tick();
             }
             if (do_vendor) {
                 memcpy(gov->vendor_sconfig, vsbuf, sizeof(gov->vendor_sconfig));
@@ -1412,7 +1460,7 @@ static ssize_t enable_show(struct kobject *k, struct kobj_attribute *a, char *b)
     mutex_lock(&gov->lock);
     v = gov->enabled;
     mutex_unlock(&gov->lock);
-    return sprintf(b, "%d\n", v);
+    return scnprintf(b, PAGE_SIZE, "%d\n", v);
 }
 static ssize_t enable_store(struct kobject *k, struct kobj_attribute *a, const char *b, size_t c) {
     unsigned long v;
@@ -1440,7 +1488,7 @@ static ssize_t profile_show(struct kobject *k, struct kobj_attribute *a, char *b
     mutex_lock(&gov->lock);
     p = gov->profile;
     mutex_unlock(&gov->lock);
-    return sprintf(b, "%s\n", n[p]);
+    return scnprintf(b, PAGE_SIZE, "%s\n", n[p]);
 }
 static void apply_profile_locked(unsigned int p) {
     const struct k6a_profile_def *d = &profiles[p];
@@ -1470,8 +1518,12 @@ static ssize_t profile_store(struct kobject *k, struct kobj_attribute *a, const 
     if (v > K6A_PROFILE_MAX) return -EINVAL;
     mutex_lock(&gov->lock);
     gov->profile = v;
-    if (v == K6A_PROFILE_OFF)
+    if (v == K6A_PROFILE_OFF) {
         set_state_locked(K6A_OFF);   /* sofort, nicht erst im naechsten Tick */
+        gov->enforced_max = 0;       /* Build454: Gold-Cap sofort statt 1-OPP-Ramp */
+        gov->cap_now = 0;
+        apply_policy();              /* (GPU-Cap releast der naechste Tick via plan) */
+    }
     if (v == K6A_PROFILE_CUSTOM) {
         pr_info("Build347: profile=custom keeps current thresholds\n");
     } else if (gov->thresholds_user) {
@@ -1557,7 +1609,7 @@ static ssize_t status_show(struct kobject *k, struct kobj_attribute *a, char *b)
     mutex_unlock(&gov->lock);
 
     if (si > K6A_CD_L4) si = K6A_OFF;
-    len = sprintf(b,
+    len = scnprintf(b, PAGE_SIZE,
         "version=%s\n"
         "state=%s\n"
         "temp=%d\n"
@@ -1689,7 +1741,7 @@ static ssize_t game_pid_show(struct kobject *k, struct kobj_attribute *a, char *
     mutex_lock(&gov->lock);
     pid = gov->game_pid;
     mutex_unlock(&gov->lock);
-    return sprintf(b, "%d\n", pid);
+    return scnprintf(b, PAGE_SIZE, "%d\n", pid);
 }
 static ssize_t game_pid_store(struct kobject *k, struct kobj_attribute *a, const char *b, size_t c) {
     int v;
@@ -1707,7 +1759,7 @@ static ssize_t legacy_show(struct kobject *k, struct kobj_attribute *a, char *b)
     mutex_lock(&gov->lock);
     v = gov->legacy_mode;
     mutex_unlock(&gov->lock);
-    return sprintf(b, "%d\n", v);
+    return scnprintf(b, PAGE_SIZE, "%d\n", v);
 }
 static ssize_t legacy_store(struct kobject *k, struct kobj_attribute *a, const char *b, size_t c) {
     unsigned long v;
@@ -1730,7 +1782,7 @@ static ssize_t hysteresis_show(struct kobject *k, struct kobj_attribute *a, char
     fast = gov->hysteresis_fast;
     normal = gov->hysteresis_normal;
     mutex_unlock(&gov->lock);
-    return sprintf(b, "fast=%u normal=%u\n", fast, normal);
+    return scnprintf(b, PAGE_SIZE, "fast=%u normal=%u\n", fast, normal);
 }
 static ssize_t hysteresis_store(struct kobject *k, struct kobj_attribute *a, const char *b, size_t c) {
     u32 fast, normal;
@@ -1749,7 +1801,7 @@ static ssize_t battery_guard_show(struct kobject *k, struct kobj_attribute *a, c
     mutex_lock(&gov->lock);
     v = gov->battery_guard;
     mutex_unlock(&gov->lock);
-    return sprintf(b, "%d\n", v);
+    return scnprintf(b, PAGE_SIZE, "%d\n", v);
 }
 static ssize_t battery_guard_store(struct kobject *k, struct kobj_attribute *a, const char *b, size_t c) {
     unsigned long v;
@@ -1765,7 +1817,7 @@ static ssize_t battery_guard_temp_show(struct kobject *k, struct kobj_attribute 
     mutex_lock(&gov->lock);
     v = gov->battery_guard_temp;
     mutex_unlock(&gov->lock);
-    return sprintf(b, "%u\n", v);
+    return scnprintf(b, PAGE_SIZE, "%u\n", v);
 }
 static ssize_t battery_guard_temp_store(struct kobject *k, struct kobj_attribute *a, const char *b, size_t c) {
     unsigned long v;
@@ -1783,7 +1835,7 @@ static ssize_t poll_ms_show(struct kobject *k, struct kobj_attribute *a, char *b
     mutex_lock(&gov->lock);
     v = gov->poll_ms;
     mutex_unlock(&gov->lock);
-    return sprintf(b, "%u\n", v);
+    return scnprintf(b, PAGE_SIZE, "%u\n", v);
 }
 static ssize_t poll_ms_store(struct kobject *k, struct kobj_attribute *a, const char *b, size_t c) {
     unsigned long v;
@@ -1801,7 +1853,7 @@ static ssize_t poll_adaptive_show(struct kobject *k, struct kobj_attribute *a, c
     mutex_lock(&gov->lock);
     v = gov->poll_adaptive;
     mutex_unlock(&gov->lock);
-    return sprintf(b, "%u\n", v);
+    return scnprintf(b, PAGE_SIZE, "%u\n", v);
 }
 static ssize_t poll_adaptive_store(struct kobject *k, struct kobj_attribute *a, const char *b, size_t c) {
     unsigned long v;
@@ -1820,7 +1872,7 @@ static ssize_t cd_thresholds_show(struct kobject *k, struct kobj_attribute *a, c
     l2t = gov->cd_l2_temp; l3t = gov->cd_l3_temp; l4t = gov->cd_l4_temp; rec = gov->cd_recover;
     l2g = gov->cd_l2_gold_max; l3g = gov->cd_l3_gold_max; l4g = gov->cd_l4_gold_max;
     mutex_unlock(&gov->lock);
-    return sprintf(b,
+    return scnprintf(b, PAGE_SIZE,
         "%u %u %u %u %u %u %u\n",
         l2t, l3t, l4t, rec, l2g, l3g, l4g);
 }
@@ -1873,7 +1925,7 @@ static ssize_t gpu_caps_show(struct kobject *k, struct kobj_attribute *a, char *
     mutex_lock(&gov->lock);
     l2g = gov->cd_l2_gpu_max; l3g = gov->cd_l3_gpu_max; l4g = gov->cd_l4_gpu_max;
     mutex_unlock(&gov->lock);
-    return sprintf(b, "%u %u %u\n", l2g, l3g, l4g);
+    return scnprintf(b, PAGE_SIZE, "%u %u %u\n", l2g, l3g, l4g);
 }
 static ssize_t gpu_caps_store(struct kobject *k, struct kobj_attribute *a, const char *b, size_t c) {
     u32 l2g,l3g,l4g;
@@ -1896,7 +1948,7 @@ static ssize_t gpu_floor_show(struct kobject *k, struct kobj_attribute *a, char 
     mutex_lock(&gov->lock);
     v = gov->gpu_floor;
     mutex_unlock(&gov->lock);
-    return sprintf(b, "%u\n", v);
+    return scnprintf(b, PAGE_SIZE, "%u\n", v);
 }
 static ssize_t gpu_floor_store(struct kobject *k, struct kobj_attribute *a, const char *b, size_t c) {
     unsigned long v;
@@ -1915,7 +1967,7 @@ static ssize_t bw_floors_show(struct kobject *k, struct kobj_attribute *a, char 
     gpubw[0] = gov->cd_l2_bw_gpubw; gpubw[1] = gov->cd_l3_bw_gpubw; gpubw[2] = gov->cd_l4_bw_gpubw;
     llcc[0] = gov->cd_l2_bw_llcc; llcc[1] = gov->cd_l3_bw_llcc; llcc[2] = gov->cd_l4_bw_llcc;
     mutex_unlock(&gov->lock);
-    return sprintf(b,
+    return scnprintf(b, PAGE_SIZE,
         "gpubw %u %u %u\n"
         "llcc %u %u %u\n",
         gpubw[0], gpubw[1], gpubw[2],

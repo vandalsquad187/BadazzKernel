@@ -50,6 +50,7 @@ static void setup(int profile) {
 /* ein Kthread-Tick (250 ms): Battery-Guard, dann State Machine, wie in gov_thread() */
 static void tick(u32 t_second, u32 t_peak) {
     fake_ms += 250; G.temp_celsius = t_second; G.temp_peak = t_peak;
+    G.invalid_ticks = 0;   /* Build454: wie gov_thread im t_valid-Zweig */
     battery_guard_tick(); state_machine();
 }
 static int count_trans(unsigned a, unsigned b) { int n = 0; for (int i = 0; i < tr_n; i++) if (tr_log[i].from == a && tr_log[i].to == b) n++; return n; }
@@ -127,8 +128,32 @@ static void s6_ramp(void) {
     CHECK(cur == 0 && ticks > 8, "Release zu schnell/haengt (cur=%u, ticks=%d)", cur, ticks);
 }
 
+static void s7_sensor_loss(void) {
+    printf("S7 Sensor-Tod: 10 invalid Ticks erzwingen CD_L2 nur aus GAMING, Recovery automatisch\n");
+    setup(K6A_PROFILE_GAMING);
+    for (int i = 0; i < 4; i++) tick(45, 47);
+    CHECK(G.state == K6A_GAMING, "Startzustand %s", SN[G.state]);
+    for (int i = 0; i < 9; i++) sensor_failsafe_tick();
+    CHECK(G.state == K6A_GAMING, "vorzeitiger fail-safe nach 9 Ticks (%s)", SN[G.state]);
+    sensor_failsafe_tick();
+    CHECK(G.state == K6A_CD_L2, "fail-safe hat L2 nicht erzwungen (%s)", SN[G.state]);
+    CHECK(count_trans(K6A_GAMING, K6A_CD_L2) == 1, "fail-safe-Transition fehlt im hist");
+    for (int i = 0; i < 5; i++) sensor_failsafe_tick();
+    CHECK(G.state == K6A_CD_L2, "gehaltener CD_L2 wurde falsch weiterveraendert (%s)", SN[G.state]);
+    tick(60, 62);
+    CHECK(G.invalid_ticks == 0, "gueltiger Tick hat invalid_ticks nicht resettet");
+    for (int i = 0; i < 40; i++) tick(60, 62);
+    CHECK(G.state == K6A_GAMING, "kein Wiedereinstieg nach Recovery (%s)", SN[G.state]);
+    printf("S7b: gehaltener CD_L3 bleibt CD_L3 (nur GAMING ist fail-open)\n");
+    setup(K6A_PROFILE_GAMING);
+    for (int i = 0; i < 4; i++) tick(45, 47);
+    G.state = K6A_CD_L3;
+    for (int i = 0; i < 10; i++) sensor_failsafe_tick();
+    CHECK(G.state == K6A_CD_L3, "CD_L3 wurde durch fail-safe veraendert (%s)", SN[G.state]);
+}
+
 int main(void) {
-    s1_single_core_spike(); s2_heat_cool(); s3_profile_off(); s4_battery_latch(); s5_entry_dwell(); s6_ramp();
+    s1_single_core_spike(); s2_heat_cool(); s3_profile_off(); s4_battery_latch(); s5_entry_dwell(); s6_ramp(); s7_sensor_loss();
     printf("\n%d Pruefungen, %d fehlgeschlagen\n", checks, fails);
     return fails ? 1 : 0;
 }

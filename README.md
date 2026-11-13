@@ -4,7 +4,7 @@
   <p>Gaming-optimized kernel for <b>SM7150 (sweet / sweet k6a)</b> — 4.14.369</p>
   <p>
     <img src="https://img.shields.io/badge/Kernel-4.14.369-blue?style=flat-square">
-    <img src="https://img.shields.io/badge/k6a__gov-1.7.0-orange?style=flat-square">
+    <img src="https://img.shields.io/badge/k6a__gov-1.7.4-orange?style=flat-square">
     <img src="https://img.shields.io/badge/KernelSU--Next-v3.3.0--311-green?style=flat-square">
     <img src="https://img.shields.io/badge/SUSFS-v2.3.0-success?style=flat-square">
     <img src="https://img.shields.io/badge/Android-13%20%E2%80%93%2016-lightgrey?style=flat-square">
@@ -15,7 +15,7 @@
 
 ## Overview
 
-BadazzKernel is a performance and gaming tuned kernel for **Redmi Note 12 Pro 4G (sweet / sweetin)**. Core is the in-kernel governor **k6a_gov v1.7.0** (loadable module, `CONFIG_K6A_GOV=m`, insmodded by k6a-ctl) — the perfect base for the companion module **[k6a-ctl](https://github.com/vandalsquad187/k6a-ctl)**. Both work hand-in-hand in delegated mode: kernel throttles, module controls.
+BadazzKernel is a performance and gaming tuned kernel for **Redmi Note 12 Pro 4G (sweet / sweetin)**. Core is the in-kernel governor **k6a_gov v1.7.4** (loadable module, `CONFIG_K6A_GOV=m`, insmodded by k6a-ctl) — the perfect base for the companion module **[k6a-ctl](https://github.com/vandalsquad187/k6a-ctl)**. Both work hand-in-hand in delegated mode: kernel throttles, module controls.
 
 🤌🏻 Join my Telegram channel: https://t.me/Badazz89
 
@@ -27,7 +27,7 @@ BadazzKernel is a performance and gaming tuned kernel for **Redmi Note 12 Pro 4G
 linux-4.14.369
 ├── KernelSU-Next v3.3.0-311 (UAPI 6, 4.14 direct-patch) + SUSFS v2.3.0  # Root + Hide (submodule 79003ef8)
 ├── fs/nomount — NoMount v22 (dev 8f05de7)      # VFS path redirection — zero-mount module injection (CONFIG_NOMOUNT=y)
-├── drivers/thermal/k6a_gov/k6a_gov.c v1.7.0     # In-kernel gaming governor (CONFIG_K6A_GOV=m)
+├── drivers/thermal/k6a_gov/k6a_gov.c v1.7.4     # In-kernel gaming governor (CONFIG_K6A_GOV=m)
 ├── drivers/gpu/msm/kgsl_pwrctrl.c               # GPU pwrlevel export (k6a_gov)
 ├── drivers/devfreq/devfreq.c                    # BW floors (gpubw / llcc), 0 = release floor
 ├── drivers/gpu/msm/ + drivers/thermal/          # Thermal + cooling floors
@@ -39,7 +39,7 @@ linux-4.14.369
 
 | Area | Feature | Details |
 |------|---------|---------|
-| **Governor** | **k6a_gov v1.7.0** | Loadable module (`CONFIG_K6A_GOV=m`, `k6a_gov.ko` shipped in the zip and loaded by k6a-ctl), state machine OFF→GAMING→CD_L2/L3/L4, hysteresis, **immediate escalation** L2→L3→L4, entry dwell on GAMING, L4 flap margin (`peak + 3 K < cd_l4_temp`), `profile=0` forces OFF immediately, throttle history (16), **residency accounting (`residency_ms`) + live `gold_cap_now` with GPU-cap ramping (tighten 1 OPP/tick, release 1 OPP/4 ticks, L4/entry-immediate), `stats_reset` node**, boot default **schedutil** |
+| **Governor** | **k6a_gov v1.7.4** | Loadable module (`CONFIG_K6A_GOV=m`, `k6a_gov.ko` shipped in the zip and loaded by k6a-ctl), state machine OFF→GAMING→CD_L2/L3/L4, hysteresis, **immediate escalation** L2→L3→L4, entry dwell on GAMING, L4 flap margin (`peak + 3 K < cd_l4_temp`), `profile=0` forces OFF immediately, throttle history (16), **residency accounting (`residency_ms`) + live `gold_cap_now` with GPU-cap ramping (tighten 1 OPP/tick, release 1 OPP/4 ticks, L4/entry-immediate), `stats_reset` node**, boot default **schedutil** |
 | **CPU** | Gold clamp | `find_gold_cpu()` + `clamp_freq`, `enforce_max_freq` + `cpufreq_update_policy` (kthread only), hardened notifier, **released again on recovery/disable** |
 | **Temp** | Multi-zone | Max over 4 Gold zones `cpu-1-0..3-usr`, fallback `cpu-0-0-usr` → `xo-therm` → `soc-therm` → `thermal_zone0`; `temp_src`/`temp_valid` in status, holds the last state if no zone answers |
 | **GPU** | Native enforcement | `kgsl_k6a_get_levels` / `kgsl_k6a_set_max_level_idx`, caps per CD state |
@@ -99,6 +99,16 @@ Fixes 1–10, all in-tree: `build397` shipped 1–7 + unified `pr_fmt`, `build39
 
 CPU side (Build 401): `cpu_cooling.c` thermal floor clamp + `k6a_thermal` sysfs (see below).
 
+### k6a_gov v1.7.4 — sensor fail-safe + release hardening (Build 454, Nov 2026)
+
+| # | Feature / Fix | Where |
+|---|-------|-------|
+| — | **Sensor fail-safe**: 10 consecutive ticks without any temp source while held in GAMING force CD_L2 (the escalation fail-open — a dead sensor previously meant "hold last state", i.e. unthrottled heating). Recovery is automatic once a source returns; a held CD_L2/L3/L4 is already conservative and is kept | `sensor_failsafe_tick()` |
+| — | `profile=0` releases the Gold CPU cap immediately (`cap_now=0`, `apply_policy()`) instead of ramping down 1 OPP/tick — matches what `enable=0` has done since Build 446. GPU cap releases via the next plan tick | `profile_store()` |
+| — | Hotplug: if the cached gold CPU is offline at readback time, `find_gold_cpu()` re-resolves fresh (previously `p==NULL` silently skipped the verification) | `enforce_max_freq()` |
+| — | One-time boot log of every temp source (`cpu-1-0..3-usr`, `cpu-0-0-usr`, `xo-therm`, `soc-therm`, `thermal_zone0`) with id + type — a firmware rename is visible in the first dmesg, not only as a symptom | `freq_init_worker()` |
+| — | `hist` moved to its own node (Build 450) and `hysteresis` defaults corrected in this README (`fast` 1..5000, default 3000 since Build 347) | docs |
+
 ---
 
 ## Companion: k6a-ctl
@@ -131,8 +141,9 @@ exactly what makes this trap invisible.
 |------|-----|---------|
 | `enable` | RW | 0/1 — kill switch, releases the Gold cap + BW floors + GPU cap |
 | `profile` | RW | 0..5 — off/gaming/battery/badazz/custom/badazz_safe (4 = keeps the current thresholds) |
-| `status` | RO | `version/state/temp/temp_src/temp_valid/temp_peak/ticks/state_age_ms/policy_max/throttle_events/gold_* /bw_* /gpu_floor/gpu_floor_last/gpu_last_idx/bt/hash_verified/hash_state/build_hash/battery_guard/batt_latched/thresholds_source/vendor_sconfig/vendor_cpu_limits/game_pid/hist=` |
-| `hysteresis` | RW | `fast normal` — dwell ms, `fast` 1..1000 (default 500), `normal` 1..5000 (default 2000) |
+| `status` | RO | `version/state/temp/temp_src/temp_valid/temp_peak/ticks/state_age_ms/policy_max/throttle_events/gold_* /bw_* /gpu_floor/gpu_floor_last/gpu_last_idx/bt/hash_verified/hash_state/build_hash/battery_guard/batt_latched/thresholds_source/cd_l2_temp/cd_l3_temp/cd_l4_temp/cd_recover/vendor_sconfig/vendor_cpu_limits/game_pid/residency_ms` (Build450: hist lives in its own node) |
+| `hysteresis` | RW | `fast normal` — dwell ms, `fast` 1..5000 (default 3000), `normal` 1..5000 (default 2000) |
+| `hist` | RO | Transition ring (16), `ms:temp:from>to` comma-separated, ms since insmod, oldest first — empty without transitions |
 | `cd_thresholds` | RW | `l2t l3t l4t rec` in **°C**, `l2g l3g l4g` in **kHz** (CPU-Gold-Caps) — Beispiel: `96 99 102 93 1708800 1209600 1094400` (GAMING) |
 | `gpu_caps` | RW | `l2 l3 l4` — **Hz** — Beispiel: `800000000 565000000 430000000` (GAMING) |
 | `bw_floors` | RW | `gpubw_l2 l3 l4 llcc_l2 l3 l4` — **raw DT-table votes** (gpubw/llcc devfreq tables, max ≈ 6881/7716), each ≤ 30000, 0 = no floor — Beispiel: `4000 3000 1500 0 4000 3000` (GAMING) |
