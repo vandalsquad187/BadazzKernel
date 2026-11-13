@@ -2182,3 +2182,23 @@ wie er ist**, keine fürsche Kernel-Arbeit nötig. Konsequenzen/Items:
 - **Roadmap danach leer**: alle gebuchten Posten abgearbeitet (KGSL-I/O,
   status_compact, adaptive Polling, webui-Backoff, CI-Hygiene geklaert,
   Micro-Ops deferred). Naechste Kernel-Runde = neue Scope-Entscheidung.
+
+## B+C-Runde (2026-11-13, kein Kernel-Release)
+- **B — Hist-Zeitkorrektur (k6a-ctl v1.6.4, `ffc9988`, ZIP 54 588 B, deployed
+  ohne Kernel-Flash)**: Kernel-hist-Rows (ms-since-boot, CLOCK_MONOTONIC
+  suspend-exklusiv) werden beim Seed exakt nach Epoch konvertiert via
+  `/proc/timer_list` "now at"-Domain (am Gerät bewiesen: uptime 52930 s
+  suspend-inklusive vs. mono 19 776 s — /proc/uptime wäre schief). `_K6A_MONO_MS`
+  gecacht → alter-Kernel-Fallback ebenfalls konvertiert, 0 Extra-Forks/Tick;
+  graceful Fallback ohne timer_list. app.js unverändert. Live-Beweis: Node
+  `42878:55:off>gaming` (ms) → DATA `1794566934:55:off>gaming` (Epoch), Banner
+  `k6a-ctl 1.6.4 start`. Funktions-Unit-Test lokal (ages 600/2400/0 s) ✓.
+- **C — KASAN-Run (lockdep.yml kasan=true, Run 19/43417909472) → FAIL
+  klassifiziert als Vendor-Blocker**: qcacld-3.0 `__qdf_bug` undefined beim
+  vmlinux-Link (Vendor-WLAN-QDF unter KASAN-Konfig nicht linkbar — die im
+  Workflow-Input dokumentierte 4.14/GCC13-Kategorie). k6a-Code unbelastet
+  (Modul-Phase nach vmlinux nie erreicht; drivers/thermal kompilierte sauber).
+  **Optional r10-Kandidat**: KASAN-Config-Variante ohne qcacld für einen echten
+  k6a_gov-KASAN-Check (Workflow-Config-Tweak).
+- **r9 (heute Abend) steht aus**: adaptive slow-poll × CD-Interplay verifizieren
+  (ticks-Delta-Muster, L2-Entry-Latenz, L3↔L4-Flip-Rate als r10-Damping-Basis).
