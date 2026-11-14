@@ -2390,7 +2390,10 @@ wie er ist**, keine fürsche Kernel-Arbeit nötig. Konsequenzen/Items:
   neue Package automatisch. Bootstrap-Kette intakt: ksud `CHANGE_MANAGER_UID`
   (uid==0-Gate unberührt, supercall.c:667-677). Mapping: Kernel 38532 = merge-base
   `b427a3f9` + fork; dev-Manager +148 Commits → kosmetischer Update-Hinweis möglich,
-  Funktion degradiert per -ENOSYS-Durchfall. Install-Sequence: spoofed ANSEITIG zum
-  alten Manager installieren → öffnen (oder Reboot) → erst dann alten Manager
-  entfernen; App-Profile/Allowlist ggf. neu setzen (neue App-DB).
+  Funktion degradiert per -ENOSYS-Durchfall. Install-Sequence **REAL (User-Ablauf
+  2026-11-14, läuft)**: erst den ALTEN Manager DEINSTALLIEREN, dann spoofed
+  installieren/öffnen — side-by-side funktioniert NICHT (der Throne-Tracker hält
+  offenbar genau EINEN Seat: der bereits registrierte appid wird vom Scan nicht
+  an ein zweites valid-APK abgegeben). Manager-Akzeptanz auf spoofed v3.4.2-198:
+  **läuft** ✓ (Registrierung + get_info + fd-Pfad bestätigt in vivo).
   `mappings-spoofed` = ProGuard-Mappings, nicht installierbar.
