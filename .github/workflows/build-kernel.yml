@@ -99,6 +99,22 @@ jobs:
           ref: ${{ matrix.ref }}
 
       # -------------------------------------------------------
+      # Schritt 1a: KSU-Supercall-Gates aufwenden (getrackter Patch)
+      # Der gepinnte KernelSU-Next-Stand laesst prctl(0xDEADBEEF) get_info
+      # + crown_diag und den reboot-magic fd-request unauthentifiziert an
+      # jeden Caller ran (Root-Detection-Audit). Der Patch klemmt alle
+      # drei Pfade; die Assertion beweist, dass er gelandet ist.
+      # -------------------------------------------------------
+      - name: Apply KSU hardening patch
+        run: |
+          test -f patches/ksu-prctl-gate.patch || { echo "::error::patches/ksu-prctl-gate.patch fehlt"; exit 1; }
+          patch -p1 --dry-run < patches/ksu-prctl-gate.patch || { echo "::error::KSU-Patch passt nicht auf den gepinnten Submodul-Stand"; exit 1; }
+          patch -p1 < patches/ksu-prctl-gate.patch
+          sed -n '/ksu_get_crown_diag(unsigned long arg3/,+3p' KernelSU-Next/kernel/supercall/supercall.c | grep -q 'is_manager' || { echo "::error::crown-diag Gate fehlt"; exit 1; }
+          awk '/arg2 == 2/{found=NR} found && NR>=found+1 && NR<=found+2 && /is_manager/{ok=1} END{exit !ok}' KernelSU-Next/kernel/supercall/supercall.c || { echo "::error::get_info Gate fehlt"; exit 1; }
+          awk '/KSU_INSTALL_MAGIC2/{found=NR} found && NR>=found+1 && NR<=found+3 && /current_uid/{ok=1} END{exit !ok}' KernelSU-Next/kernel/supercall/supercall.c || { echo "::error::fd-request Gate fehlt"; exit 1; }
+
+      # -------------------------------------------------------
       # Schritt 1b: NoMount-Subsystem integrieren (pinned SHA)
       # setup.sh klont NoMount, symlinkt fs/nomount und patcht
       # fs/Makefile + fs/Kconfig. Muss vor dem Configure-Step
@@ -198,6 +214,8 @@ jobs:
             "CONFIG_KSU=y"
             "CONFIG_KSU_SUSFS=y"
             "CONFIG_KSU_TAMPER_SYSCALL_TABLE=y"
+            "CONFIG_FORTIFY_SOURCE=y"
+            "CONFIG_INIT_STACK_ALL_ZERO=y"
             "CONFIG_K6A_GOV=m"
             "CONFIG_NOMOUNT=y"
             "CONFIG_NFC_NQ_PN80T=y"
