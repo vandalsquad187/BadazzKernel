@@ -2374,3 +2374,23 @@ wie er ist**, keine fürsche Kernel-Arbeit nötig. Konsequenzen/Items:
 - **KSU-Gate-Akzeptanz (nach 457-Flash)**: Device bootet + su arbeitet; Manager-Dialog
   (fd-ioctl-Pfad) vom User zu bestätigen — get_info/crown-diag sind App-seitig nur für
   den Manager nützlich, Gate darf Nicht-Manager die -ENOSYS-Kamouflage geben.
+- **Manager-Swap auf spoofed (2026-11-14, verifiziert, Go erteilt)**: Upstream-dev
+  (KernelSU-Next/KernelSU-Next, Run 2269 @ `7ccf6147`) baut `manager-spoofed` =
+  `KernelSU_Next_v3.4.2-198-g7ccf6147-spoofed_33553-release.apk`. **Cert-Verifikation
+  (Vorsicht, 2 Fallen)**: (1) APK Signing Block Geometrie — head-u64-Check-Position
+  = `cd_offset - sz - 8`; die Pair-Walk-Position ist danach automatisch `pos` (der
+  Kernel resettet NICHT) = `cd_offset - sz`; wenn man selbst resettet, liest man
+  `id=0x6ca` (= erstes u64 low-word) statt `id=0x7109871a` — false NO-V2-PAIR.
+  (2) Erwartungswerte im gepinnten `KernelSU-Next/kernel/Kbuild` (:188-196 Fallback,
+  Größe `0x3e6`=998 B, Hash `79e590113c4c…21bf7`, Signer CN=Rifat Azad). v2-Payload-
+  Layout: signers→signer→signed_data→digests(algo u32 0x103, len u32, 32B)→
+  certificates→cert_len u32. Spoofed-Cert = **byte-exakt MATCH** → Throne-Tracker
+  (`on_post_fs_data`/`on_boot_completed` `track_throne_now`, kernel-seitig, unabhängig
+  vom fd-Gate; Live-Observer `track_throne(true)` ab boot_completed) registriert das
+  neue Package automatisch. Bootstrap-Kette intakt: ksud `CHANGE_MANAGER_UID`
+  (uid==0-Gate unberührt, supercall.c:667-677). Mapping: Kernel 38532 = merge-base
+  `b427a3f9` + fork; dev-Manager +148 Commits → kosmetischer Update-Hinweis möglich,
+  Funktion degradiert per -ENOSYS-Durchfall. Install-Sequence: spoofed ANSEITIG zum
+  alten Manager installieren → öffnen (oder Reboot) → erst dann alten Manager
+  entfernen; App-Profile/Allowlist ggf. neu setzen (neue App-DB).
+  `mappings-spoofed` = ProGuard-Mappings, nicht installierbar.
