@@ -2397,3 +2397,30 @@ wie er ist**, keine fürsche Kernel-Arbeit nötig. Konsequenzen/Items:
   an ein zweites valid-APK abgegeben). Manager-Akzeptanz auf spoofed v3.4.2-198:
   **läuft** ✓ (Registrierung + get_info + fd-Pfad bestätigt in vivo).
   `mappings-spoofed` = ProGuard-Mappings, nicht installierbar.
+
+## r14 (2026-11-14 23:22-23:38, build457, D1-Runde — User „super flüssiges Spiel")
+- **Setup**: cd_thresholds 72/80/87/66 + gpu_caps 800/680/500 + poll_adaptive=0;
+  Manager-Swap-Reboot hatte gpu_caps/poll_adaptive resettet → Re-Arm vor der Runde
+  (Lektion hart bestätigt: **JEDER Reboot resettet beide**, auch nicht-Flash-Reboots).
+- **Verdict D1 = ERFOLG**: (1) **Vendor-Engine still die GANZE Runde**
+  (`vendor_sconfig=0`, `vendor_cpu_limits=none`) — trotz Source-Spikes bis 80: das war
+  das D1-Hauptziel (r12: 26-75-fps-Vendor-Chaos, r13: Escalation). (2) Intro sauber:
+  ~10-12 min reines gaming (0 Events), CD-Phase nur in den letzten ~5 min
+  (~1180-1463 s). (3) **throttle_events=12** (r13: +69) bei Subjectiv „super flüssig".
+  (4) Residual: Endphasen-PUMP L2↔L3 — 11 Flips in 44 s (1323-1367 s, ~5,5-s-Kadenz,
+  Readings 71↔80): Equilibrium ~76 °C liegt MIT ±4-5-K-Zonen-Noise an den Bandkanten
+  [72,80). Auswirkung benign: CPU 1708↔1555 MHz + GPU 800↔680 MHz, beide mild.
+- **Messung-Fixes (Wichtig)**: `temp_peak` ist **Pro-Tick-Snapshot** (`gov->temp_peak =
+  t_peak` :1345, kein latched Max — 65 @+17 s nach Rundenende war kein Widerspruch
+  zu den @80-Flip-Readings). Tick-Arithmetik: Rundensegment 3758 Ticks/964 s = exakt
+  4 Hz (poll_adaptive=0 honoriert); Pre-Round-Defizit = Nach-Reboot-Fenster vor dem
+  Re-Arm (adaptive 1 Hz Default). Hist-Ring (16 Slots) evicted früh —
+  throttle_events als Transfer-Zähler gegen evicted Rows konsistent nutzbar (12 =
+  10 Escalations + 2 Entries).
+- **Optionale Mikro-Tweaks (nicht nötig, notiert)**: cd_l2_temp 72→70 (Exit tiefer
+  unter Equilibrium → weniger Endphasen-Flips; Entry 80 bleibt → Vendor-Risiko
+  unverändert); ODER gpu L3-Cap 680→650. Empfehlung: D1 als neue Baseline akzeptieren.
+- **Tools**: r14-Dmesg-Capture-Worker wieder dem Phantom-Killer erlegen (47 Zeilen
+  Drain, ~30 s — Mid-Session-Spawns bleiben killbar); Auswertung über Kernel-Ring
+  (`dmesg`, Boot < 1 h) + hist/status-Nodes. Files: `/data/local/tmp/a15r14_status.txt`
+  (pre), `a15r14_post.txt`, `a15r14_dmesg.log` (Fragment).
