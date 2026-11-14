@@ -2409,7 +2409,19 @@ wie er ist**, keine fürsche Kernel-Arbeit nötig. Konsequenzen/Items:
   (~1180-1463 s). (3) **throttle_events=12** (r13: +69) bei Subjectiv „super flüssig".
   (4) Residual: Endphasen-PUMP L2↔L3 — 11 Flips in 44 s (1323-1367 s, ~5,5-s-Kadenz,
   Readings 71↔80): Equilibrium ~76 °C liegt MIT ±4-5-K-Zonen-Noise an den Bandkanten
-  [72,80). Auswirkung benign: CPU 1708↔1555 MHz + GPU 800↔680 MHz, beide mild.
+  [72,80). Auswirkung benign: CPU 1708↔1555 MHz +   GPU 800↔680 MHz, beide mild.
+- **D1 = neue Baseline (User-OK 2026-11-14) + rebootfest via k6a-ctl v1.6.6**:
+  Fund — `gpu_caps`/`poll_adaptive`-Nodes sind Sysfs-flüchtig (Reboot → Kernel-
+  Defaults 800/565/430 bzw. adaptive=1); das ctl las gpu_caps nur für Telemetrie.
+  Fix in k6a-ctl v1.6.6 (`b6dd5c6`, Release v1.6.6, Gate grün): settings.conf-Keys
+  `gpu_caps`/`poll_adaptive` + `_apply_gov_caps()` beim Controller-Start
+  (idempotent wie `_apply_cd_thresholds`; deckt Boot/Watchdog-Respawn/rmmod-
+  Recovery ab, alte Kernel failen still). Deploy-Tanz: Kontext = `app_data_file:
+  s0:c83,c257,c512,c768` für controller/module.prop, `system_file:s0` für
+  settings.conf; HB-Pid-Erkennung via `/proc/[0-9]*/cmdline`-Scan (service.log-
+  hb-Zeile trägt pid=0 → data.txt ist der Diag-Ort). Verifiziert: Start-Log
+  `gpu_caps=800000000 680000000 500000000 poll_adaptive=0`, Sysfs-Readback
+  identisch. Nächster Boot beweist den Write-Pfad (bis dahin nur der Skip-Pfad).
 - **Messung-Fixes (Wichtig)**: `temp_peak` ist **Pro-Tick-Snapshot** (`gov->temp_peak =
   t_peak` :1345, kein latched Max — 65 @+17 s nach Rundenende war kein Widerspruch
   zu den @80-Flip-Readings). Tick-Arithmetik: Rundensegment 3758 Ticks/964 s = exakt
