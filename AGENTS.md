@@ -1,12 +1,16 @@
 # Kernel Build Status
 
-## Current State (Stand 2026-11-12, Build 449)
-- **Repo**: `vandalsquad187/BadazzKernel` branch `main` @ **`cd02a1f4e`** (Plan/Commit/Latch + gpu_idx_read-Fix).
+## Current State (Stand 2026-11-14, Build 455 live)
+- **Repo**: `vandalsquad187/BadazzKernel` branch `main` @ **`5622eb83e`** (Build 454: Sensor-Fail-safe +
+  profile-off Cap-Release + Hotplug-Re-Resolve + Zone-Spiegel-Log + scnprintf-Hygiene).
   Kette: build441 `831efce8a` (NoMount) -> `456be5f7d` (GPU-OPP-Cache + kgsl_k6a_get_idx + psy-Cache)
   -> `784a55541` (CI lockdep: NoMount-Step) -> `5bdd119ac` (Build446: Plan/Commit/Latch — KGSL/Devfreq-I/O
-  aus `gov->lock`) -> `cd02a1f4e` (gpu_idx_read-Return-Value-Bugfix, r8b-Fund).
-  Releases **v4.14.369-badazz-build447** (Run 43127438219) und **v4.14.369-badazz-build449** (Run
-  43255030399) — beide geflasht; build449 live verifiziert 2026-11-12 (`git_hash=cd02a1f4`, ko 68 608 B).
+  aus `gov->lock`) -> `cd02a1f4e` (gpu_idx_read-Return-Value-Bugfix, r8b-Fund) -> `d0fdae972` (Build450:
+  hist aus status ausgelagert) -> `52917a18e` (Build452: adaptive slow-poll in GAMING) -> `489b360ce`
+  (r9/r9b-Kalibrierung) -> `5622eb83e` (Build 454, flashed als build455).
+  Releases: **v4.14.369-badazz-build455** (Run 43502371855, Latest) — geflasht + live verifiziert
+  2026-11-14 (ko **53 248 B**, git_hash/zone-mirror unten im r10-Abschnitt); davor 453 (ko 69 384 B,
+  2026-11-13) und 451/450/449/447.
 - **KGSL-I/O aus `gov->lock` (Build446, `5bdd119ac`) — implementiert + in vivo bewiesen (r8c)**:
   Plan/Commit/Latch-Muster: alle KGSL/Devfreq-Schreib-Readbacks laufen im Commit ausserhalb von
   `gov->lock` (Work-Structs `k6a_gpu_work/k6a_gpu_res/k6a_bw_work/k6a_bw_res/k6a_limits_work/.any`),
@@ -2217,3 +2221,85 @@ wie er ist**, keine fürsche Kernel-Arbeit nötig. Konsequenzen/Items:
 - gpu_caps-Node beim Custom-Profil: 800/565/430 (L3=565 lvl2, L4=430 lvl3).
 - Offen/Tuning: L2↔L3-Flip-Damping (falls bemerkt), kalibrierte Defaults in
   ctl-Template + kernel profiles[] (nächste Kernel-Runde), KASAN ohne qcacld.
+
+## r10/r11 (2026-11-13/14, Review-Scope Build 454/455 + k6a-ctl v1.6.5 — live verifiziert)
+- **Externer Review („Analyse v2") triagiert + implementiert**: K1 valid → K2b valid →
+  K4 valid (Doc-Drift) → K7 valid → K8 reduziert → C1 valid → C5 valid; K5 deferred
+  (insmod-Hash), K6 REJECTED (game_pid ist Diagnose-Kanal, bleibt), C2 ENTFÄLLT
+  (Backoff existierte schon: service.sh 3→30 s, >10 Crashes/60 s → give-up),
+  C3 REJECTED, C4 outdated (WebUI-Token seit v1.5.1). User-Approval „Voller Scope".
+- **K1 Sensor-Fail-safe (`5622eb83e`)**: `invalid_ticks` im Struct + `sensor_failsafe_tick()`
+  — 10 aufeinanderfolgende Ticks ohne Temp-Quelle (2,5 s @ poll 250 ms) **nur im
+  state GAMING** → CD_L2 erzwungen + Einmal-`pr_warn "Build454: sensor fail-safe"`,
+  eine hist-Row, Recovery natürlich über die State Machine (Quelle wieder da → CD-Exit).
+  Fail-open nur im GAMING (Hot-Side), gehaltene CD_L2/L3/L4/OFF bleiben (schon
+  konservativ). Reset im t_valid-Zweig. r11-Boot: **still** (0 pr_warn) — dormant wie
+  designed, erster Live-Test steht noch aus (Sensor-Tod simulieren nötig).
+- **K2b profile_store(0)**: Cap-Vars wurden zwar gecleart, aber ohne `apply_policy()`
+  lief die Freigabe als 1-OPP/Tick-Rampe statt OFF-sofort. Fix: enforced_max=0 +
+  cap_now=0 + `apply_policy()` (Spiegel des enable_store(0)-Blocks aus Build 446).
+  GPU-Cap released wie bisher über den nächsten Plan-Tick.
+- **K7 Hotplug-Re-Resolve**: Cached-Gold-CPU hotplug-off → `cpufreq_cpu_get()` NULL,
+  seen=0, der „not applied"-Check skippte still. Jetzt frisches `find_gold_cpu()` +
+  Cache-Update + Readback-Retry im selben Tick. **Deadlock-Falle entdeckt**: erste
+  Version hatte inneres `mutex_lock` — `enforce_max_freq` läuft bereits unter
+  `gov->lock` (plan_limits), Fix ohne Lock.
+- **K8 Zone-Spiegel-Log (einmalig, freq_init_worker)**: 8 Quellen mit id+type
+  (`Build454: zone ...`). r11-Boot beweist: cpu-1-0..3-usr id 26-29, cpu-0-0-usr
+  id 18; xo-therm/soc-therm/thermal_zone0 „not found (yet)" (vor Registration —
+  erwartet). Bonus: ctl-Zonen-Fund (Gold=zone26/Silver=zone18) matcht den
+  Kernel-Mirror — erstmals gegenseitig verifiziert.
+- **Hygiene**: 14 verbliebene `sprintf()` in show-Handlern → `scnprintf(b, PAGE_SIZE, …)`
+  (24 scnprintf total, 0 sprintf). Syntax-Check pristine-vs-neu: Warnset identisch.
+- **K4 Doc-Drift geschlossen**: README behauptete hysteresis `fast` default 500 seit
+  v1.6.0-Ära — Code (Build 347+) schiffte **3000** (explizit `gov->hysteresis_fast = 3000;`).
+  Erläutert evtl. die r9b ~5 s-Flips. README-Row korrigiert (1..5000, default 3000/2000),
+  Version-Refs → 1.7.4, hist-Node-Row, v1.7.4-Feature-Sektion. **CI-Guard** in
+  tools/k6a_gov_host_test/run.sh: Code-Hysteresis-Defaults + K6A_GOV_VERSION gegen
+  README-Node-Table → „DOC-DRIFT: OK …" bzw. Fail. (Guard selbst hatte 2 Bugs während
+  der Runde: `[0-9]*` matcht auch leer — `hysteresis_fast = fast;` im Store — Fix
+  `[0-9][0-9]*`; README-Extraktion frisst Newline-loses printf-Futter nicht — Fix awk.)
+- **Host-Test 31/31**: extract.py +`sensor_failsafe_tick`; S7-Szenario (Fail-safe feuert
+  nur aus GAMING bei exakt 10 Ticks, hist-Row, Reset bei valid, gehaltener CD_L3 bleibt);
+  harness `tick()` resettet invalid_ticks (gov_thread-Spiegel).
+- **CI**: Push-Runs grün (host-test sofort, Build 11 m, Lockdep 7 m); Release als
+  **build455** (Run 43502371855) weil die Push-Runs die Nummer 454 verbrauchten
+  (bestätigt: NNN = Run-Nummer, Dispatch ≈ Push+1).
+- **k6a-ctl v1.6.5 (`1d48701`)**: `_read_int()` in k6a-lib.sh (0 forks: read+eval,
+  Zielvar-Semantik wie read_temp/TEMP_NOW) → alle 5 `_write_data`-Hot-Path-Leser
+  (P0/P6 cur_freq, GPU devfreq cur_freq, battery capacity/temp) + service.sh-Uptime-Scrub
+  an 3 `cut`-Stellen. **Gate [7] Fuzz (12 Cases) fand beim ersten Lauf einen echten Bug in
+  `_read_int` selbst**: POSIX-read liefert rc=1 bei fehlendem Newline, Variable ist
+  trotzdem gesetzt — Fix: Verzweigung auf Nichtleere statt rc. hb_pid/hb_hit/hb_miss
+  im data.txt-Blob (nach gov_hist) + app.js-Anzeige unter der Hist-Tabelle. Banner-
+  Fallback + module.prop 1.6.5/175. README: **Failure-Semantics-Tabelle** (Kernel hold +
+  Fail-safe / ctl-Scrub / Watchdog-Backoff / Turbo-Notbremse-Re-Arm). Gate 41/41,
+  `sh -n` grün, Controller-Smoke Sandbox 3 Ticks (34 Keys). Release v1.6.5 (Zip 56 609 B).
+  **Lektion gh release notes**: backtick-Fragmente in `--notes` mangled durch Shell-
+  Command-Substitution (`cut`-Befehl lief!) — Notes via `--notes-file` nachlegen.
+- **r9c-Runde (build453 + v1.6.4, 05:10–05:17)**: 74 throttle_events (2→76), CD_L3-Dips
+  2× „@70 without dwell" (25 s auseinander), Cap-Rampe 2,208 GHz→1,555 GHz→rauf, Flips
+  unverändert 1–3 s-Rhythmus am 65/70-Boundary, Controller überlebte (0 Crashes).
+  Logs: `/data/local/tmp/a15r9c_{kst,dmesg}.log`. Uptime-Domain-Fund: /proc/uptime
+  (boottime, suspend-inclusive) vs. Kernel-printk/hist (monotonic, suspend-exklusiv)
+  differieren um die Suspend-Zeit (Nacht ≈ 2 h 50 m) — hist-Rows sind NICHT uptime-
+  vergleichbar, nur dmesg-Stamp-vs-hist-Stamp (gleiche Domain).
+- **Flash + Deploy (2026-11-14 05:53)**: build455-aosp.zip (19 346 005 B, SHA256
+  `4c70215b…79bd1` verifiziert gegen SHA256SUMS) via KSU-Manager geflasht; ctl v1.6.5
+  in-place VOR dem Reboot (Backups `.bak-v165`), Reboot übernimmt alles. Boot-Sequenz:
+  app.js-Token → ko 1.7.4 geladen → service start → stale-lock übernommen (6570) →
+  Zonen neu erkannt → thresholds ← 65/70/75/60 → **k6a-ctl 1.6.5 start** → GAMING/custom.
+- **r11-Boot-Verify (alle grün)**: k6a_gov 1.7.4 (ko 45 056→**53 248 B**), Zone-Mirror ×8,
+  Fail-safe still, 0 Oops, schedutil erzwungen, gpu_caps 800/565/430, thresholds
+  65/70/75/60, hb-Keys im data.txt, HB alive. ksud/KSU-Module-Loading funktionierte mit
+  dem Magisk-Format unverändert.
+- **UMGEBUNGSWECHSEL dokumentiert**: (1) **KSU Next ist jetzt Root-Provider** (User-
+  Flash via KSU-Manager; `id` → context `u:r:ksu:s0`; Magisk wird nicht mehr als Loader
+  erwartet — Magisk-Format-Module laden über ksud). (2) **`uname -r` spoofed**:
+  `6.12.0-android16-6.12-perf-g1d01cd293` (SUSFS-Uname-Spoof) — REAL ist 4.14.369-badazz;
+  Beweis über k6a_gov-Laden + Modulgröße, NICHT über uname. Nicht in Panik verfallen.
+  (3) **Termux-su-Wrapper-Syntax**: `/data/data/com.termux/files/usr/bin/su` (ELF, execv
+  `/system/bin/su` + hardcodiertes `sh -c`) — Aufruf ist `su 'befehl'` OHNE `-c`
+  (`su -c '…'` → „unknown option"-Wirrwarr); KSU-Grant für Termux bleibt erhalten.
+  (4) `/sys/kernel/k6a_gov/version` existiert nicht — Version ist Key in `status`.
+  (5) `pidof` matcht den Controller nicht (heißt `sh` im comm) — `pgrep -f` oder HB-Log nutzen.
