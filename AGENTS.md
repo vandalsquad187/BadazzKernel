@@ -2467,7 +2467,29 @@ wie er ist**, keine fürsche Kernel-Arbeit nötig. Konsequenzen/Items:
   **Härtungs-Finalstand: `CONFIG_INIT_STACK_ALL_ZERO=y` AN, `FORTIFY_SOURCE`
   AUS (schuldig, unverträglich mit GCC 13.3 auf 4.14 — frühster Boot-Tod,
   pre-ramoops).** Isolationsfall vollständig: 1 Build = 1 Variable, Rescue-Dance
-  (Download-Zip + Recovery-Flash) bewährt in Minuten.
+  (Download-Zip + Recovery-Flash)   bewährt in Minuten.
+- **r15 (10:46-~11:15, build459, D1a-Testrunde) → D1a FALSIFIZIERT, Revert auf
+  D1-72 (2026-11-15)**: User „ziemlich laggy". Hist/Residency: cd_l3 843,9 s
+  (14 min! vs r14: 72,5 s) — zwei kontinuierliche L3-Strecken (575 s + 253 s)
+  bei CPU 1555/GPU 680. Mechanik: Exit < 70 → L3-Exit erst nach tiefer
+  Abkühlung → statt r14's schnellen Flips (71↔80, subjektiv smooth) lange tiefe
+  L3-Dwells = gedrosselte Minutendauer = lag. throttle_events 9 (vs r14: 12) —
+  Event-Count war irreführend: **Dwell-Zeit, nicht Event-Zahl, ist die
+  Lag-Metrik**. Vendor weiterhin stumm (vendor_sconfig=0). Rückkehr-Logik:
+  r14-Exit 72 → Exits @71 = minimale Überschreitung → schnelle L3-Exits →
+  Flips benign; Exit-Tiefe 70 kippt das Equilibrium in den Dwell-Modus.
+  **Thermal-Finalstand = D1 exakt: `72 80 87 66 1708800 1555200 1324800` +
+  gpu_caps 800/680/500 + poll_adaptive 0** (r14 „super flüssig" bleibt der
+  Goldstandard). Kein weiterer Test; 71-Experiment ausdrücklich verworfen.
+- **ctl-Bedienlektion r15**: Mid-Gaming settings.conf-Edits parse der ctl pro
+  Tick, aber `_apply_cd_thresholds` feuert NUR bei State-Transitions — im
+  Dauer-GAMING wird ein Edit erst beim nächsten Transition aktiv; für
+  Sofortwirkung: Controller-Neustart (kill -TERM + Watchdog-Respawn = 1 Start-
+  Log-Zeile + Apply). Pid-Falle 2: `/proc`-Scan unter su kann in Timeout
+  laufen (807 Pids); robuster Weg = `tr "\0" " "`-Scan auf cmdline + Ausgabe
+  mit Pid-Feld, Kill in EINEM kurzen Befehl (compound mit sleep läuft in
+  den 120-s-Tool-Timeout — zweistufig killen). Revert-Apply 11:21:08
+  verifiziert (`cd_thresholds ← 72 …` + Start-Log).
 - **Messung-Fixes (Wichtig)**: `temp_peak` ist **Pro-Tick-Snapshot** (`gov->temp_peak =
   t_peak` :1345, kein latched Max — 65 @+17 s nach Rundenende war kein Widerspruch
   zu den @80-Flip-Readings). Tick-Arithmetik: Rundensegment 3758 Ticks/964 s = exakt
