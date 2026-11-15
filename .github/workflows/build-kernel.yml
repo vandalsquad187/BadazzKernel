@@ -216,7 +216,7 @@ jobs:
             "CONFIG_KSU_TAMPER_SYSCALL_TABLE=y"
             "CONFIG_K6A_GOV=m"
             "CONFIG_NOMOUNT=y"
-            "CONFIG_FORTIFY_SOURCE=y"
+            "CONFIG_INIT_STACK_ALL_ZERO=y"
             "CONFIG_NFC_NQ_PN80T=y"
             "CONFIG_PHY_QCOM_QUSB2=y"
           )
