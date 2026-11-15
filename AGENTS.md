@@ -2459,6 +2459,15 @@ wie er ist**, keine fürsche Kernel-Arbeit nötig. Konsequenzen/Items:
   Workflow-Assert `CONFIG_INIT_STACK_ALL_ZERO=y` statt FORTIFY-Assert). CI-Run
   `43687047805`. Plan: bootet → 459 = Final (INIT an, FORTIFY aus); bootlooped →
   beide schuldig, Revert auf 457-Stand (baut 460 = 457-äquivalent, main-konsistent).
+- **459 BOOTET → FINAL-BUILD (2026-11-15)**: CI grün (run `43687047805`), Banner
+  `build459-aosp` verifiziert, 0 echte Oops/Panics (einziger grep-Treffer =
+  benigne `evtlog_status: panic:1`-DRM-Debug-Zeile, identisch in 457s Boot),
+  k6a_gov 1.7.4 alive (state=gaming, temp 50, throttle_events 0), su OK,
+  v1.6.6 Re-Arm post-Flash ✓ (dritter Kernel-Flash-Zyklus in Serie).
+  **Härtungs-Finalstand: `CONFIG_INIT_STACK_ALL_ZERO=y` AN, `FORTIFY_SOURCE`
+  AUS (schuldig, unverträglich mit GCC 13.3 auf 4.14 — frühster Boot-Tod,
+  pre-ramoops).** Isolationsfall vollständig: 1 Build = 1 Variable, Rescue-Dance
+  (Download-Zip + Recovery-Flash) bewährt in Minuten.
 - **Messung-Fixes (Wichtig)**: `temp_peak` ist **Pro-Tick-Snapshot** (`gov->temp_peak =
   t_peak` :1345, kein latched Max — 65 @+17 s nach Rundenende war kein Widerspruch
   zu den @80-Flip-Readings). Tick-Arithmetik: Rundensegment 3758 Ticks/964 s = exakt
