@@ -2433,6 +2433,17 @@ wie er ist**, keine fürsche Kernel-Arbeit nötig. Konsequenzen/Items:
   allein) nagt den Schuldigen fest; 458a bootlooped → FORTIFY ist er.
   Nach jedem 458a/b-Boot: Banner/Oops/Thresholds/gpu_caps/poll_adaptive prüfen
   (v1.6.6 sollte D1a-Werte selbst setzen — Write-Pfad-Beweis).
+- **Reboot-Proof 2026-11-15 ERFOLGREICH (v1.6.6 vollständig bewiesen)**: Boot-Log
+  `[06:51:05] cd_thresholds ← 70 80 87 66` + `[06:51:06] gpu_caps ←
+  800000000 680000000 500000000` — beide `←`-Zeilen = echte Writes auf
+  Reboot-Defaults (Skip-Pfad war vorher der einzige bewiesene); Sysfs-Readback
+  exakt D1a. D1a = aktive Baseline.
+- **458a CI grün (run `43682402722`) + Artifact verifiziert**: Banner
+  `build458-aosp` (GCC 13.3.0), Image.gz decomp 44 386 312 B (+10 B vs 457 =
+  Banner-Ziffern), direkte AK3-Struktur (wie 457), REQUIRED_CONFIGS-Assert
+  beweist `CONFIG_FORTIFY_SOURCE=y` in .config. Zip liegt in
+  `/data/media/0/Download/` (chown media_rw). Flash + Boot-Analyse = nächster
+  Schritt (FORTIFY-Anklage/Entlastung).
 - **Messung-Fixes (Wichtig)**: `temp_peak` ist **Pro-Tick-Snapshot** (`gov->temp_peak =
   t_peak` :1345, kein latched Max — 65 @+17 s nach Rundenende war kein Widerspruch
   zu den @80-Flip-Readings). Tick-Arithmetik: Rundensegment 3758 Ticks/964 s = exakt
