@@ -2422,6 +2422,17 @@ wie er ist**, keine fürsche Kernel-Arbeit nötig. Konsequenzen/Items:
   hb-Zeile trägt pid=0 → data.txt ist der Diag-Ort). Verifiziert: Start-Log
   `gpu_caps=800000000 680000000 500000000 poll_adaptive=0`, Sysfs-Readback
   identisch. Nächster Boot beweist den Write-Pfad (bis dahin nur der Skip-Pfad).
+- **D1a aktiviert + 458a gestartet (2026-11-15)**: settings.conf cd_thresholds
+  72→70 (Template-Sync `22c5dfe` im ctl-Repo, ctl-Commits: v1.6.6 = `b6dd5c6`),
+  Entry 80 unverändert (Vendor-Risiko konstant). Hot-Reload-Hinweis: ctl parst
+  pro Tick, aber `_apply_cd_thresholds` feuert nur bei State-Wechseln — Mid-Gaming-
+  Edits wirken erst bei der nächsten Transition/Boot. Build 458a = FORTIFY allein
+  (`66bb2a510`: `CONFIG_FORTIFY_SOURCE=y`, INIT_STACK_ALL_ZERO bleibt aus,
+  REQUIRED_CONFIGS-Assert `CONFIG_FORTIFY_SOURCE=y` wieder drin); CI-Run
+  `43682402722`. Isolationsplan: 458a bootet → FORTIFY unschuldig → 458b (INIT
+  allein) nagt den Schuldigen fest; 458a bootlooped → FORTIFY ist er.
+  Nach jedem 458a/b-Boot: Banner/Oops/Thresholds/gpu_caps/poll_adaptive prüfen
+  (v1.6.6 sollte D1a-Werte selbst setzen — Write-Pfad-Beweis).
 - **Messung-Fixes (Wichtig)**: `temp_peak` ist **Pro-Tick-Snapshot** (`gov->temp_peak =
   t_peak` :1345, kein latched Max — 65 @+17 s nach Rundenende war kein Widerspruch
   zu den @80-Flip-Readings). Tick-Arithmetik: Rundensegment 3758 Ticks/964 s = exakt
