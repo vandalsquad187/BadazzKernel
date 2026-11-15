@@ -2438,12 +2438,27 @@ wie er ist**, keine fürsche Kernel-Arbeit nötig. Konsequenzen/Items:
   800000000 680000000 500000000` — beide `←`-Zeilen = echte Writes auf
   Reboot-Defaults (Skip-Pfad war vorher der einzige bewiesene); Sysfs-Readback
   exakt D1a. D1a = aktive Baseline.
-- **458a CI grün (run `43682402722`) + Artifact verifiziert**: Banner
-  `build458-aosp` (GCC 13.3.0), Image.gz decomp 44 386 312 B (+10 B vs 457 =
-  Banner-Ziffern), direkte AK3-Struktur (wie 457), REQUIRED_CONFIGS-Assert
-  beweist `CONFIG_FORTIFY_SOURCE=y` in .config. Zip liegt in
-  `/data/media/0/Download/` (chown media_rw). Flash + Boot-Analyse = nächster
-  Schritt (FORTIFY-Anklage/Entlastung).
+- **458a BOOTLOOP → FORTIFY überführt (2026-11-15)**: Splash-Loop 2-3 s Zyklen,
+  User hat 457 noch am selben Tag zurückgeflasht (Rescue-Dance erprobt, Minuten).
+  Bisect-Matrix damit komplett: **455 ✓ (beide aus) / 456 ✗ (beide an) / 457 ✓
+  (beide aus) / 458a ✗ (FORTIFY allein)** → `CONFIG_FORTIFY_SOURCE` allein =
+  Bootloop-Ursache; INIT_STACK unverdächtig (456 durch FORTIFY erklärt).
+- **pstore-Forensik = Dead End (erklärt)**: `/sys/fs/pstore` leer nach Bootloop.
+  Ramoops korrekt registriert (dmesg: `ramoops: attached 0x400000@0xb0000000`,
+  console/pstore-1 @0.252 s, Zones 20 KB) — aber die 458a-Death-Cycles sterben
+  früher (< 0,25 s, vor pstore-Registrierung) → nichts zu capturen. Mechanismus-
+  Hypothese: 4.14-FORTIFY-Implementierung vs. GCC 13.3 (`__builtin_object_size`-
+  Semantik-Änderungen seit GCC 10; Ära-Kernels pingen alte GCCs). FORTIFY-Fix =
+  Port der Compiler-Kompatibilitäts-Patches (tief, unsicher, geringer Nutzen) —
+  nicht verfolgt. sweet_ramoops bleibt für spätere Spät-Crashes nutzbar.
+- **v1.6.6 dritter Live-Beweis (post-Flash)**: nach 457-Rückflash re-armete der
+  ctl selbst: `70 80 87 66` + `gpu_caps 800/680/500` + `poll_adaptive 0` —
+  Persistenz gilt auch über Kernel-Flash-Zyklen.
+- **Build 459 = INIT_STACK allein** (`c21e4ac62`: FORTIFY zurück auf 457-Stand,
+  `CONFIG_INIT_STACK_ALL_ZERO=y` + `# CONFIG_INIT_STACK_NONE is not set`;
+  Workflow-Assert `CONFIG_INIT_STACK_ALL_ZERO=y` statt FORTIFY-Assert). CI-Run
+  `43687047805`. Plan: bootet → 459 = Final (INIT an, FORTIFY aus); bootlooped →
+  beide schuldig, Revert auf 457-Stand (baut 460 = 457-äquivalent, main-konsistent).
 - **Messung-Fixes (Wichtig)**: `temp_peak` ist **Pro-Tick-Snapshot** (`gov->temp_peak =
   t_peak` :1345, kein latched Max — 65 @+17 s nach Rundenende war kein Widerspruch
   zu den @80-Flip-Readings). Tick-Arithmetik: Rundensegment 3758 Ticks/964 s = exakt
