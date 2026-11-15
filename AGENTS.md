@@ -1,16 +1,18 @@
 # Kernel Build Status
 
-## Current State (Stand 2026-11-14, Build 455 live)
-- **Repo**: `vandalsquad187/BadazzKernel` branch `main` @ **`5622eb83e`** (Build 454: Sensor-Fail-safe +
-  profile-off Cap-Release + Hotplug-Re-Resolve + Zone-Spiegel-Log + scnprintf-Hygiene).
-  Kette: build441 `831efce8a` (NoMount) -> `456be5f7d` (GPU-OPP-Cache + kgsl_k6a_get_idx + psy-Cache)
+## Current State (Stand 2026-11-14, Build 457 live)
+- **Repo**: `vandalsquad187/BadazzKernel` branch `main` @ **`17a66600a`** (Build 457: KSU-prctl/reboot-Gates
+  + defconfig-Revert von 456 — **456 bootlooped am Gerät**, Ursache = FORTIFY/INIT_STACK-CFLAGS, beide
+  revertiert; siehe Build-456/457-Abschnitt unten). Kette: build441 `831efce8a` (NoMount)
+  -> `456be5f7d` (GPU-OPP-Cache + kgsl_k6a_get_idx + psy-Cache)
   -> `784a55541` (CI lockdep: NoMount-Step) -> `5bdd119ac` (Build446: Plan/Commit/Latch — KGSL/Devfreq-I/O
   aus `gov->lock`) -> `cd02a1f4e` (gpu_idx_read-Return-Value-Bugfix, r8b-Fund) -> `d0fdae972` (Build450:
   hist aus status ausgelagert) -> `52917a18e` (Build452: adaptive slow-poll in GAMING) -> `489b360ce`
-  (r9/r9b-Kalibrierung) -> `5622eb83e` (Build 454, flashed als build455).
-  Releases: **v4.14.369-badazz-build455** (Run 43502371855, Latest) — geflasht + live verifiziert
-  2026-11-14 (ko **53 248 B**, git_hash/zone-mirror unten im r10-Abschnitt); davor 453 (ko 69 384 B,
-  2026-11-13) und 451/450/449/447.
+  (r9/r9b-Kalibrierung) -> `5622eb83e` (Build 454, flashed als build455) -> `f5257d095` (Build 456,
+  Bootloop) -> `17a66600a` (Build 457, **live via Push-Run-Artifact**).
+  Releases: **v4.14.369-badazz-build455** (Run 43502371855, Latest) — 455 verifiziert
+  (ko **53 248 B**, git_hash/zone-mirror unten im r10-Abschnitt); 457 lebt nur als Artifact
+  (Run 43640674494); davor Releases 453 (ko 69 384 B, 2026-11-13) und 451/450/449/447.
 - **KGSL-I/O aus `gov->lock` (Build446, `5bdd119ac`) — implementiert + in vivo bewiesen (r8c)**:
   Plan/Commit/Latch-Muster: alle KGSL/Devfreq-Schreib-Readbacks laufen im Commit ausserhalb von
   `gov->lock` (Work-Structs `k6a_gpu_work/k6a_gpu_res/k6a_bw_work/k6a_bw_res/k6a_limits_work/.any`),
@@ -2302,4 +2304,146 @@ wie er ist**, keine fürsche Kernel-Arbeit nötig. Konsequenzen/Items:
   `/system/bin/su` + hardcodiertes `sh -c`) — Aufruf ist `su 'befehl'` OHNE `-c`
   (`su -c '…'` → „unknown option"-Wirrwarr); KSU-Grant für Termux bleibt erhalten.
   (4) `/sys/kernel/k6a_gov/version` existiert nicht — Version ist Key in `status`.
-  (5) `pidof` matcht den Controller nicht (heißt `sh` im comm) — `pgrep -f` oder HB-Log nutzen.
+   (5) `pidof` matcht den Controller nicht (heißt `sh` im comm) — `pgrep -f` oder HB-Log nutzen.
+
+## r12/r13 (2026-11-14, Mittelweg-Tests auf build455) — PUMP-MECHANIK KORRIGIERT
+- **r12 (passive-Rediscovery)**: passive 96/99/102/93 + poll_adaptive=0 statt r9b-Kalibrierung →
+  Intro-Spur **120 fps wie build451** (r9b 65/70/75/60 + poll_adaptive=0 war der Intro-Killer:
+  L2-Entrys mitten in der Intro-Phase). Round 2 (heat-soak, ~100 Fps Ziel): Vendor-Eskalation
+  26-75 fps Jump-Zyklen bei Kernel 100 % gaming → Vendor-Onset-Zone Kernel-Quelle **~78-82 °C**
+  (Skin 74-76). Logs: `/data/local/tmp/a15r12_dmesg.log`, `r12_status.txt`.
+- **r13 (Mittelweg 76/80/86/73 + gpu_caps 800/680/500, poll_adaptive=0)**: throttle_events +69,
+  hist 75↔80/82-Flips alle 4-8 s → **PUMP** an der [L2,L3)-Grenze. Logs: `a15r13_dmesg.log`,
+  `a15r13_hist.txt`, `a15r13_status.txt`.
+- **Pump-Mechanik (WICHTIG — alte Aussage war falsch)**: L3→L2-Exit = `t < gov->cd_l2_temp`
+  (k6a_gov.c:613) — **NICHT** hardcodiert; das Flip-Band = `[cd_l2_temp, cd_l3_temp)` ist
+  **config-formbar** (r11s-Band [65,70), r13s-Band [76,80)). Pump tritt auf, wenn das Last-
+  Gleichgewicht IM Band liegt; Exit UNTERHALB des gecapten Gleichgewichts = strukturell pump-frei.
+- **Test D1 (armed, 2026-11-14 21:4x, auf build457)**: `cd_thresholds=72 80 87 66 1708800 1555200
+  1324800` (settings.conf Zeile 55) + gpu_caps 800/680/500 + poll_adaptive=0. Band [72,80);
+  L3-Cap-Äquilibrium (~74-77) robust über Exit 72. Erwartung: kühle Intros 120, Soak steady ~100
+  statt Sägezahn. Vendor-Onset (~78-82) wird vom L3-Cap unterschritten/knapp gestreift; Eskalation
+  D2 = `gpu_caps 680/680/500` falls nötig. **Reboot resettet gpu_caps+poll_adaptive** (Sysfs-only!)
+  — nach jedem Flash Re-Arm nötig; cd_thresholds überlebt via settings.conf (ctl re-applied).
+- **QG-K-Charging-Detection-Falle**: Fuel-Gauge-Lines (`charge_status=2`, gepinntes soc, positive
+  batt_ma) sind stale/Latch-Garbage — Beweis: Discharging/30 %/3,66 V während QG-K "charging"
+  meldete. Einzige Quelle: `/sys/class/power_supply/{usb,dc}/online+present`.
+  (r9-Kabeltheorie verfallen.) grep-Falle: `fail.safe|Oops|BUG` = 257 pm6150_charger rc=-22
+  Noise-Hits (0 echte Fail-safes).
+- **Controller-Restart-Gap**: TERM-Handler schreibt die im RAM gemerkten Thresholds zurück;
+  bis zum nächsten Commit-Cycle (~2 min) läuft der Kernel mit ALTEN Werten — kurzfristige
+  sysfs-Overrides NICHT via Restart ins persistence-Flashen treiben.
+
+## Build 456/457 (2026-11-14, KSU-Supercall-Gates — Defconfig-Hardening-Bootloop)
+- **Anlass (Duck-Detector-Report, Plan-Mode-Matrix)**: prctl(0xDEADBEEF)-Dispatcher
+  `KernelSU-Next/kernel/supercall/supercall.c:131` `ksu_handle_prctl` — arg2==2 get_info
+  (:293-321) + arg2==3 crown-diag (:200-220) **ungated** (jede App kann root-Prozesse
+  listen); `ksu_handle_sys_reboot` :531 — fd-request `KSU_INSTALL_MAGIC2` (:634-649) **ungated**
+  (Kommentar :636: „jede App kann fd anfordern"). Korrekt gated: set_manager_appid (:653/:659
+  uid==0), SuSFS-Commands (:543 uid==0), prctl-FD-Install (:248 is_manager).
+  `is_manager()` = static inline `manager/manager_identity.h:16/:47`; Hook `hook/syscall_
+  table_hook_arm64.c:130-133` fällt bei `-ENOSYS` zum echten prctl durch → Kamouflage-by-Design.
+- **Fix (f5257d095, patches/ksu-prctl-gate.patch)**: 3 Gates — get_info + crown-diag:
+  `if (!is_manager()) return -ENOSYS;` (Funktion ist `long ksu_get_crown_diag(...)`, NICHT int);
+  fd-request: `if (current_uid().val != 0 && !is_manager()) return 0;`. Kein App-Bruch:
+  Compat-Empfehlungen stehen im Plan-Mode-Report (npm-Expose, HiddenApi-Bypass).
+- **Repo-Mechanik**: KernelSU-Next = **Submodul** @ `79003ef8e8df26b38d55a46b994e4362448bd725`
+  (v3.3.0-318, vandalsquad187/KernelSU-Next.git), Checkout mit `submodules: true` (:98);
+  `drivers/kernelsu` = **Symlink** → `../KernelSU-Next/kernel`. Patch-Datei `patches/
+  ksu-prctl-gate.patch` mit umgeschriebenen Pfaden (a/KernelSU-Next/kernel/...), `patch -p1`
+  aus Repo-Root; Round-Trip bewiesen (pristine-Backups in Termux-tmp). **.gitignore-Fallen**:
+  Zeile 34 `*.patch`, Zeile 92 `patches` UND `.github` → `git add -f` nötig.
+- **Workflow (.github/workflows/build-kernel.yml)**: Step „Apply KSU hardening patch" nach
+  Checkout + 3 grep-Assertionen (lokal getestet: ASSERT1/2/3-OK); REQUIRED_CONFIGS hatte
+  temporär FORTIFY+INIT_STACK_ALL_ZERO (457: wieder entfernt). Resync miui/test mit main
+  (X-ours) nimmt beide Commits mit.
+- **f5257d095 (Build 456) = BOOTLOOP**: + `CONFIG_FORTIFY_SOURCE=y` + `CONFIG_INIT_STACK_
+  ALL_ZERO=y` (Makefile :837/:845, `-ftrivial-auto-var-init=zero`, GCC 13.3; security/
+  Kconfig.hardening-Choice ohne plugin-deps; CI assertete beides, KSU-Patch applied — Beweis
+  im CI-Log Run 43636158212; 456-vs-455-Image-Diff = 31,2 M Bytes = 70 %). Gerät: Xiaomi-
+  Splash, ~3-s-Reboot-Zyklus, pstore/ramoops nicht verfügbar; aosp-ZIP korrekt geflasht
+  (Banner/size/inner-zip-Struktur verifiziert).
+- **17a66600a (Build 457) = Boot-Fix, Gates drin**: beide defconfig-Items revertiert (455-
+  Stand), KSU-Gates unangetastet → bootet sauber (Banner `build457-aosp`, 0 Oops, su OK,
+  k6a unverändert). 457-vs-455-Image-Diff = 5,3 M Bytes (12 %) = Abschnitts-Realign durch
+  die kleine KSU-Änderung. **Verdachtsverteilung**: FORTIFY und/oder INIT_STACK-`zero`
+  killen early boot auf diesem Vendor-Tree (4.14+GCC13) — isoliert NICHT festgenagelt;
+  Isolation (ein Item pro Build) nur optional bei Interesse. Global-CFLAGS-Härtung =
+  höchster Blast-Radius → nie mit anderem Scope kombinieren; Lektion: Härtungs-Flashs
+  nur mit Zeitfenster und Backup-Kernel.
+- **KSU-Gate-Akzeptanz (nach 457-Flash)**: Device bootet + su arbeitet; Manager-Dialog
+  (fd-ioctl-Pfad) vom User zu bestätigen — get_info/crown-diag sind App-seitig nur für
+  den Manager nützlich, Gate darf Nicht-Manager die -ENOSYS-Kamouflage geben.
+- **Manager-Swap auf spoofed (2026-11-14, verifiziert, Go erteilt)**: Upstream-dev
+  (KernelSU-Next/KernelSU-Next, Run 2269 @ `7ccf6147`) baut `manager-spoofed` =
+  `KernelSU_Next_v3.4.2-198-g7ccf6147-spoofed_33553-release.apk`. **Cert-Verifikation
+  (Vorsicht, 2 Fallen)**: (1) APK Signing Block Geometrie — head-u64-Check-Position
+  = `cd_offset - sz - 8`; die Pair-Walk-Position ist danach automatisch `pos` (der
+  Kernel resettet NICHT) = `cd_offset - sz`; wenn man selbst resettet, liest man
+  `id=0x6ca` (= erstes u64 low-word) statt `id=0x7109871a` — false NO-V2-PAIR.
+  (2) Erwartungswerte im gepinnten `KernelSU-Next/kernel/Kbuild` (:188-196 Fallback,
+  Größe `0x3e6`=998 B, Hash `79e590113c4c…21bf7`, Signer CN=Rifat Azad). v2-Payload-
+  Layout: signers→signer→signed_data→digests(algo u32 0x103, len u32, 32B)→
+  certificates→cert_len u32. Spoofed-Cert = **byte-exakt MATCH** → Throne-Tracker
+  (`on_post_fs_data`/`on_boot_completed` `track_throne_now`, kernel-seitig, unabhängig
+  vom fd-Gate; Live-Observer `track_throne(true)` ab boot_completed) registriert das
+  neue Package automatisch. Bootstrap-Kette intakt: ksud `CHANGE_MANAGER_UID`
+  (uid==0-Gate unberührt, supercall.c:667-677). Mapping: Kernel 38532 = merge-base
+  `b427a3f9` + fork; dev-Manager +148 Commits → kosmetischer Update-Hinweis möglich,
+  Funktion degradiert per -ENOSYS-Durchfall. Install-Sequence **REAL (User-Ablauf
+  2026-11-14, läuft)**: erst den ALTEN Manager DEINSTALLIEREN, dann spoofed
+  installieren/öffnen — side-by-side funktioniert NICHT (der Throne-Tracker hält
+  offenbar genau EINEN Seat: der bereits registrierte appid wird vom Scan nicht
+  an ein zweites valid-APK abgegeben). Manager-Akzeptanz auf spoofed v3.4.2-198:
+  **läuft** ✓ (Registrierung + get_info + fd-Pfad bestätigt in vivo).
+  `mappings-spoofed` = ProGuard-Mappings, nicht installierbar.
+
+## r14 (2026-11-14 23:22-23:38, build457, D1-Runde — User „super flüssiges Spiel")
+- **Setup**: cd_thresholds 72/80/87/66 + gpu_caps 800/680/500 + poll_adaptive=0;
+  Manager-Swap-Reboot hatte gpu_caps/poll_adaptive resettet → Re-Arm vor der Runde
+  (Lektion hart bestätigt: **JEDER Reboot resettet beide**, auch nicht-Flash-Reboots).
+- **Verdict D1 = ERFOLG**: (1) **Vendor-Engine still die GANZE Runde**
+  (`vendor_sconfig=0`, `vendor_cpu_limits=none`) — trotz Source-Spikes bis 80: das war
+  das D1-Hauptziel (r12: 26-75-fps-Vendor-Chaos, r13: Escalation). (2) Intro sauber:
+  ~10-12 min reines gaming (0 Events), CD-Phase nur in den letzten ~5 min
+  (~1180-1463 s). (3) **throttle_events=12** (r13: +69) bei Subjectiv „super flüssig".
+  (4) Residual: Endphasen-PUMP L2↔L3 — 11 Flips in 44 s (1323-1367 s, ~5,5-s-Kadenz,
+  Readings 71↔80): Equilibrium ~76 °C liegt MIT ±4-5-K-Zonen-Noise an den Bandkanten
+  [72,80). Auswirkung benign: CPU 1708↔1555 MHz +   GPU 800↔680 MHz, beide mild.
+- **D1 = neue Baseline (User-OK 2026-11-14) + rebootfest via k6a-ctl v1.6.6**:
+  Fund — `gpu_caps`/`poll_adaptive`-Nodes sind Sysfs-flüchtig (Reboot → Kernel-
+  Defaults 800/565/430 bzw. adaptive=1); das ctl las gpu_caps nur für Telemetrie.
+  Fix in k6a-ctl v1.6.6 (`b6dd5c6`, Release v1.6.6, Gate grün): settings.conf-Keys
+  `gpu_caps`/`poll_adaptive` + `_apply_gov_caps()` beim Controller-Start
+  (idempotent wie `_apply_cd_thresholds`; deckt Boot/Watchdog-Respawn/rmmod-
+  Recovery ab, alte Kernel failen still). Deploy-Tanz: Kontext = `app_data_file:
+  s0:c83,c257,c512,c768` für controller/module.prop, `system_file:s0` für
+  settings.conf; HB-Pid-Erkennung via `/proc/[0-9]*/cmdline`-Scan (service.log-
+  hb-Zeile trägt pid=0 → data.txt ist der Diag-Ort). Verifiziert: Start-Log
+  `gpu_caps=800000000 680000000 500000000 poll_adaptive=0`, Sysfs-Readback
+  identisch. Nächster Boot beweist den Write-Pfad (bis dahin nur der Skip-Pfad).
+- **D1a aktiviert + 458a gestartet (2026-11-15)**: settings.conf cd_thresholds
+  72→70 (Template-Sync `22c5dfe` im ctl-Repo, ctl-Commits: v1.6.6 = `b6dd5c6`),
+  Entry 80 unverändert (Vendor-Risiko konstant). Hot-Reload-Hinweis: ctl parst
+  pro Tick, aber `_apply_cd_thresholds` feuert nur bei State-Wechseln — Mid-Gaming-
+  Edits wirken erst bei der nächsten Transition/Boot. Build 458a = FORTIFY allein
+  (`66bb2a510`: `CONFIG_FORTIFY_SOURCE=y`, INIT_STACK_ALL_ZERO bleibt aus,
+  REQUIRED_CONFIGS-Assert `CONFIG_FORTIFY_SOURCE=y` wieder drin); CI-Run
+  `43682402722`. Isolationsplan: 458a bootet → FORTIFY unschuldig → 458b (INIT
+  allein) nagt den Schuldigen fest; 458a bootlooped → FORTIFY ist er.
+  Nach jedem 458a/b-Boot: Banner/Oops/Thresholds/gpu_caps/poll_adaptive prüfen
+  (v1.6.6 sollte D1a-Werte selbst setzen — Write-Pfad-Beweis).
+- **Messung-Fixes (Wichtig)**: `temp_peak` ist **Pro-Tick-Snapshot** (`gov->temp_peak =
+  t_peak` :1345, kein latched Max — 65 @+17 s nach Rundenende war kein Widerspruch
+  zu den @80-Flip-Readings). Tick-Arithmetik: Rundensegment 3758 Ticks/964 s = exakt
+  4 Hz (poll_adaptive=0 honoriert); Pre-Round-Defizit = Nach-Reboot-Fenster vor dem
+  Re-Arm (adaptive 1 Hz Default). Hist-Ring (16 Slots) evicted früh —
+  throttle_events als Transfer-Zähler gegen evicted Rows konsistent nutzbar (12 =
+  10 Escalations + 2 Entries).
+- **Optionale Mikro-Tweaks (nicht nötig, notiert)**: cd_l2_temp 72→70 (Exit tiefer
+  unter Equilibrium → weniger Endphasen-Flips; Entry 80 bleibt → Vendor-Risiko
+  unverändert); ODER gpu L3-Cap 680→650. Empfehlung: D1 als neue Baseline akzeptieren.
+- **Tools**: r14-Dmesg-Capture-Worker wieder dem Phantom-Killer erlegen (47 Zeilen
+  Drain, ~30 s — Mid-Session-Spawns bleiben killbar); Auswertung über Kernel-Ring
+  (`dmesg`, Boot < 1 h) + hist/status-Nodes. Files: `/data/local/tmp/a15r14_status.txt`
+  (pre), `a15r14_post.txt`, `a15r14_dmesg.log` (Fragment).
