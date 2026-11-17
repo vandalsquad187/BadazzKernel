@@ -2559,3 +2559,43 @@ wie er ist**, keine fürsche Kernel-Arbeit nötig. Konsequenzen/Items:
   u:object_r:system_file:s0` nachziehen. Files: `/data/local/tmp/a15r16a_{status,post}.txt`,
   `a15r16b_{status,post}.txt`, `a17soak_pre.txt`, `a17soak_t0.txt`, `a17soak_post.txt`,
   `a17soakT0b.txt`, `a17stop_post.txt`.
+
+## 2026-11-17 II — Build 460 (Spike-Filter/Silver-Caps/quiet-Telemetrie) + ctl v1.6.7
+- **Build 460** (`b32dad620`, gov **1.7.5**): (1) **Spike-Filter** vor der State-Entscheidung
+  (`K6A_SPIKE_K=15`, Rate-Klemme vs `temp_smooth` + Spread-Klemme tp vs 2nd-highest — ein
+  glitchiger Zonenwert kann L4 nicht mehr sofort ausloesen; `spike_drops=`-Telemetrie).
+  (2) **Silver-Caps** im CD-Pfad: sysfs `cd_silver_caps` (L2/L3/L4 Hz, `0 0 0` = aus =
+  Null-Verhalten), sofortiger Apply (kein Ramp), Notifier-Klammer auf die CPU-0-Policy.
+  (3) **quiet_therm-Telemetrie** `temp_quiet=` in status (zone74, keine Steuerung).
+  Host-Test: **31/31 Pruefungen gruen** (S1-S7b); Run rot nur wegen DOC-DRIFT (README fehlte
+  1.7.5) → README nachgezogen (`7a57f2d9b`, md-only, verbraucht keine Build-Nummer); das rote
+  X auf b32dad620 cleart beim naechsten Code-Push (461). build-kernel.yml hat paths-ignore
+  '**.md' — README-Push triggerte keinen neuen Run ✓.
+- **ctl v1.6.7** (`5c88157`, Gate 0 Warns, Zip 58 KB): _auto_eval-Cgroup-Scan als While-Loop
+  (13-Zeilen-Kappe weg), `_enter_daily` laesst `_TURBO_LOCK` stehen (Notbremse-Sperre loest
+  nur `_turbo_guard` via TURBO_REARM_C — sonst darf Turbo bei heissem Geraet beim naechsten
+  Gaming-Entry sofort wieder scharf werden), **Daemon-Stop-Verifikation** (3 Ticks nach der
+  Pause: pidof-Check → `turbo: Stop verifiziert` oder `WARN ... wirkungslos`; Race-Guard:
+  `_TURBO_ACTIVE != 1` cancelt), README-Fix GAMING-Takt 2 s. Deploy zusammen mit 460 ok —
+  alle Aenderungen verhaltenneutral fuer den Runden-Test (Loop = Robustheit, Lock-Fix =
+  betrifft nur Notbremsen-Fall, Verify = Logging).
+
+## 2026-11-17 III — Build 460 geflasht + Runden-Test (kernel-only, L4 194 s)
+- **460-Flash verifiziert**: Banner `4.14.369-openela-rc1-...-build460-aosp` (GCC 13.3.0,
+  PREEMPT), `k6a_gov v1.7.5 loaded` @11.7 s. Re-Arm über Flash ✓ (cd_thresholds 72/80/87/66
+  + gpu_caps 800/680/500 + poll_adaptive 0 via v1.6.6-Persistenz). Neue Keys live:
+  `spike_drops=0`, `silver_caps=0 0 0`, `temp_quiet=` (trackt). turbo_stop=1: Daemons
+  pausiert direkt beim ersten Gaming-Entry nach Boot.
+- **460-Runden-Test** (1 Runde, kein Lüfter, ungesteckt, kernel-only): `spike_drops=0`
+  (Filter still — reale Anstiege unberührt ✓), Dump **bleibt 3 Zeilen** (0 TGAME-Entries
+  ✓), silver_caps inaktiv ✓. **ABER: L4 +194,5 s** in EINER Runde (Stop-Runden: 13,3 s in
+  ZWEI): ~10 bang-bang-Episoden @86↔78-79 (2,5-25 s, Ring evicted frühe), +30 Events,
+  L2 +106 s, L3 +442 s, Ende temp 61/quiet **45** (Onset-39-Nähe: mit Vendor-Ladder wäre
+  diese Runde tief in 1017/576 gewesen — Soak-Muster). temp_peak=62 (rolling, post).
+  **Befund**: kernel-only Floor (L4 = 1324) wird ohne Vendor-Ladder und ohne Lüfter hart
+  erreicht — die 1708/1555-Zwischenstufen halten 87 °C nicht auf. Das ist exakt das
+  Argument für **Build 461 (Feinleiter)**: Interpolation l2g→l4g über 72-87 °C statt
+  3 flacher Stufen → caps kommen GRADUell früher runter, 87-Klippe bleibt Notfall.
+  Files: `/data/local/tmp/a17b460_t0.txt`, `a17b460_post.txt`.
+- **Ausstehend**: ctl v1.6.7-Deploy (Zip in /data/local/tmp/), Build 461 (Feinleiter),
+  Runden-Feel-Feedback des Users zur L4-Episoden-Last.
