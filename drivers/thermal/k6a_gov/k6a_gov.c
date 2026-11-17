@@ -30,12 +30,13 @@ extern int kgsl_k6a_set_min_level_idx(unsigned int level);
 extern int k6a_devfreq_get_bw(const char *name, u32 *cur, u32 *min, u32 *max);
 extern int k6a_devfreq_set_bw(const char *name, u32 min, u32 max);
 
-#define K6A_GOV_VERSION       "1.7.4"
+#define K6A_GOV_VERSION       "1.7.5"
 #define K6A_GOV_KTHREAD_SLEEP_MS   250
 #define K6A_GOV_MAX_FREQS     32
 #define K6A_HIST_N            16
 #define K6A_RAMP_UP_TICKS     4   /* Ticks pro OPP-Schritt beim Loesen des Gold-Caps */
 #define K6A_L4_MARGIN     3   /* K unter cd_l4_temp, bevor L4 verlassen wird */
+#define K6A_SPIKE_K       15  /* Build460: max K/Tick (250 ms) Sprung, darueber = Spike (Realraempfe ~0.1-2 K/Tick) */
 
 enum k6a_state { K6A_OFF=0, K6A_GAMING=1, K6A_CD_L2=2, K6A_CD_L3=3, K6A_CD_L4=4 };
 enum k6a_tsrc { K6A_TSRC_NONE=0, K6A_TSRC_GOLD, K6A_TSRC_SILVER, K6A_TSRC_XO, K6A_TSRC_SOC, K6A_TSRC_ZONE0 };
@@ -58,6 +59,8 @@ struct k6a_gov {
     bool temp_valid;
     bool temp_warned;
     u32 invalid_ticks;     /* Build454: aufeinanderfolgende Ticks ohne Temp-Quelle */
+    s32 temp_smooth;       /* Build460: gefilterte Referenz fuer den Spike-Filter, 0 = unset */
+    u32 spike_drops;       /* Build460: geclampte Spike-Ticks (Telemetrie) */
     u32 profile;
     bool thresholds_user;
     char vendor_sconfig[16];
@@ -76,6 +79,9 @@ struct k6a_gov {
 
     u32 cd_l2_temp, cd_l3_temp, cd_l4_temp, cd_recover;
     u32 cd_l2_gold_max, cd_l3_gold_max, cd_l4_gold_max;
+    u32 cd_l2_silver_max, cd_l3_silver_max, cd_l4_silver_max; /* Build460: Silver-Caps, 0 = aus */
+    u32 silver_cap_now;    /* Build460: aktuell angewendeter Silver-Cap, 0 = keiner */
+    u32 silver_enforced_max;
     u32 cd_l2_gpu_max, cd_l3_gpu_max, cd_l4_gpu_max;
     u32 cd_l2_bw_gpubw, cd_l3_bw_gpubw, cd_l4_bw_gpubw;
     u32 cd_l2_bw_llcc, cd_l3_bw_llcc, cd_l4_bw_llcc;
@@ -125,6 +131,7 @@ struct k6a_gov {
     struct thermal_zone_device *tz_xo;
     struct thermal_zone_device *tz_soc;
     struct thermal_zone_device *tz_zone0;
+    struct thermal_zone_device *tz_quiet;  /* Build460: quiet_therm-Telemetrie (zone74) */
 
     u32 build_hash;
 
@@ -332,6 +339,19 @@ static u32 get_cd_max_freq(void) {
     }
 }
 
+/* Build460: Silver-Caps im CD-Pfad — symmetrisch zu Gold; 0 = aus
+ * (Silver bleibt dann bewusst in Vendor-/Stock-Regie). Caller haelt
+ * gov->lock. */
+static u32 get_cd_silver_max_freq(void) {
+    if (!gov) return 0;
+    switch (gov->state) {
+    case K6A_CD_L2: return gov->cd_l2_silver_max;
+    case K6A_CD_L3: return gov->cd_l3_silver_max;
+    case K6A_CD_L4: return gov->cd_l4_silver_max;
+    default: return 0;
+    }
+}
+
 /* Naechster Gold-Cap Richtung Ziel (0 = kein Cap). Runter: ein OPP pro Tick,
  * hoch: ein OPP alle K6A_RAMP_UP_TICKS Ticks, L4 und fehlende Tabelle sofort.
  * Caller haelt gov->lock. */
@@ -379,15 +399,31 @@ static void apply_policy(void) {
         cpufreq_update_policy(cpu);
 }
 
+/* Build460: Silver-Policy = die mit CPU 0 (CPU 0 sitzt immer in Silver). */
+static void apply_silver_policy(void) {
+    cpufreq_update_policy(0);
+}
+
 static void enforce_max_freq(void) {
     static u32 last_notapp_seen, last_stuck_seen, last_stuck_hard;
-    u32 max, seen = 0, hard = 0;
+    u32 max, smax, seen = 0, hard = 0;
     int cpu;
     struct cpufreq_policy *p;
 
     if (!gov || !gov->enabled || !gov->legacy_mode) return;
     gov->cap_now = ramp_next_cap(gov->cap_now, get_cd_max_freq());
     max = gov->cap_now;
+
+    /* Build460: Silver-Cap — sofort (kein Ramp; der Vendor drosselte cpu0
+     * auch direkt). 0 = aus. Laeuft pro Tick, unabhaengig vom Gold-
+     * Early-Return darunter. */
+    smax = get_cd_silver_max_freq();
+    if (gov->silver_cap_now != smax) {
+        gov->silver_cap_now = smax;
+        gov->silver_enforced_max = smax;
+        apply_silver_policy();
+    }
+
     if (max == gov->enforced_max) return;
     gov->enforced_max = max;
     apply_policy();
@@ -436,7 +472,7 @@ static void enforce_max_freq(void) {
 
 static int cpufreq_notify(struct notifier_block *nb, unsigned long e, void *data) {
     struct cpufreq_policy *p;
-    u32 max;
+    u32 max, smax;
 
     if (!gov || !gov->enabled || !gov->legacy_mode)
         return NOTIFY_OK;
@@ -444,10 +480,16 @@ static int cpufreq_notify(struct notifier_block *nb, unsigned long e, void *data
         return NOTIFY_OK;
     p = data;
     max = READ_ONCE(gov->cap_now);   /* gerampter Cap, nicht das State-Ziel */
-    if (!max) return NOTIFY_OK;
+    smax = READ_ONCE(gov->silver_cap_now);   /* Build460: Silver-Cap */
+    if (!max && !smax) return NOTIFY_OK;
 
-    if (is_gold_policy(p) && p->max > max) {
+    if (max && is_gold_policy(p) && p->max > max) {
         p->max = max;
+        /* NO cpufreq_update_policy() here — causes recursion! */
+    }
+    if (smax && !is_gold_policy(p) &&
+        cpumask_test_cpu(0, p->related_cpus) && p->max > smax) {
+        p->max = smax;
         /* NO cpufreq_update_policy() here — causes recursion! */
     }
     return NOTIFY_OK;
@@ -1298,6 +1340,7 @@ static int gov_thread(void *data) {
         int t_src = K6A_TSRC_NONE;
         bool t_valid = false;
         int t_peak = 0;
+        int spike = 0;
         int bt = 0;
         bool bt_ok = false;
         char vsbuf[sizeof(gov->vendor_sconfig)];
@@ -1339,6 +1382,26 @@ static int gov_thread(void *data) {
             }
             battery_guard_apply(bt_ok, bt);
             if (t_valid) {
+                /* Build460: Spike-Filter vor der Zustandsentscheidung. Ein
+                 * Lesefehler einer Zone mit plausibel positivem Wert liess
+                 * sonst tp (= Max aller 4 Gold-Zonen) L4 sofort ausloesen
+                 * (state_machine: tp >= cd_l4_temp). Zwei Klemmen:
+                 * (a) Tick-Rate gegen die gefilterte Referenz,
+                 * (b) Zonen-Spread gegen den 2nd-highest (Ein-Ausreisser
+                 * unterm Max). Keine Latenz fuer reale Anstiege: alle
+                 * Zonen steigen gemeinsam (< 15 K/Tick Spread). */
+                if (gov->temp_smooth > 0 &&
+                    t > gov->temp_smooth + K6A_SPIKE_K) {
+                    t = gov->temp_smooth + K6A_SPIKE_K;
+                    spike = 1;
+                }
+                if (t > 0 && t_peak > t + K6A_SPIKE_K) {
+                    t_peak = t + K6A_SPIKE_K;
+                    spike = 1;
+                }
+                if (spike)
+                    gov->spike_drops++;
+                gov->temp_smooth = t;
                 gov->temp_celsius = t;
                 gov->temp_src = t_src;
                 gov->temp_valid = true;
@@ -1555,6 +1618,8 @@ static ssize_t status_show(struct kobject *k, struct kobj_attribute *a, char *b)
     u32 bw_floors_gpubw[3], bw_floors_llcc[3];
     u32 bwc, bwmn, bwmx;
     u32 l2t, l3t, l4t, rec;
+    u32 spike_drops, s2, s3, s4, snow;
+    int quiet;
     size_t len;
 
     {
@@ -1563,6 +1628,13 @@ static ssize_t status_show(struct kobject *k, struct kobj_attribute *a, char *b)
 
         policy_peek = pol ? pol->max : 0;
         if (pol) cpufreq_cpu_put(pol);
+    }
+    {
+        /* Build460: quiet_therm (zone74) — dominanter Eingang der Vendor-
+         * TGAME-Ladder; Telemetrie fuer die Ladder-Naehe (39.0 Onset /
+         * 46.5 Klippe), KEINE Steuerungsentscheidung darauf. */
+        int q = read_cached_temp(&gov->tz_quiet, "quiet_therm");
+        quiet = q > 0 ? q : -1;
     }
     mutex_lock(&gov->lock);
     si = gov->state;
@@ -1606,6 +1678,9 @@ static ssize_t status_show(struct kobject *k, struct kobj_attribute *a, char *b)
     l3t = gov->cd_l3_temp;
     l4t = gov->cd_l4_temp;
     rec = gov->cd_recover;
+    spike_drops = gov->spike_drops;
+    s2 = gov->cd_l2_silver_max; s3 = gov->cd_l3_silver_max; s4 = gov->cd_l4_silver_max;
+    snow = gov->silver_cap_now;
     mutex_unlock(&gov->lock);
 
     if (si > K6A_CD_L4) si = K6A_OFF;
@@ -1698,6 +1773,14 @@ static ssize_t status_show(struct kobject *k, struct kobj_attribute *a, char *b)
         "gold_cap_now=%u\n"
         "residency_ms=off:%llu,gaming:%llu,cd_l2:%llu,cd_l3:%llu,cd_l4:%llu\n",
         gold_cap_now, res_ms[0], res_ms[1], res_ms[2], res_ms[3], res_ms[4]);
+
+    /* Build460: Spike-Filter-Telemetrie + Silver-Caps + quiet_therm */
+    len += scnprintf(b + len, PAGE_SIZE - len,
+        "spike_drops=%u\n"
+        "silver_caps=%u %u %u\n"
+        "silver_cap_now=%u\n"
+        "temp_quiet=%d\n",
+        spike_drops, s2, s3, s4, snow, quiet);
 
     /* Build450: hist ausgelagert in eigenen Node /sys/kernel/k6a_gov/hist —
      * status ist damit klein und fix-gross (1s-Controller-Heartbeat + 2s-Webui
@@ -1920,6 +2003,30 @@ static ssize_t cd_thresholds_store(struct kobject *k, struct kobj_attribute *a, 
     return c;
 }
 
+/* Build460: Silver-Caps (L2/L3/L4, Hz) — 0 0 0 = aus. Absteigend, wie Gold. */
+static ssize_t cd_silver_caps_show(struct kobject *k, struct kobj_attribute *a, char *b) {
+    u32 s2, s3, s4;
+    mutex_lock(&gov->lock);
+    s2 = gov->cd_l2_silver_max; s3 = gov->cd_l3_silver_max; s4 = gov->cd_l4_silver_max;
+    mutex_unlock(&gov->lock);
+    return scnprintf(b, PAGE_SIZE, "%u %u %u\n", s2, s3, s4);
+}
+static ssize_t cd_silver_caps_store(struct kobject *k, struct kobj_attribute *a, const char *b, size_t c) {
+    u32 s2, s3, s4;
+    if (sscanf(b, "%u %u %u", &s2, &s3, &s4) != 3) return -EINVAL;
+    if (s2 > 2000000000 || s3 > 2000000000 || s4 > 2000000000)
+        return -EINVAL;
+    if ((s2 || s3 || s4) && (!s2 || !s3 || !s4))
+        return -EINVAL;
+    if (s2 < s3 || s3 < s4)
+        return -EINVAL;
+    mutex_lock(&gov->lock);
+    gov->cd_l2_silver_max = s2; gov->cd_l3_silver_max = s3; gov->cd_l4_silver_max = s4;
+    mutex_unlock(&gov->lock);
+    gov_wake();
+    return c;
+}
+
 static ssize_t gpu_caps_show(struct kobject *k, struct kobj_attribute *a, char *b) {
     u32 l2g, l3g, l4g;
     mutex_lock(&gov->lock);
@@ -2006,6 +2113,7 @@ static struct kobj_attribute attr_pid         = __ATTR_RW(game_pid);
 static struct kobj_attribute attr_legacy      = __ATTR_RW(legacy);
 static struct kobj_attribute attr_hysteresis  = __ATTR_RW(hysteresis);
 static struct kobj_attribute attr_cd_thresh   = __ATTR_RW(cd_thresholds);
+static struct kobj_attribute attr_cd_silver   = __ATTR_RW(cd_silver_caps);
 static struct kobj_attribute attr_batt_guard  = __ATTR_RW(battery_guard);
 static struct kobj_attribute attr_batt_guard_temp = __ATTR_RW(battery_guard_temp);
 static struct kobj_attribute attr_poll_ms     = __ATTR_RW(poll_ms);
@@ -2024,6 +2132,7 @@ static struct attribute *gov_attrs[] = {
     &attr_legacy.attr,
     &attr_hysteresis.attr,
     &attr_cd_thresh.attr,
+    &attr_cd_silver.attr,
     &attr_batt_guard.attr,
     &attr_batt_guard_temp.attr,
     &attr_poll_ms.attr,
