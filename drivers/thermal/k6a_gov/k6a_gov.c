@@ -30,7 +30,7 @@ extern int kgsl_k6a_set_min_level_idx(unsigned int level);
 extern int k6a_devfreq_get_bw(const char *name, u32 *cur, u32 *min, u32 *max);
 extern int k6a_devfreq_set_bw(const char *name, u32 min, u32 max);
 
-#define K6A_GOV_VERSION       "1.7.5"
+#define K6A_GOV_VERSION       "1.7.6"
 #define K6A_GOV_KTHREAD_SLEEP_MS   250
 #define K6A_GOV_MAX_FREQS     32
 #define K6A_HIST_N            16
@@ -61,6 +61,7 @@ struct k6a_gov {
     u32 invalid_ticks;     /* Build454: aufeinanderfolgende Ticks ohne Temp-Quelle */
     s32 temp_smooth;       /* Build460: gefilterte Referenz fuer den Spike-Filter, 0 = unset */
     u32 spike_drops;       /* Build460: geclampte Spike-Ticks (Telemetrie) */
+    bool cd_ladder;        /* Build461: Feinleiter (piecewise l2g->l3g->l4g), default an */
     u32 profile;
     bool thresholds_user;
     char vendor_sconfig[16];
@@ -329,14 +330,42 @@ static void freq_init_worker(struct work_struct *work) {
 
 /* ── CPU Freq Enforcement ────────────────────────────────────────── */
 /* Caller must hold gov->lock. */
+/* Build461: Feinleiter — statt 3 flacher Stufen mit Dwells an den Grenzen
+ * (der Vendor-Dump zeigt die 1-°C-Leiter als das, was spielbar haelt)
+ * interpoliert der Gold-Cap piecewise-linear durch alle drei Anker:
+ *   l2g @ cd_l2_temp → l3g @ cd_l3_temp → l4g @ cd_l4_temp.
+ * L4 bleibt sofort + Backstop (Eskalation vor der Kurve). cd_ladder=0 =
+ * flaches Build459-Verhalten (A/B-Toggle ohne Reflash). Caller haelt
+ * gov->lock. */
+static u32 ladder_lerp(u32 hi, u32 lo, u32 t, u32 t_lo, u32 t_hi) {
+    u64 span, drop;
+    if (hi <= lo || t_hi <= t_lo) return hi;
+    if (t <= t_lo) return hi;
+    if (t >= t_hi) return lo;
+    span = (u64)(t_hi - t_lo);
+    drop = (u64)(hi - lo) * (u64)(t - t_lo);
+    return hi - (u32)(drop / span);
+}
+
 static u32 get_cd_max_freq(void) {
+    u32 cap;
     if (!gov || !gov->gold_num) return 0;
     switch (gov->state) {
-    case K6A_CD_L2: return gov->cd_l2_gold_max;
-    case K6A_CD_L3: return gov->cd_l3_gold_max;
+    case K6A_CD_L2: cap = gov->cd_l2_gold_max; break;
+    case K6A_CD_L3: cap = gov->cd_l3_gold_max; break;
     case K6A_CD_L4: return gov->cd_l4_gold_max;
     default: return 0;
     }
+    if (gov->cd_ladder && gov->temp_celsius > 0) {
+        u32 t = gov->temp_celsius;
+        if (gov->state == K6A_CD_L2 && gov->cd_l3_temp > gov->cd_l2_temp)
+            cap = ladder_lerp(gov->cd_l2_gold_max, gov->cd_l3_gold_max,
+                              t, gov->cd_l2_temp, gov->cd_l3_temp);
+        else if (gov->state == K6A_CD_L3 && gov->cd_l4_temp > gov->cd_l3_temp)
+            cap = ladder_lerp(gov->cd_l3_gold_max, gov->cd_l4_gold_max,
+                              t, gov->cd_l3_temp, gov->cd_l4_temp);
+    }
+    return cap;
 }
 
 /* Build460: Silver-Caps im CD-Pfad — symmetrisch zu Gold; 0 = aus
@@ -1620,6 +1649,7 @@ static ssize_t status_show(struct kobject *k, struct kobj_attribute *a, char *b)
     u32 l2t, l3t, l4t, rec;
     u32 spike_drops, s2, s3, s4, snow;
     int quiet;
+    u32 ladder_on;
     size_t len;
 
     {
@@ -1681,6 +1711,7 @@ static ssize_t status_show(struct kobject *k, struct kobj_attribute *a, char *b)
     spike_drops = gov->spike_drops;
     s2 = gov->cd_l2_silver_max; s3 = gov->cd_l3_silver_max; s4 = gov->cd_l4_silver_max;
     snow = gov->silver_cap_now;
+    ladder_on = gov->cd_ladder ? 1 : 0;
     mutex_unlock(&gov->lock);
 
     if (si > K6A_CD_L4) si = K6A_OFF;
@@ -1774,13 +1805,15 @@ static ssize_t status_show(struct kobject *k, struct kobj_attribute *a, char *b)
         "residency_ms=off:%llu,gaming:%llu,cd_l2:%llu,cd_l3:%llu,cd_l4:%llu\n",
         gold_cap_now, res_ms[0], res_ms[1], res_ms[2], res_ms[3], res_ms[4]);
 
-    /* Build460: Spike-Filter-Telemetrie + Silver-Caps + quiet_therm */
+    /* Build460: Spike-Filter-Telemetrie + Silver-Caps + quiet_therm
+     * Build461: Feinleiter-Toggle */
     len += scnprintf(b + len, PAGE_SIZE - len,
         "spike_drops=%u\n"
         "silver_caps=%u %u %u\n"
         "silver_cap_now=%u\n"
-        "temp_quiet=%d\n",
-        spike_drops, s2, s3, s4, snow, quiet);
+        "temp_quiet=%d\n"
+        "cd_ladder=%u\n",
+        spike_drops, s2, s3, s4, snow, quiet, ladder_on);
 
     /* Build450: hist ausgelagert in eigenen Node /sys/kernel/k6a_gov/hist —
      * status ist damit klein und fix-gross (1s-Controller-Heartbeat + 2s-Webui
@@ -1944,6 +1977,26 @@ static ssize_t poll_adaptive_store(struct kobject *k, struct kobj_attribute *a, 
     if (v > 1) return -EINVAL;
     mutex_lock(&gov->lock);
     gov->poll_adaptive = (u32)v;
+    mutex_unlock(&gov->lock);
+    gov_wake();
+    return c;
+}
+
+/* Build461: Feinleiter-Toggle — 1 = piecewise l2g->l3g->l4g (default),
+ * 0 = flache 3-Stufen (Build459-Verhalten), A/B ohne Reflash. */
+static ssize_t cd_ladder_show(struct kobject *k, struct kobj_attribute *a, char *b) {
+    u32 v;
+    mutex_lock(&gov->lock);
+    v = gov->cd_ladder ? 1 : 0;
+    mutex_unlock(&gov->lock);
+    return scnprintf(b, PAGE_SIZE, "%u\n", v);
+}
+static ssize_t cd_ladder_store(struct kobject *k, struct kobj_attribute *a, const char *b, size_t c) {
+    unsigned long v;
+    if (kstrtoul(b, 10, &v)) return -EINVAL;
+    if (v > 1) return -EINVAL;
+    mutex_lock(&gov->lock);
+    gov->cd_ladder = (v != 0);
     mutex_unlock(&gov->lock);
     gov_wake();
     return c;
@@ -2118,6 +2171,7 @@ static struct kobj_attribute attr_batt_guard  = __ATTR_RW(battery_guard);
 static struct kobj_attribute attr_batt_guard_temp = __ATTR_RW(battery_guard_temp);
 static struct kobj_attribute attr_poll_ms     = __ATTR_RW(poll_ms);
 static struct kobj_attribute attr_poll_adaptive = __ATTR_RW(poll_adaptive);
+static struct kobj_attribute attr_cd_ladder    = __ATTR_RW(cd_ladder);
 static struct kobj_attribute attr_gpu_caps    = __ATTR_RW(gpu_caps);
 static struct kobj_attribute attr_gpu_floor   = __ATTR_RW(gpu_floor);
 static struct kobj_attribute attr_bw_floors   = __ATTR_RW(bw_floors);
@@ -2137,6 +2191,7 @@ static struct attribute *gov_attrs[] = {
     &attr_batt_guard_temp.attr,
     &attr_poll_ms.attr,
     &attr_poll_adaptive.attr,
+    &attr_cd_ladder.attr,
     &attr_gpu_caps.attr,
     &attr_gpu_floor.attr,
     &attr_bw_floors.attr,
@@ -2164,6 +2219,7 @@ static int __init k6a_gov_init(void) {
     gov->battery_guard_temp = 45;
     gov->poll_ms = K6A_GOV_KTHREAD_SLEEP_MS;
     gov->poll_adaptive = 1;
+    gov->cd_ladder = true;   /* Build461: Feinleiter default an (cd_ladder=0 = flach) */
     gov->profile = (profile >= 0 && profile <= K6A_PROFILE_MAX) ?
                    profile : K6A_PROFILE_OFF;
 
