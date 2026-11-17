@@ -2599,3 +2599,18 @@ wie er ist**, keine fürsche Kernel-Arbeit nötig. Konsequenzen/Items:
   Files: `/data/local/tmp/a17b460_t0.txt`, `a17b460_post.txt`.
 - **Ausstehend**: ctl v1.6.7-Deploy (Zip in /data/local/tmp/), Build 461 (Feinleiter),
   Runden-Feel-Feedback des Users zur L4-Episoden-Last.
+
+## 2026-11-17 IV — 460-Feel-Feedback + Build 461 (Feinleiter)
+- **460-Runden-Feel (User)**: „wenn überhaupt minimale ruckler zum ende — minimal
+  spürbar". 194 s L4 in ~10 kurzen Episoden also quasi unsichtbar. Der kernel-only
+  Pfad (kein Vendor, kein Lüfter) ist damit subjektiv clean.
+- **Build 461** (`b32dad620`-Nachfolger, gov **1.7.6**): **Feinleiter** — statt 3
+  flacher Stufen mit Dwells an den Grenzen interpoliert der Gold-Cap piecewise-
+  linear durch alle drei Anker: `l2g@cd_l2_temp → l3g@cd_l3_temp → l4g@cd_l4_temp`
+  (1708800→1555200→1324800 über 72→80→87 °C; 72-80: 19,2 kHz/K, 80-87: 32,9 kHz/K —
+  früh fangen, spät härter bremsen). L4 bleibt sofort + Backstop (Eskalation vor
+  der Kurve, im L4-State keine Interpolation). **`cd_ladder`-Toggle** (sysfs, 0/1,
+  default an) = A/B ohne Reflash (0 = exaktes Build459-Verhalten). Ramp (1 OPP/Tick
+  runter, 1 OPP/4 Ticks hoch) glättet die Kurve weiter. State Machine unangetastet
+  (Events/Hysterese/Residency/GPU/BW bleiben), nur der Gold-Cap-Zielwert wird
+  temp-abhängig. Host-Test beim Push sofort grün (README 1.7.6 synchron).
