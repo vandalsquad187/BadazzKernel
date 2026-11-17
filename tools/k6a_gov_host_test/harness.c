@@ -3,6 +3,7 @@
 #include <stdbool.h>
 #include <stdio.h>
 #include <string.h>
+#include <errno.h>
 #include <sys/types.h>
 
 typedef uint8_t u8; typedef uint16_t u16; typedef uint32_t u32; typedef uint64_t u64;
@@ -21,6 +22,26 @@ static u64 fake_ms;
 #define pr_warn(...)             ((void)0)
 #define pr_warn_ratelimited(...) ((void)0)
 
+/* Build462: Stubs fuer die Sysfs-Store-Extraktion (S9).
+ * kstrtoul reimplementiert die Kernel-Semantik (lib/kstrtox.c:
+ * '+'-Skip, Basis 10, genau ein '\n' toleriert, sonst -EINVAL,
+ * Overflow hier nicht getestet -> -ERANGE unberuehrt). */
+struct kobj_attribute {};
+static void mutex_lock(struct mutex *m) { (void)m; }
+static void mutex_unlock(struct mutex *m) { (void)m; }
+static int fake_wakes; static void gov_wake(void) { fake_wakes++; }
+static int kstrtoul(const char *s, unsigned int base, unsigned long *v) {
+    unsigned long long r = 0; int seen = 0;
+    if (base != 10) return -EINVAL;
+    if (s[0] == '+') s++;
+    while (*s >= '0' && *s <= '9') { r = r * 10 + (*s - '0'); seen++; s++; }
+    if (!seen) return -EINVAL;
+    if (*s == '\n') s++;
+    if (*s) return -EINVAL;
+    *v = (unsigned long)r;
+    return 0;
+}
+
 struct tr { u64 ms; unsigned from, to; int temp; };
 static struct tr tr_log[4096]; static int tr_n;
 static void trace_k6a_state(unsigned from, unsigned to, int temp) {
@@ -32,7 +53,10 @@ struct power_supply;   /* Build441: nur Pointer im struct k6a_gov */
 static int fake_batt_c = 30; static int fake_batt_err;
 static int read_bat_temp(int *c) { if (fake_batt_err) return -1; *c = fake_batt_c; return 0; }
 
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wunused-parameter"
 #include "extracted.h"
+#pragma GCC diagnostic pop
 
 static struct k6a_gov G;
 static const char *SN[] = {"off","gaming","L2","L3","L4"};
@@ -152,8 +176,119 @@ static void s7_sensor_loss(void) {
     CHECK(G.state == K6A_CD_L3, "CD_L3 wurde durch fail-safe veraendert (%s)", SN[G.state]);
 }
 
+/* Build462: S8 — Spike-Filter-Goldens aus der eingefrorenen 461-Logik
+ * (Tick-fuer-Tick-Expected-Values, deterministische Integer-Arithmetik
+ * = Paritaetsbeweis). Helper ist rein (kein gov-Zugriff), direkte Calls. */
+static void s8_spike_filter(void) {
+    int t, tp, s, r;
+
+    printf("S8a Reale Rampen 2 K/Tick: keine Klemme, smooth folgt\n");
+    s = 0; t = 40; tp = 40;
+    for (int i = 0; i < 30; i++) {
+        r = k6a_spike_filter(&t, &tp, &s);
+        CHECK(r == 0, "Tick %d: Klemme bei realem Anstieg (t=%d)", i, t);
+        CHECK(s == t, "Tick %d: smooth != t (%d/%d)", i, s, t);
+        CHECK(tp == t, "Tick %d: tp veraendert (%d/%d)", i, tp, t);
+        t += 2; tp += 2;
+    }
+
+    printf("S8b Einzel-Sprung +40 K: t auf smooth+15, tp auf t+15\n");
+    s = 40; t = 40; tp = 40; (void)k6a_spike_filter(&t, &tp, &s);
+    t = 80; tp = 80;
+    r = k6a_spike_filter(&t, &tp, &s);
+    CHECK(r == 1, "Sprung nicht als Spike erkannt (r=%d)", r);
+    CHECK(t == 55 && tp == 70 && s == 55, "Klemmwerte falsch (t=%d tp=%d s=%d)", t, tp, s);
+
+    printf("S8c Spread-Glitch: tp=110, t real 62 -> tp auf t+15\n");
+    s = 60; t = 60; tp = 60; (void)k6a_spike_filter(&t, &tp, &s);
+    t = 62; tp = 110;
+    r = k6a_spike_filter(&t, &tp, &s);
+    CHECK(r == 1 && t == 62 && tp == 77 && s == 62,
+          "Spread-Klemme falsch (t=%d tp=%d s=%d r=%d)", t, tp, s, r);
+
+    printf("S8d Persistenter Bias +25 K: Tick1 +15 absorbiert, Tick2+ getrackt\n");
+    s = 40; t = 40; tp = 40; (void)k6a_spike_filter(&t, &tp, &s);
+    t = 65; tp = 65; r = k6a_spike_filter(&t, &tp, &s);
+    CHECK(r == 1 && s == 55, "Tick1: Bias nicht absorbiert (s=%d r=%d)", s, r);
+    t = 65; tp = 65; r = k6a_spike_filter(&t, &tp, &s);
+    CHECK(r == 0 && s == 65, "Tick2: Bias nicht getrackt (s=%d r=%d)", s, r);
+    t = 65; tp = 65; r = k6a_spike_filter(&t, &tp, &s);
+    CHECK(r == 0 && s == 65, "Tick3: smooth driftet (s=%d)", s);
+
+    printf("S8-smooth: smooth-Update auch ohne Klemme (Refactor-Schutz)\n");
+    s = 0; t = 42; tp = 42; r = k6a_spike_filter(&t, &tp, &s);
+    CHECK(r == 0 && s == 42, "erster Tick: smooth=%d r=%d", s, r);
+    t = 44; tp = 44; r = k6a_spike_filter(&t, &tp, &s);
+    CHECK(r == 0 && s == 44, "nur-on-clamp-Refactor erkannt (smooth=%d r=%d)", s, r);
+
+    printf("S8-Grenzen: smooth+15 / tp=t+15 exakt passiert, +1 darueber geklemmt\n");
+    s = 40; t = 55; tp = 55; r = k6a_spike_filter(&t, &tp, &s);
+    CHECK(r == 0 && s == 55, "smooth+15 exakt geklemmt (t=%d r=%d)", t, r);
+    s = 40; t = 56; tp = 56; r = k6a_spike_filter(&t, &tp, &s);
+    CHECK(r == 1 && t == 55, "smooth+16 nicht geklemmt (t=%d r=%d)", t, r);
+    s = 55; t = 60; tp = 75; r = k6a_spike_filter(&t, &tp, &s);
+    CHECK(r == 0 && tp == 75, "tp=t+15 exakt geklemmt (tp=%d r=%d)", tp, r);
+    s = 55; t = 60; tp = 76; r = k6a_spike_filter(&t, &tp, &s);
+    CHECK(r == 1 && tp == 75, "tp=t+16 nicht geklemmt (tp=%d r=%d)", tp, r);
+}
+
+/* Build462: S9 — Sysfs-Store-Validierung gegen den echten Code. */
+static void s9_store_validation(void) {
+    ssize_t r;
+    int w0, w1;
+    char buf[64];
+    struct kobject k; struct kobj_attribute a;
+
+    printf("S9 cd_ladder-Store: 1/0 ok, 2/Garbage/-abc -EINVAL\n");
+    fake_wakes = 0;
+    r = cd_ladder_store(&k, &a, "1\n", 2);
+    CHECK(r == 2 && gov->cd_ladder, "1 nicht akzeptiert (r=%zd)", r);
+    CHECK(fake_wakes == 1, "kein gov_wake bei gueltigem Write");
+    r = cd_ladder_store(&k, &a, "0\n", 2);
+    CHECK(r == 2 && !gov->cd_ladder, "0 nicht akzeptiert (r=%zd)", r);
+    w0 = fake_wakes;
+    r = cd_ladder_store(&k, &a, "2\n", 2);
+    CHECK(r == -EINVAL, "2 nicht abgelehnt (r=%zd)", r);
+    r = cd_ladder_store(&k, &a, "abc\n", 4);
+    CHECK(r == -EINVAL, "abc nicht abgelehnt (r=%zd)", r);
+    r = cd_ladder_store(&k, &a, "-1\n", 3);
+    CHECK(r == -EINVAL, "-1 nicht abgelehnt (r=%zd)", r);
+    CHECK(fake_wakes == w0, "gov_wake bei abgelehntem Write");
+    gov->cd_ladder = true;
+
+    printf("S9 cd_silver_caps-Store: gueltig, partial-zero, aufsteigend, Bereich, 0 0 0\n");
+    snprintf(buf, sizeof(buf), "1708800 1555200 1324800\n");
+    fake_wakes = 0;
+    r = cd_silver_caps_store(&k, &a, buf, strlen(buf));
+    CHECK(r == (ssize_t)strlen(buf), "gueltige Caps abgelehnt (r=%zd)", r);
+    CHECK(gov->cd_l2_silver_max == 1708800 && gov->cd_l3_silver_max == 1555200 &&
+          gov->cd_l4_silver_max == 1324800, "Caps nicht angewandt (%u %u %u)",
+          gov->cd_l2_silver_max, gov->cd_l3_silver_max, gov->cd_l4_silver_max);
+    CHECK(fake_wakes == 1, "kein gov_wake bei gueltigen Caps");
+    w1 = fake_wakes;
+    snprintf(buf, sizeof(buf), "1708800 0 1324800\n");
+    r = cd_silver_caps_store(&k, &a, buf, strlen(buf));
+    CHECK(r == -EINVAL, "partial-zero nicht abgelehnt (r=%zd)", r);
+    snprintf(buf, sizeof(buf), "1000 2000 3000\n");
+    r = cd_silver_caps_store(&k, &a, buf, strlen(buf));
+    CHECK(r == -EINVAL, "aufsteigend nicht abgelehnt (r=%zd)", r);
+    snprintf(buf, sizeof(buf), "3000000000 2000000000 1000000000\n");
+    r = cd_silver_caps_store(&k, &a, buf, strlen(buf));
+    CHECK(r == -EINVAL, "out-of-range nicht abgelehnt (r=%zd)", r);
+    snprintf(buf, sizeof(buf), "1 2\n");
+    r = cd_silver_caps_store(&k, &a, buf, strlen(buf));
+    CHECK(r == -EINVAL, "zu wenige Werte nicht abgelehnt (r=%zd)", r);
+    CHECK(fake_wakes == w1, "gov_wake bei abgelehnten Caps");
+    snprintf(buf, sizeof(buf), "0 0 0\n");
+    r = cd_silver_caps_store(&k, &a, buf, strlen(buf));
+    CHECK(r == (ssize_t)strlen(buf) && !gov->cd_l2_silver_max &&
+          !gov->cd_l3_silver_max && !gov->cd_l4_silver_max,
+          "0 0 0 (aus) nicht akzeptiert (r=%zd)", r);
+}
+
 int main(void) {
     s1_single_core_spike(); s2_heat_cool(); s3_profile_off(); s4_battery_latch(); s5_entry_dwell(); s6_ramp(); s7_sensor_loss();
+    s8_spike_filter(); s9_store_validation();
     printf("\n%d Pruefungen, %d fehlgeschlagen\n", checks, fails);
     return fails ? 1 : 0;
 }

@@ -11,7 +11,7 @@ gilt der Code.
 | # | Schicht | Entgegename | Wo |
 |---|---|---|---|
 | 1 | **Sensor-Akquisition** | `read_cached_temp()` liest Zonen °C (≤0 verworfen); Gold-Entscheidung = **2nd-highest of 4** Gold-Zonen (`t`), das Max geht separat als `tp` (Peak) weiter — KB8 | `read_temp()` :~480 |
-| 2 | **Spike-Filter** | Rate-Klemme `t > temp_smooth + 15` → `t = smooth+15`; Spread-Klemme `tp > t + 15` → `tp = t+15`; `smooth` wird **immer** aktualisiert; Treffer zählt `spike_drops++` | `gov_thread()` T-Valid-Block :~1360 |
+| 2 | **Spike-Filter** | Rate-Klemme `t > temp_smooth + 15` → `t = smooth+15`; Spread-Klemme `tp > t + 15` → `tp = t+15`; `smooth` wird **immer** aktualisiert; Treffer zählt `spike_drops++` | `k6a_spike_filter()` (Build462-Helper, gerufen aus dem `gov_thread()` T-Valid-Block) |
 | 3 | **State Machine** | Escalation sofort (`tp >= cd_l4_temp` → L4; `t >= cd_l3_temp` → L3), De-escalation nur mit Hysterese (`hysteresis_normal` 2 s; L4-Austritt `tp + 3 < cd_l4_temp`); **Battery-Guard = Constraint dieser Schicht** (latched `batt_latched` blockiert den CD-L2→GAMING-Exit, kein eigener Regelkreis); Sensor-Verlust: 10 invalid Ticks → failsafe CD_L2 nur aus GAMING (gehaltene L2/L3/L4 bleiben) | `state_machine()` :~610 |
 | 4 | **Feinleiter** | Nur in Zwischenstufen: Gold-Cap-**ZIEL** interpoliert piecewise-linear durch alle drei Anker — `l2g@cd_l2_temp → l3g@cd_l3_temp → l4g@cd_l4_temp` (72→80→87 °C). Im L4-State flach `l4g`. `cd_ladder=0` = flache 3-Stufen (Build459-Verhalten) | `get_cd_max_freq()`, `ladder_lerp()` :~345 |
 | 5 | **Ramp** | Gold: `cap_now` 1 OPP/Tick runter, 1 OPP/4 Ticks hoch, L4/Entry sofort; Silver: sofort (kein Ramp) | `ramp_next_cap()`, `enforce_max_freq()` :~385 |
