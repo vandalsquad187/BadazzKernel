@@ -2649,3 +2649,39 @@ wie er ist**, keine fürsche Kernel-Arbeit nötig. Konsequenzen/Items:
   am Gerät nicht machbar). Kernel: `k6a_spike_filter()`-Helper + **Bias-Grenzen-
   Kommentar an ZWEI Stellen** (über dem Helper + über der Call-Site in
   gov_thread — kann nicht driften).
+
+## 2026-11-18 VI — 461-Session: AnTuTu-Volltelemetrie + Leiter-Beweis + ctl-Zoo
+- **Foreground-Sampler = kill-proof**: 501/501 Zeilen überlebt (18 min, 1 Tool-Call,
+  sync) — vs. Background-nohup = tot nach 8,5 min (Phantom-Killer, jetzt mit
+  Kandidat: BRENE's inotify.sh). Methode: sync-su-Loop in EINEM Bash-Call mit
+  langem Timeout, Serie auf Gerät loggen.
+- **AnTuTu hot-start (22:41-00:0x, ~18 min getestet)**: Start @ 71 °C (vorwärmt),
+  komplett CD: 357 Samples cd_l2 + 143 cd_l3, 0 gaming. **CD_L4 = 0, temp≥86 =
+  0 %, Peak 81/82 °C.** gold_cap_now-Verteilung = 10 Level VOLL gestreut
+  (1555200×142 … 1708800×102, Zwischenstufen ×21-54) → **Leiter parkt nicht**
+  (Reviewer-Diskriminator mit Real-Daten erfüllt). 242 policy_max-Wechsel exakt
+  auf dem 19,2-kHz/K-Raster + 1 Sample @ 1522286 (= 32,9-kHz/K-Raster, L3-Band)
+  → Interpolation sichtbar in beiden Bändern. Events +29, spike_drops=0 →
+  **R2-Exit-Kriterium „spike_drops im Live-Check = 0" erfüllt.**
+- **AnTuTu run1 (cool start, 22:06-22:21)**: Peak 69 °C, null CD; Dips 2:45/9:45/
+  10:40 = Subtest-Täler (Kernel-Signatur: keine); CPU7 flat = unser 1709er-Cap
+  (Diagramm-„1800" = Rundung) → **Baseline = gaming-capped, NICHT schedutil-rein**
+  (User-Fazit bestätigt). Baseline-Doc-Werte 34-36 °C Akku = Pack-Indikator,
+  Gold-Zonen liefen 55-82 (unsere Serie).
+- **22:22-22:31-Pump-Session** (79-80 °C, L2/L3): = User-Modul-/TEE-Arbeit, KEINE
+  Runden-Daten. Abend-Residenz gesamt: cd_l2 1174 s, cd_l3 412 s, **cd_l4 = 0**
+  — die 87-°C-Klippe wurde nie erreicht. spike_drops=0 durchgehend.
+- **ctl-Zoo aufgeklärt**: 1.6.7-ctl starb 22:04 (AnTuTu-App-Killer), Neustarts
+  22:05:38 (Banner „1.6.6" = module.prop-Stale-Read während User-Modul-Churn —
+  ctl liest module.prop live via sed), 22:10:56 + 22:13:55 wieder 1.6.7. PID
+  5540 (seit 22:13:52) = 1.6.7 ✓, deployed Skript = alle 1.6.7-Features (9 Hits)
+  ✓, module.prop = 1.6.7 ✓. Daemon-Stop hielt durchgehend (dump nie TGAME-SS).
+  ctl überlebte den zweiten AnTuTu-Lauf diesmal.
+- **brene (BRENE-SUSFS v0.0.76) + tricky_store (TEESimulator-RS v6.0.1)** =
+  User-Integrity-Stack (22:13/22:16 installiert), keine k6a-Interferenz.
+- **k6a_thermal-Floor-Konfig**: en=1, T1/T2/T3 = 85/90/95 °C, hard=100 °C —
+  außerhalb Arbeitsbereich, nie wirksam.
+- **R2 (CoD-Runde)**: gefroren bis User ausgeruht (User-Müdigkeit; AnTuTu passiv
+  substituiert heute). **R3/462 vom User freigegeben, unabhängig von R2**: Test-
+  Infra-Build per frozen protocol (Goldens aus eingefrorener 461-Logik, S8a-d +
+  smooth-immer-Assertion + S9, S1-S7b bit-identisch, Version bleibt 1.7.6).
