@@ -4,7 +4,7 @@
   <p>Gaming-optimized kernel for <b>SM7150 (sweet / sweet k6a)</b> — 4.14.369</p>
   <p>
     <img src="https://img.shields.io/badge/Kernel-4.14.369-blue?style=flat-square">
-    <img src="https://img.shields.io/badge/k6a__gov-1.7.4-orange?style=flat-square">
+    <img src="https://img.shields.io/badge/k6a__gov-1.7.6-orange?style=flat-square">
     <img src="https://img.shields.io/badge/KernelSU--Next-v3.3.0--311-green?style=flat-square">
     <img src="https://img.shields.io/badge/SUSFS-v2.3.0-success?style=flat-square">
     <img src="https://img.shields.io/badge/Android-13%20%E2%80%93%2016-lightgrey?style=flat-square">
@@ -15,7 +15,7 @@
 
 ## Overview
 
-BadazzKernel is a performance and gaming tuned kernel for **Redmi Note 12 Pro 4G (sweet / sweetin)**. Core is the in-kernel governor **k6a_gov v1.7.4** (loadable module, `CONFIG_K6A_GOV=m`, insmodded by k6a-ctl) — the perfect base for the companion module **[k6a-ctl](https://github.com/vandalsquad187/k6a-ctl)**. Both work hand-in-hand in delegated mode: kernel throttles, module controls.
+BadazzKernel is a performance and gaming tuned kernel for **Redmi Note 12 Pro 4G (sweet / sweetin)**. Core is the in-kernel governor **k6a_gov v1.7.6** (loadable module, `CONFIG_K6A_GOV=m`, insmodded by k6a-ctl) — the perfect base for the companion module **[k6a-ctl](https://github.com/vandalsquad187/k6a-ctl)**. Both work hand-in-hand in delegated mode: kernel throttles, module controls.
 
 🤌🏻 Join my Telegram channel: https://t.me/Badazz89
 
@@ -27,7 +27,7 @@ BadazzKernel is a performance and gaming tuned kernel for **Redmi Note 12 Pro 4G
 linux-4.14.369
 ├── KernelSU-Next v3.3.0-311 (UAPI 6, 4.14 direct-patch) + SUSFS v2.3.0  # Root + Hide (submodule 79003ef8)
 ├── fs/nomount — NoMount v22 (dev 8f05de7)      # VFS path redirection — zero-mount module injection (CONFIG_NOMOUNT=y)
-├── drivers/thermal/k6a_gov/k6a_gov.c v1.7.4     # In-kernel gaming governor (CONFIG_K6A_GOV=m)
+├── drivers/thermal/k6a_gov/k6a_gov.c v1.7.6     # In-kernel gaming governor (CONFIG_K6A_GOV=m)
 ├── drivers/gpu/msm/kgsl_pwrctrl.c               # GPU pwrlevel export (k6a_gov)
 ├── drivers/devfreq/devfreq.c                    # BW floors (gpubw / llcc), 0 = release floor
 ├── drivers/gpu/msm/ + drivers/thermal/          # Thermal + cooling floors
@@ -39,7 +39,7 @@ linux-4.14.369
 
 | Area | Feature | Details |
 |------|---------|---------|
-| **Governor** | **k6a_gov v1.7.4** | Loadable module (`CONFIG_K6A_GOV=m`, `k6a_gov.ko` shipped in the zip and loaded by k6a-ctl), state machine OFF→GAMING→CD_L2/L3/L4, hysteresis, **immediate escalation** L2→L3→L4, entry dwell on GAMING, L4 flap margin (`peak + 3 K < cd_l4_temp`), `profile=0` forces OFF immediately, throttle history (16), **residency accounting (`residency_ms`) + live `gold_cap_now` with GPU-cap ramping (tighten 1 OPP/tick, release 1 OPP/4 ticks, L4/entry-immediate), `stats_reset` node**, boot default **schedutil** |
+| **Governor** | **k6a_gov v1.7.6** | Loadable module (`CONFIG_K6A_GOV=m`, `k6a_gov.ko` shipped in the zip and loaded by k6a-ctl), state machine OFF→GAMING→CD_L2/L3/L4, hysteresis, **immediate escalation** L2→L3→L4, entry dwell on GAMING, L4 flap margin (`peak + 3 K < cd_l4_temp`), `profile=0` forces OFF immediately, throttle history (16), **residency accounting (`residency_ms`) + live `gold_cap_now` with GPU-cap ramping (tighten 1 OPP/tick, release 1 OPP/4 ticks, L4/entry-immediate), `stats_reset` node**, boot default **schedutil** |
 | **CPU** | Gold clamp | `find_gold_cpu()` + `clamp_freq`, `enforce_max_freq` + `cpufreq_update_policy` (kthread only), hardened notifier, **released again on recovery/disable** |
 | **Temp** | Multi-zone | Max over 4 Gold zones `cpu-1-0..3-usr`, fallback `cpu-0-0-usr` → `xo-therm` → `soc-therm` → `thermal_zone0`; `temp_src`/`temp_valid` in status, holds the last state if no zone answers |
 | **GPU** | Native enforcement | `kgsl_k6a_get_levels` / `kgsl_k6a_set_max_level_idx`, caps per CD state |
@@ -108,6 +108,20 @@ CPU side (Build 401): `cpu_cooling.c` thermal floor clamp + `k6a_thermal` sysfs 
 | — | Hotplug: if the cached gold CPU is offline at readback time, `find_gold_cpu()` re-resolves fresh (previously `p==NULL` silently skipped the verification) | `enforce_max_freq()` |
 | — | One-time boot log of every temp source (`cpu-1-0..3-usr`, `cpu-0-0-usr`, `xo-therm`, `soc-therm`, `thermal_zone0`) with id + type — a firmware rename is visible in the first dmesg, not only as a symptom | `freq_init_worker()` |
 | — | `hist` moved to its own node (Build 450) and `hysteresis` defaults corrected in this README (`fast` 1..5000, default 3000 since Build 347) | docs |
+
+### k6a_gov v1.7.5 — spike filter + silver caps + quiet telemetry (Build 460, Nov 2026)
+
+| # | Feature / Fix | Where |
+|---|-------|-------|
+| — | **Spike filter before the state decision**: a single glitchy sensor read with a plausible positive value used to arm L4 immediately (`tp >= cd_l4_temp`). Two clamps — (a) tick-rate vs the filtered reference (> 15 K per 250 ms tick discarded, real ramps are ~0.1–2 K/tick), (b) zone-spread vs the 2nd-highest (an outlier more than 15 K above the vote is clamped). No latency for real ramps; counter `spike_drops` in `status` | `gov_thread()`, `K6A_SPIKE_K` |
+| — | **Silver caps in the CD path** (`cd_silver_caps` sysfs, `L2 L3 L4` Hz, `0 0 0` = off): symmetric to Gold — applied immediately (no ramp; the vendor also throttled cpu0 directly), notifier clamp on the CPU-0 policy, released on CD exit. Silver stays in stock/vendor regime while off | `get_cd_silver_max_freq()`, `enforce_max_freq()`, `cpufreq_notify()` |
+| — | **quiet_therm telemetry** (`temp_quiet=` in `status`): zone74 is the dominant input of the vendor TGAME ladder (39.0 onset / ~46.5 cliff) — live proximity monitoring, no control decision on it | `status_show()` |
+
+### k6a_gov v1.7.6 — fine-grained CD ladder (Build 461, Nov 2026)
+
+| # | Feature / Fix | Where |
+|---|-------|-------|
+| — | **Fine-grained CD ladder** (`cd_ladder` sysfs, default on): instead of 3 flat cap steps with dwell flip-flops at the boundaries, the Gold cap interpolates piecewise-linear through all three anchors — `l2g @ cd_l2_temp → l3g @ cd_l3_temp → l4g @ cd_l4_temp` (e.g. 1708800 → 1555200 → 1324800 over 72→80→87 °C). The existing threshold tuning stays meaningful; L4 stays immediate + backstop. `cd_ladder=0` restores the flat Build459 behavior (A/B without re-flash). Cap ramping (1 OPP/tick down, 1 OPP/4 ticks up) still smooths the curve | `get_cd_max_freq()`, `ladder_lerp()` |
 
 ---
 
