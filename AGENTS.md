@@ -2614,3 +2614,38 @@ wie er ist**, keine fürsche Kernel-Arbeit nötig. Konsequenzen/Items:
   runter, 1 OPP/4 Ticks hoch) glättet die Kurve weiter. State Machine unangetastet
   (Events/Hysterese/Residency/GPU/BW bleiben), nur der Gold-Cap-Zielwert wird
   temp-abhängig. Host-Test beim Push sofort grün (README 1.7.6 synchron).
+
+## 2026-11-17 V — Review-Runde: Regelwerk-Doc (R1) + 461-Runden-Protokoll (R2)
+- **R1 erledigt**: `docs/k6a_gov_rules.md` — die Entscheidungs-Schichten in
+  Ausführungsreihenfolge pro Tick (Sensor-Akquisition KB8 → Spike-Filter → State
+  Machine → Feinleiter → Ramp → Notifier-Klammer) + Feinleiter↔Spike-Filter-
+  Semantik + „Was passiert bei …" (Sensor-Verlust, Ein-Tick-Glitch, reale
+  Anstiege, **Bias-Grenze ehrlich**: +15 K absorbiert, Filter trackt dann mit,
+  L4 auf biased t möglich — Grenze, nicht Bug) + **Battery-Guard als Constraint
+  der State Machine markiert** (Blockade des CD-Exits, kein eigener Regelkreis).
+  README: ein Satz + Link, keine Tabellen-Änderung. Reviewer-Korrektur:
+  README-Drift-Claim war gegen den historischen Tabellenkopf (:78 v1.7.0 =
+  Builds 421-428) gerichtet, aktueller Stand 1.7.6 überall verifiziert, Guard
+  grün — erledigt. **Update-Pflicht**: das Doc wandert mit jeder künftigen
+  Regelungs-Änderung im selben Commit mit (R4-Vermerk).
+- **R2-Protokoll (461-Runde)**: Flash 461 → Verify (`cd_ladder=1`, Re-Arm,
+  Stop-Verifikation im v1.6.7-Log) → Runde (~22 min, ungesteckt, gleiches
+  Szenario). **Exit-Kriterien (2 Beobachter)**: (a) L4-Residenz ≪ 194 s
+  (460-Baseline), (b) **Anteil Zeit ≥86 °C + Cap-Treppenwechsel/Min aus der
+  data.txt-Serie** (2-s-Takt, temp + policy_max) — trennt „Kurve arbeitet" von
+  „hängt ewig in der letzten Stufe bei 86". Dazu: Events/L2/L3-Deltas,
+  `spike_drops=0` = PASS (der Filter-Arbeitsbeweis kommt deterministisch aus
+  S8/462, nicht aus realen Glitches), kein TGAME-Entry. A/B-Fallback ohne
+  Reflash: `echo 0 > /sys/kernel/k6a_gov/cd_ladder` = exaktes 459/460-Verhalten.
+- **R3-Exit-Kriterium (462 = reiner Test-Infra-Build, schriftlich fixiert)**:
+  S1-S7b bit-identisch ✓ · S8 (a: reale Rampen 2 K/Tick unberührt, b: +40-K-
+  Sprung geklemmt auf smooth+15, c: Spread-Glitch tp→t+15, d: Bias-Absorption
+  als dokumentierte Grenze) neu grün · S9 (cd_silver_caps/cd_ladder-Store-
+  Validierung) neu grün · **smooth-immer-Update-Assertion** (verhindert die
+  „nur-on-clamp optimieren"-Refactor-Katastrophe) · spike_drops im Live-Check
+  = 0 · gov-Version unverändert 1.7.6 · data.txt-Charakteristik unverändert.
+  Goldens aus der **eingefrorenen 461-Quelllogik** (Tick-für-Tick-Expected-
+  Values, deterministische Integer-Arithmetik = Paritätsbeweis; Fault-Injection
+  am Gerät nicht machbar). Kernel: `k6a_spike_filter()`-Helper + **Bias-Grenzen-
+  Kommentar an ZWEI Stellen** (über dem Helper + über der Call-Site in
+  gov_thread — kann nicht driften).
