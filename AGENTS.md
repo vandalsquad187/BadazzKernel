@@ -2459,6 +2459,37 @@ wie er ist**, keine fürsche Kernel-Arbeit nötig. Konsequenzen/Items:
   Workflow-Assert `CONFIG_INIT_STACK_ALL_ZERO=y` statt FORTIFY-Assert). CI-Run
   `43687047805`. Plan: bootet → 459 = Final (INIT an, FORTIFY aus); bootlooped →
   beide schuldig, Revert auf 457-Stand (baut 460 = 457-äquivalent, main-konsistent).
+- **459 BOOTET → FINAL-BUILD (2026-11-15)**: CI grün (run `43687047805`), Banner
+  `build459-aosp` verifiziert, 0 echte Oops/Panics (einziger grep-Treffer =
+  benigne `evtlog_status: panic:1`-DRM-Debug-Zeile, identisch in 457s Boot),
+  k6a_gov 1.7.4 alive (state=gaming, temp 50, throttle_events 0), su OK,
+  v1.6.6 Re-Arm post-Flash ✓ (dritter Kernel-Flash-Zyklus in Serie).
+  **Härtungs-Finalstand: `CONFIG_INIT_STACK_ALL_ZERO=y` AN, `FORTIFY_SOURCE`
+  AUS (schuldig, unverträglich mit GCC 13.3 auf 4.14 — frühster Boot-Tod,
+  pre-ramoops).** Isolationsfall vollständig: 1 Build = 1 Variable, Rescue-Dance
+  (Download-Zip + Recovery-Flash)   bewährt in Minuten.
+- **r15 (10:46-~11:15, build459, D1a-Testrunde) → D1a FALSIFIZIERT, Revert auf
+  D1-72 (2026-11-15)**: User „ziemlich laggy". Hist/Residency: cd_l3 843,9 s
+  (14 min! vs r14: 72,5 s) — zwei kontinuierliche L3-Strecken (575 s + 253 s)
+  bei CPU 1555/GPU 680. Mechanik: Exit < 70 → L3-Exit erst nach tiefer
+  Abkühlung → statt r14's schnellen Flips (71↔80, subjektiv smooth) lange tiefe
+  L3-Dwells = gedrosselte Minutendauer = lag. throttle_events 9 (vs r14: 12) —
+  Event-Count war irreführend: **Dwell-Zeit, nicht Event-Zahl, ist die
+  Lag-Metrik**. Vendor weiterhin stumm (vendor_sconfig=0). Rückkehr-Logik:
+  r14-Exit 72 → Exits @71 = minimale Überschreitung → schnelle L3-Exits →
+  Flips benign; Exit-Tiefe 70 kippt das Equilibrium in den Dwell-Modus.
+  **Thermal-Finalstand = D1 exakt: `72 80 87 66 1708800 1555200 1324800` +
+  gpu_caps 800/680/500 + poll_adaptive 0** (r14 „super flüssig" bleibt der
+  Goldstandard). Kein weiterer Test; 71-Experiment ausdrücklich verworfen.
+- **ctl-Bedienlektion r15**: Mid-Gaming settings.conf-Edits parse der ctl pro
+  Tick, aber `_apply_cd_thresholds` feuert NUR bei State-Transitions — im
+  Dauer-GAMING wird ein Edit erst beim nächsten Transition aktiv; für
+  Sofortwirkung: Controller-Neustart (kill -TERM + Watchdog-Respawn = 1 Start-
+  Log-Zeile + Apply). Pid-Falle 2: `/proc`-Scan unter su kann in Timeout
+  laufen (807 Pids); robuster Weg = `tr "\0" " "`-Scan auf cmdline + Ausgabe
+  mit Pid-Feld, Kill in EINEM kurzen Befehl (compound mit sleep läuft in
+  den 120-s-Tool-Timeout — zweistufig killen). Revert-Apply 11:21:08
+  verifiziert (`cd_thresholds ← 72 …` + Start-Log).
 - **Messung-Fixes (Wichtig)**: `temp_peak` ist **Pro-Tick-Snapshot** (`gov->temp_peak =
   t_peak` :1345, kein latched Max — 65 @+17 s nach Rundenende war kein Widerspruch
   zu den @80-Flip-Readings). Tick-Arithmetik: Rundensegment 3758 Ticks/964 s = exakt
@@ -2473,3 +2504,58 @@ wie er ist**, keine fürsche Kernel-Arbeit nötig. Konsequenzen/Items:
   Drain, ~30 s — Mid-Session-Spawns bleiben killbar); Auswertung über Kernel-Ring
   (`dmesg`, Boot < 1 h) + hist/status-Nodes. Files: `/data/local/tmp/a15r14_status.txt`
   (pre), `a15r14_post.txt`, `a15r14_dmesg.log` (Fragment).
+
+## 2026-11-17 — r16 A/B, Vendor-Ladder enttarnt, Daemon-Stop = Gaming-Default
+- **r16 A/B (11-15/16, D1-72, v1.6.6)**: A = Lüfter ×2 Runden („super flüssig“): +34 Events
+  (~17/Runde), L2 +880 s, L3 +334 s, hist = Mini-Flips @80↔71 (2-6 s), temp_peak 58. B = ohne
+  Lüfter („besser als erwartet, hektisch“): +24 Events, gaming +781 s, L2 +653.8 s, L3 +266.7 s,
+  hist = dichte Flips @71↔@80 (0.8-4.9 s) + 17-50-s-L3-Holds, Ende 64/peak 64. Vendor-Mirror
+  stumm in beiden. **Buchhaltung-Lektion**: Residency-Zähler akkumulieren wachen Idle im
+  mode=gaming-Lock (~11,7 h-Sprung in der Pause); su-date-Stamps springen (NTP) — nur monotone
+  Zähler (events/residency/hist-ts) für Analysen.
+- **VENDOR-LADDER ENTTARNT (thermal.dump)**: mi_thermalds `TGAME-SS-CPU0/CPU6` war in JEDER
+  Runde aktiv (schreibt cpufreq direkt), während vendor_sconfig=0/vendor_cpu_limits=none —
+  **Mirror blind gegen den TGAME-Direkt-Pfad; der korrekte Vendor-Probe ist der dump-TGAME-
+  Cluster, nicht vendor_sconfig (Monitoring-Lektion)**. Ladder (Onsets Virtual-Sensor):
+  39.0→1612800, 40.0→1497600, 41.0→1324800, 42.0→1248000, 43.0→1017600, **Klippe ~46.50→576000**
+  (geklammert 46492→1017 / 46512→576), darüber 1804800. **Bang-bang ohne Hysterese** (2-4-s-
+  Flips an Stufengrenzen; der „milde“ Eindruck entsteht nur aus der Mittelung — Vendor-Verhalten
+  dokumentiert). Ladder-Tiefe: r15 (laggy) bis 576 (~5 min @46.3-46.5 → **r15-Lag = Kernel-Dwell +
+  tiefe Ladder, Synergie**); A flach (min 1324); B = monotoner Soak-Abstieg bis 1017 (36 % Boden-
+  zeit, ≤1324 61 %). **Effective caps = min(Kernel-cap_now, Ladder-Stufe)**; Notifier klammert nur
+  nach oben (k6a_gov.c:449-455, kein cpufreq_update_policy wegen Rekursion) → Vendor-tiefe Writes
+  laufen durch; GPU-Caps bleiben kernel-only (Ladder touchiert nur CPU-Freq).
+- **Ladder-Input = quiet_therm/thermal_zone74** (Korrelationstabelle: Δ −1,2…−2,1 °C; xo/pa/cpu
+  ~10 °C drüber). **Blast-Radius-Spoof**: quiet_therm füttert alle 8 dump-Tag-Typen (SS/TGAME-SS +
+  BCL/CCC/BOOST_LIMIT-Monitoring) → Spoof friert die komplette Userspace-Regie ein; Enforcement
+  bleibt kernel-PMIC5 (CONFIG_QTI_BCL_PMIC5=y + QTI_BCL_SOC_DRIVER=y) → Spoof strikt ungesteckt.
+  **Spoof = nur Fallback** (ungetestete Transferfunktion). Vendor-Configs verschlüsselt
+  (thermal-tgame.conf & Co. — Jan-1-2009-Stempel täuschten; mi_thermald entschlüsselt zur Laufzeit,
+  /data/vendor/thermal/config/ leer) → Ladder-Onset-Edit nur via Runtime-Capture. Beide Daemons
+  non-critical (init.mi_thermald.rc, init.target.rc:203) → ctl.stop hält; init.target.rc schreibt
+  boot-seitig sconfig=10.
+- **Phase-A-Soak (11-16 21:37→21:59, 1326 s ≈ B, kein Lüfter, ungesteckt)**: Trigger beide erfüllt —
+  Virtual-Sensor 46.6 (≥45.5) mit **582 s @ 576 MHz** (Klippe getroffen!) und **74,4 % ≤1248** (≥50).
+  Stufen: 1804 19,2 % / 1612 3,2 / 1497 3,3 / 1324 3,0 / 1248 5,4 / 1017 22,0 / **576 43,9**.
+  Kernel: +10 Events, L2 +721,7 s, L3 +389,4 s, L4 0, temp_peak 69. → B triggert.
+- **Daemon-Stop-Test (11-17, 2 Runden, kein Lüfter, ungesteckt)**: settings.conf
+  `turbo_stop_daemons=1` (:79) + Controller-Restart; Start-Log `turbo_stop=1 turbo_spoof=0` +
+  `turbo: thermal-daemons pausiert`; **Punkt-7-Verifikation**: pidof-Scan sofort + nach 3 Ticks —
+  kein Respawn. **Definitiver Beweis: 0 neue TGAME-Entries im Dump** (Marker Zeile 332).
+  Kernel = alleiniger Limiter: +37 Events (~18,5/Runde), L2 +488,3 s, **L3 +792,1 s** (~3× vs B),
+  **L4 +13,3 s** (4 kurze Episoden 2-6,6 s @86-87, Summe exakt 13307 ms), Recovery-Kaskade sauber
+  (cd_l2>gaming @65 < 66), keine spürbaren Lags (User, „viel action“ — besser als B „hektisch“).
+  Trade-off: ohne Ladder Floor = Kernel-Caps 1324 statt Vendor 576 → mehr Hitze → mehr Kernel-L2/L3,
+  aber flache Caps = smooth Feel (die TIEFEN Stufen waren der Lag-Treiber, nicht die Event-Frequenz).
+  L4-Touch = Argument für die Feinleiter (461): Interpolation l2g→l4g hält L4 als echten Notfall.
+  **Entscheidung: turbo_stop_daemons=1 = Gaming-Default (persistiert, auch Daily/SS-Ladder aus);
+  Revert-Option bleibt.** Termux-Hintergrund-Lauf störte nicht (hit/miss 0/0, pid=0, Caps
+  policy-wide). Nächste Schritte: Build 460 (Spike-Filter >15 K/Tick + Silver-Caps cd_*_silver_max
+  + quiet_therm-Telemetrie temp_quiet=), Build 461 (Feinleiter isoliert), ctl v1.6.7 (_auto_eval-
+  While-Loop, _enter_daily-Lock-Fix, README :793 „≈1 s“→2 s; Spoof-Infra nur falls relevant).
+- **Tool-Lektionen**: `pidof` matcht k6a-controller/Daemons hier nicht → tr-Scan (self-match
+  einplanen, Pattern aus der Scan-Zeile selbst matcht mit); service.log lebt in
+  `/data/adb/modules/k6a-ctl/config/service.log`; settings.conf-Edit immer mit `chcon
+  u:object_r:system_file:s0` nachziehen. Files: `/data/local/tmp/a15r16a_{status,post}.txt`,
+  `a15r16b_{status,post}.txt`, `a17soak_pre.txt`, `a17soak_t0.txt`, `a17soak_post.txt`,
+  `a17soakT0b.txt`, `a17stop_post.txt`.
