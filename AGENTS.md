@@ -2685,3 +2685,30 @@ wie er ist**, keine fürsche Kernel-Arbeit nötig. Konsequenzen/Items:
   substituiert heute). **R3/462 vom User freigegeben, unabhängig von R2**: Test-
   Infra-Build per frozen protocol (Goldens aus eingefrorener 461-Logik, S8a-d +
   smooth-immer-Assertion + S9, S1-S7b bit-identisch, Version bleibt 1.7.6).
+
+## 2026-11-18 VII — Build 462 (Test-Infra: Spike-Filter-Helper + S8/S9, kein Verhalten)
+- **Commit `5075b3fcd`, gov-Version bleibt 1.7.6** (deklarierter Test-Infra-Build):
+  Inline-Spike-Filter aus gov_thread T-Valid in **`k6a_spike_filter(int *t, int *t_peak,
+  s32 *smooth)`** gezogen — bit-identisch (Rate-Klemme → Spread-Klemme → `*smooth = *t`
+  immer → Return hit; `spike_drops++` am Call-Site). Bias-Grenzen-Kommentar an 2 Stellen
+  (Helper + Call-Site), Regeldoc-Locator-Update (R4: Layer-2 zeigt jetzt den Helper).
+- **Host-Test 31 → 149 Checks, 3 CI-Runs grün** (host 44204036011 / build 44204035891 /
+  lockdep 44204035836), kein Release (Push-Run). S8a-d = Goldens aus der eingefrorenen
+  461-Logik: (a) 2 K/Tick-Rampe 30 Ticks ohne Klemme, (b) +40-K-Sprung → t=55/tp=70
+  (smooth 40), (c) Spread-Glitch tp=110 → tp=77 (t=62 real), (d) persistenter +25-K-Bias
+  = Tick1 Absorption auf +15, Tick2+ Tracking. Boundary: +15 exakt passiert, +16 geklemmt
+  (beide Achsen). **smooth-immer-Assertion** = 2-Tick-Rampe (faengt jeden
+  nur-on-clamp-Refactor: smooth bliebe 0 → Tick2 wuerde clampen).
+- **S9 Store-Validierung gegen den echten Code** (cd_ladder_store + cd_silver_caps_store
+  extrahiert): kstrtoul-Stub mit kstrtox-Semantik **verifiziert an lib/kstrtox.c** —
+  '+'-Skip, Basis 10, GENAU ein trailing '\n' toleriert, '-' → EINVAL (`echo N >` schreibt
+  "N\n" → A/B-Fallback cd_ladder funktioniert, kein Bug). Tests: 1/0 ok, 2/abc/-1 →
+  -EINVAL; silver-caps gueltig/partial-zero/aufsteigend/out-of-range/zu-wenige → -EINVAL,
+  `0 0 0` = aus; gov_wake nur bei akzeptierten Writes. Stubs: mutex no-ops, gov_wake
+  Counter, `#pragma GCC diagnostic` um extracted.h-Include (unused-parameter aus
+  Kernel-Code, nicht global abgedreht).
+- **Ferry erledigt**: aosp-ZIP (19 347 214 B, md5 `8e9ee7d87dc5436cb214c90cebe865c8`)
+  in `/data/media/0/Download/Badazz-kernel-sweet-v4.14.369-build462-aosp.zip` — Flash +
+  Verify beim User (Banner `build462-aosp`, status `version=1.7.6`, `spike_drops=0`).
+  Lektion: `gh run download`-Filename hat Bindestrich (`build462-aosp`) ≠ Artifact-Name
+  (`build462aosp`) — cp-Fehlermenge, nicht Run-Fehler.
