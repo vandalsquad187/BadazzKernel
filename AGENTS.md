@@ -2712,3 +2712,26 @@ wie er ist**, keine fürsche Kernel-Arbeit nötig. Konsequenzen/Items:
   Verify beim User (Banner `build462-aosp`, status `version=1.7.6`, `spike_drops=0`).
   Lektion: `gh run download`-Filename hat Bindestrich (`build462-aosp`) ≠ Artifact-Name
   (`build462aosp`) — cp-Fehlermenge, nicht Run-Fehler.
+
+## 2026-11-18 VIII — R2-CoD-Runde auf 461: PASS (L4 0 s vs 460-Baseline 194,5 s)
+- **Setup**: 461 (gov 1.7.6, cd_ladder=1) behalten, 462 nicht geflasht (verhaltensidentisch).
+  D1-Thresholds 72/80/87/66 + gpu_caps 800/680/500 + poll_adaptive=0, ungesteckt, kein
+  Lüfter. T0 @53 C: throttle_events=0, residency cd_l2/3/4=0, spike_drops=0, Dump 9 Zeilen
+  (0 TGAME), game_pid=0.
+- **Beobachter**: Foreground-Sampler (Termux geschlossen) starb nach 7 min/204 Zeilen →
+  verworfen. **Richtige Methode (AGENTS :256-272): badazz_iowatch KSU-Modul** — Watchdog
+  PID 1869 (service.sh, Boot-Spawn, killer-immun) + `io_samp4.sh` PID 13715 triggert
+  automatisch auf `game_pid != 0` (gp=15867 nach 1078 s Wartezeit), schreibt 1500 Samples
+  1-Hz inkl. kstate/ktemp/kpeak/kpm/kth in `/data/local/tmp/io_r60r.log`. Serie = 1103
+  Datenzeilen (t=65806..67191 = 1385 s) + `=== done 1500 ===`, rotiert als
+  `/data/local/tmp/io_r60r_DONE_1795027416.log` (121 791 B) — **Hintergrund-Methode bewiesen**.
+- **Exit-Kriterien (alle PASS)**: L4-Residenz **0 s** (Serie 0/1103 L4-Samples; Post-
+  Snapshot residency `cd_l2:406111,cd_l3:779104,cd_l4:0`) vs 460-Baseline **194,5 s**;
+  temp max **84 C**, Anteil **>=86 C = 0,00 %** (auch temp_peak max 84); gold_cap_now
+  **13 Level** (1 423 543 … 1 708 800 Hz), **326 Cap-Wechsel/1385 s = 14,12/min**
+  (Leiter parkt nicht); spike_drops=0; Dump 9 Zeilen/0 TGAME (Vendor-Engine still);
+  throttle_events +10 (Post) / +8 (Serie) vs +30 (460). State-Verteilung: cd_l2 315 s,
+  cd_l3 616 s, gaming 172 s. User-Feel-Runde folgt separat.
+- **Lektion**: data.txt ist Snapshot (35 Zeilen), KEINE Zeitreihe — als 2. Beobachter
+  nur io_samp4-Serie + Kernel-Snapshot nutzen. Foreground-Sampler nie bei geschlossenem
+  Termux einsetzen.
