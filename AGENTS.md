@@ -2685,3 +2685,61 @@ wie er ist**, keine fürsche Kernel-Arbeit nötig. Konsequenzen/Items:
   substituiert heute). **R3/462 vom User freigegeben, unabhängig von R2**: Test-
   Infra-Build per frozen protocol (Goldens aus eingefrorener 461-Logik, S8a-d +
   smooth-immer-Assertion + S9, S1-S7b bit-identisch, Version bleibt 1.7.6).
+
+## 2026-11-18 VII — Build 462 (Test-Infra: Spike-Filter-Helper + S8/S9, kein Verhalten)
+- **Commit `5075b3fcd`, gov-Version bleibt 1.7.6** (deklarierter Test-Infra-Build):
+  Inline-Spike-Filter aus gov_thread T-Valid in **`k6a_spike_filter(int *t, int *t_peak,
+  s32 *smooth)`** gezogen — bit-identisch (Rate-Klemme → Spread-Klemme → `*smooth = *t`
+  immer → Return hit; `spike_drops++` am Call-Site). Bias-Grenzen-Kommentar an 2 Stellen
+  (Helper + Call-Site), Regeldoc-Locator-Update (R4: Layer-2 zeigt jetzt den Helper).
+- **Host-Test 31 → 149 Checks, 3 CI-Runs grün** (host 44204036011 / build 44204035891 /
+  lockdep 44204035836), kein Release (Push-Run). S8a-d = Goldens aus der eingefrorenen
+  461-Logik: (a) 2 K/Tick-Rampe 30 Ticks ohne Klemme, (b) +40-K-Sprung → t=55/tp=70
+  (smooth 40), (c) Spread-Glitch tp=110 → tp=77 (t=62 real), (d) persistenter +25-K-Bias
+  = Tick1 Absorption auf +15, Tick2+ Tracking. Boundary: +15 exakt passiert, +16 geklemmt
+  (beide Achsen). **smooth-immer-Assertion** = 2-Tick-Rampe (faengt jeden
+  nur-on-clamp-Refactor: smooth bliebe 0 → Tick2 wuerde clampen).
+- **S9 Store-Validierung gegen den echten Code** (cd_ladder_store + cd_silver_caps_store
+  extrahiert): kstrtoul-Stub mit kstrtox-Semantik **verifiziert an lib/kstrtox.c** —
+  '+'-Skip, Basis 10, GENAU ein trailing '\n' toleriert, '-' → EINVAL (`echo N >` schreibt
+  "N\n" → A/B-Fallback cd_ladder funktioniert, kein Bug). Tests: 1/0 ok, 2/abc/-1 →
+  -EINVAL; silver-caps gueltig/partial-zero/aufsteigend/out-of-range/zu-wenige → -EINVAL,
+  `0 0 0` = aus; gov_wake nur bei akzeptierten Writes. Stubs: mutex no-ops, gov_wake
+  Counter, `#pragma GCC diagnostic` um extracted.h-Include (unused-parameter aus
+  Kernel-Code, nicht global abgedreht).
+- **Ferry erledigt**: aosp-ZIP (19 347 214 B, md5 `8e9ee7d87dc5436cb214c90cebe865c8`)
+  in `/data/media/0/Download/Badazz-kernel-sweet-v4.14.369-build462-aosp.zip` — Flash +
+  Verify beim User (Banner `build462-aosp`, status `version=1.7.6`, `spike_drops=0`).
+  Lektion: `gh run download`-Filename hat Bindestrich (`build462-aosp`) ≠ Artifact-Name
+  (`build462aosp`) — cp-Fehlermenge, nicht Run-Fehler.
+
+## 2026-11-18 VIII — R2-CoD-Runde auf 461: PASS (L4 0 s vs 460-Baseline 194,5 s)
+- **Setup**: 461 (gov 1.7.6, cd_ladder=1) behalten, 462 nicht geflasht (verhaltensidentisch).
+  D1-Thresholds 72/80/87/66 + gpu_caps 800/680/500 + poll_adaptive=0, ungesteckt, kein
+  Lüfter. T0 @53 C: throttle_events=0, residency cd_l2/3/4=0, spike_drops=0, Dump 9 Zeilen
+  (0 TGAME), game_pid=0.
+- **Beobachter**: Foreground-Sampler (Termux geschlossen) starb nach 7 min/204 Zeilen →
+  verworfen. **Richtige Methode (AGENTS :256-272): badazz_iowatch KSU-Modul** — Watchdog
+  PID 1869 (service.sh, Boot-Spawn, killer-immun) + `io_samp4.sh` PID 13715 triggert
+  automatisch auf `game_pid != 0` (gp=15867 nach 1078 s Wartezeit), schreibt 1500 Samples
+  1-Hz inkl. kstate/ktemp/kpeak/kpm/kth in `/data/local/tmp/io_r60r.log`. Serie = 1103
+  Datenzeilen (t=65806..67191 = 1385 s) + `=== done 1500 ===`, rotiert als
+  `/data/local/tmp/io_r60r_DONE_1795027416.log` (121 791 B) — **Hintergrund-Methode bewiesen**.
+- **Exit-Kriterien (alle PASS)**: L4-Residenz **0 s** (Serie 0/1103 L4-Samples; Post-
+  Snapshot residency `cd_l2:406111,cd_l3:779104,cd_l4:0`) vs 460-Baseline **194,5 s**;
+  temp max **84 C**, Anteil **>=86 C = 0,00 %** (auch temp_peak max 84); gold_cap_now
+  **13 Level** (1 423 543 … 1 708 800 Hz), **326 Cap-Wechsel/1385 s = 14,12/min**
+  (Leiter parkt nicht); spike_drops=0; Dump 9 Zeilen/0 TGAME (Vendor-Engine still);
+  throttle_events +10 (Post) / +8 (Serie) vs +30 (460). State-Verteilung: cd_l2 315 s,
+  cd_l3 616 s, gaming 172 s.
+- **User-Feel (R2, subjektiv)**: „sehr gute Runde", nur im **hektischen Finale minimale
+  Stutters**. Bei langen Fahrten/Flügen und viel Feuer spürbar sinkende FPS — interpretiert
+  als die graduelle Cap-Rampe des Feinleiters (genau der beabsichtigte Trade-off: keine
+  194-s-L4-Bang-bang-Klippe mehr, dafür frühes sanftes Absenken). Geschätzter Durchschnitt
+  **5-10 FPS niedriger, aber stabiler über die Runde** (subjektive Schätzung, keine FPS-
+  Messung in dieser Runde — io_samp4 misst PSI/GPU/IO, nicht fps). Konsistent mit dem
+  r14-D1-Eindruck „super flüssig" und dem 460-Runden-Feedback
+  „minimale Ruckler zum Ende".
+- **Lektion**: data.txt ist Snapshot (35 Zeilen), KEINE Zeitreihe — als 2. Beobachter
+  nur io_samp4-Serie + Kernel-Snapshot nutzen. Foreground-Sampler nie bei geschlossenem
+  Termux einsetzen.
