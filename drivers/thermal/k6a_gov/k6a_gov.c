@@ -1360,6 +1360,38 @@ static void sensor_failsafe_tick(void) {
     set_state_locked(K6A_CD_L2);
 }
 
+/* Build462: Spike-Filter als Helper — bit-identischer Refactor des
+ * Inline-Blocks aus gov_thread (Build460-Logik). Bias-Grenze
+ * (dokumentiert in docs/k6a_gov_rules.md): ein anhaltend falsch-hoher
+ * Wert wird bis +K6A_SPIKE_K absorbiert und danach mitgetrackt
+ * (temp_smooth folgt dem Bias ab Tick 2) — Grenze, nicht Bug; L4 kann
+ * auf dem biased t ausloesen. Liefert 1, wenn eine Klemme zuschlug,
+ * 0 bei unberuehrten realen Anstiegen. */
+static int k6a_spike_filter(int *t, int *t_peak, s32 *smooth)
+{
+    int spike = 0;
+
+    /* Build460: Spike-Filter vor der Zustandsentscheidung. Ein
+     * Lesefehler einer Zone mit plausibel positivem Wert liess
+     * sonst tp (= Max aller 4 Gold-Zonen) L4 sofort ausloesen
+     * (state_machine: tp >= cd_l4_temp). Zwei Klemmen:
+     * (a) Tick-Rate gegen die gefilterte Referenz,
+     * (b) Zonen-Spread gegen den 2nd-highest (Ein-Ausreisser
+     * unterm Max). Keine Latenz fuer reale Anstiege: alle
+     * Zonen steigen gemeinsam (< 15 K/Tick Spread). */
+    if (*smooth > 0 &&
+        *t > *smooth + K6A_SPIKE_K) {
+        *t = *smooth + K6A_SPIKE_K;
+        spike = 1;
+    }
+    if (*t > 0 && *t_peak > *t + K6A_SPIKE_K) {
+        *t_peak = *t + K6A_SPIKE_K;
+        spike = 1;
+    }
+    *smooth = *t;
+    return spike;
+}
+
 static int gov_thread(void *data) {
     while (!kthread_should_stop()) {
         int t;
@@ -1411,26 +1443,13 @@ static int gov_thread(void *data) {
             }
             battery_guard_apply(bt_ok, bt);
             if (t_valid) {
-                /* Build460: Spike-Filter vor der Zustandsentscheidung. Ein
-                 * Lesefehler einer Zone mit plausibel positivem Wert liess
-                 * sonst tp (= Max aller 4 Gold-Zonen) L4 sofort ausloesen
-                 * (state_machine: tp >= cd_l4_temp). Zwei Klemmen:
-                 * (a) Tick-Rate gegen die gefilterte Referenz,
-                 * (b) Zonen-Spread gegen den 2nd-highest (Ein-Ausreisser
-                 * unterm Max). Keine Latenz fuer reale Anstiege: alle
-                 * Zonen steigen gemeinsam (< 15 K/Tick Spread). */
-                if (gov->temp_smooth > 0 &&
-                    t > gov->temp_smooth + K6A_SPIKE_K) {
-                    t = gov->temp_smooth + K6A_SPIKE_K;
-                    spike = 1;
-                }
-                if (t > 0 && t_peak > t + K6A_SPIKE_K) {
-                    t_peak = t + K6A_SPIKE_K;
-                    spike = 1;
-                }
+                /* Build462: Filter in k6a_spike_filter() (Build460-Logik,
+                 * bit-identisch). Bias-Grenze: anhaltend falsch-hoch wird
+                 * bis +15 K absorbiert und dann mitgetrackt — Grenze,
+                 * nicht Bug (docs/k6a_gov_rules.md). */
+                spike = k6a_spike_filter(&t, &t_peak, &gov->temp_smooth);
                 if (spike)
                     gov->spike_drops++;
-                gov->temp_smooth = t;
                 gov->temp_celsius = t;
                 gov->temp_src = t_src;
                 gov->temp_valid = true;

@@ -22,7 +22,7 @@ def block(start_re, open_ch="{", close_ch="}", end_semicolon=False):
     raise SystemExit("unbalanciert: " + start_re)
 
 out = ["/* automatisch extrahiert aus k6a_gov.c, nicht von Hand aendern */"]
-for name in ("K6A_HIST_N", "K6A_RAMP_UP_TICKS", "K6A_L4_MARGIN", "K6A_GOV_MAX_FREQS"):
+for name in ("K6A_HIST_N", "K6A_RAMP_UP_TICKS", "K6A_L4_MARGIN", "K6A_SPIKE_K", "K6A_GOV_MAX_FREQS"):
     m = re.search(r"^#define\s+" + name + r"\b.*$", src, re.M)
     line = m.group(0)
     if name == "K6A_L4_MARGIN" and margin is not None:
@@ -35,7 +35,7 @@ out.append(block(r"^struct k6a_gov\s*\{", end_semicolon=True))
 out.append(block(r"^struct k6a_profile_def\s*\{", end_semicolon=True))
 out.append(block(r"^static const struct k6a_profile_def profiles\[\]\s*=\s*\{", end_semicolon=True))
 out.append("static struct k6a_gov *gov;")
-for fn in ("k6a_hist_push", "set_state_locked", "ramp_next_cap", "state_machine", "battery_guard_apply", "battery_guard_tick", "sensor_failsafe_tick"):
+for fn in ("k6a_hist_push", "set_state_locked", "ramp_next_cap", "state_machine", "battery_guard_apply", "battery_guard_tick", "sensor_failsafe_tick", "k6a_spike_filter", "cd_ladder_store", "cd_silver_caps_store"):
     out.append(block(r"^static \w[\w\s\*]*\b" + fn + r"\("))
 open(sys.argv[2], "w").write("\n\n".join(out) + "\n")
 print("extracted ->", sys.argv[2])

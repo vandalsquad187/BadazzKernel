@@ -2614,3 +2614,74 @@ wie er ist**, keine fürsche Kernel-Arbeit nötig. Konsequenzen/Items:
   runter, 1 OPP/4 Ticks hoch) glättet die Kurve weiter. State Machine unangetastet
   (Events/Hysterese/Residency/GPU/BW bleiben), nur der Gold-Cap-Zielwert wird
   temp-abhängig. Host-Test beim Push sofort grün (README 1.7.6 synchron).
+
+## 2026-11-17 V — Review-Runde: Regelwerk-Doc (R1) + 461-Runden-Protokoll (R2)
+- **R1 erledigt**: `docs/k6a_gov_rules.md` — die Entscheidungs-Schichten in
+  Ausführungsreihenfolge pro Tick (Sensor-Akquisition KB8 → Spike-Filter → State
+  Machine → Feinleiter → Ramp → Notifier-Klammer) + Feinleiter↔Spike-Filter-
+  Semantik + „Was passiert bei …" (Sensor-Verlust, Ein-Tick-Glitch, reale
+  Anstiege, **Bias-Grenze ehrlich**: +15 K absorbiert, Filter trackt dann mit,
+  L4 auf biased t möglich — Grenze, nicht Bug) + **Battery-Guard als Constraint
+  der State Machine markiert** (Blockade des CD-Exits, kein eigener Regelkreis).
+  README: ein Satz + Link, keine Tabellen-Änderung. Reviewer-Korrektur:
+  README-Drift-Claim war gegen den historischen Tabellenkopf (:78 v1.7.0 =
+  Builds 421-428) gerichtet, aktueller Stand 1.7.6 überall verifiziert, Guard
+  grün — erledigt. **Update-Pflicht**: das Doc wandert mit jeder künftigen
+  Regelungs-Änderung im selben Commit mit (R4-Vermerk).
+- **R2-Protokoll (461-Runde)**: Flash 461 → Verify (`cd_ladder=1`, Re-Arm,
+  Stop-Verifikation im v1.6.7-Log) → Runde (~22 min, ungesteckt, gleiches
+  Szenario). **Exit-Kriterien (2 Beobachter)**: (a) L4-Residenz ≪ 194 s
+  (460-Baseline), (b) **Anteil Zeit ≥86 °C + Cap-Treppenwechsel/Min aus der
+  data.txt-Serie** (2-s-Takt, temp + policy_max) — trennt „Kurve arbeitet" von
+  „hängt ewig in der letzten Stufe bei 86". Dazu: Events/L2/L3-Deltas,
+  `spike_drops=0` = PASS (der Filter-Arbeitsbeweis kommt deterministisch aus
+  S8/462, nicht aus realen Glitches), kein TGAME-Entry. A/B-Fallback ohne
+  Reflash: `echo 0 > /sys/kernel/k6a_gov/cd_ladder` = exaktes 459/460-Verhalten.
+- **R3-Exit-Kriterium (462 = reiner Test-Infra-Build, schriftlich fixiert)**:
+  S1-S7b bit-identisch ✓ · S8 (a: reale Rampen 2 K/Tick unberührt, b: +40-K-
+  Sprung geklemmt auf smooth+15, c: Spread-Glitch tp→t+15, d: Bias-Absorption
+  als dokumentierte Grenze) neu grün · S9 (cd_silver_caps/cd_ladder-Store-
+  Validierung) neu grün · **smooth-immer-Update-Assertion** (verhindert die
+  „nur-on-clamp optimieren"-Refactor-Katastrophe) · spike_drops im Live-Check
+  = 0 · gov-Version unverändert 1.7.6 · data.txt-Charakteristik unverändert.
+  Goldens aus der **eingefrorenen 461-Quelllogik** (Tick-für-Tick-Expected-
+  Values, deterministische Integer-Arithmetik = Paritätsbeweis; Fault-Injection
+  am Gerät nicht machbar). Kernel: `k6a_spike_filter()`-Helper + **Bias-Grenzen-
+  Kommentar an ZWEI Stellen** (über dem Helper + über der Call-Site in
+  gov_thread — kann nicht driften).
+
+## 2026-11-18 VI — 461-Session: AnTuTu-Volltelemetrie + Leiter-Beweis + ctl-Zoo
+- **Foreground-Sampler = kill-proof**: 501/501 Zeilen überlebt (18 min, 1 Tool-Call,
+  sync) — vs. Background-nohup = tot nach 8,5 min (Phantom-Killer, jetzt mit
+  Kandidat: BRENE's inotify.sh). Methode: sync-su-Loop in EINEM Bash-Call mit
+  langem Timeout, Serie auf Gerät loggen.
+- **AnTuTu hot-start (22:41-00:0x, ~18 min getestet)**: Start @ 71 °C (vorwärmt),
+  komplett CD: 357 Samples cd_l2 + 143 cd_l3, 0 gaming. **CD_L4 = 0, temp≥86 =
+  0 %, Peak 81/82 °C.** gold_cap_now-Verteilung = 10 Level VOLL gestreut
+  (1555200×142 … 1708800×102, Zwischenstufen ×21-54) → **Leiter parkt nicht**
+  (Reviewer-Diskriminator mit Real-Daten erfüllt). 242 policy_max-Wechsel exakt
+  auf dem 19,2-kHz/K-Raster + 1 Sample @ 1522286 (= 32,9-kHz/K-Raster, L3-Band)
+  → Interpolation sichtbar in beiden Bändern. Events +29, spike_drops=0 →
+  **R2-Exit-Kriterium „spike_drops im Live-Check = 0" erfüllt.**
+- **AnTuTu run1 (cool start, 22:06-22:21)**: Peak 69 °C, null CD; Dips 2:45/9:45/
+  10:40 = Subtest-Täler (Kernel-Signatur: keine); CPU7 flat = unser 1709er-Cap
+  (Diagramm-„1800" = Rundung) → **Baseline = gaming-capped, NICHT schedutil-rein**
+  (User-Fazit bestätigt). Baseline-Doc-Werte 34-36 °C Akku = Pack-Indikator,
+  Gold-Zonen liefen 55-82 (unsere Serie).
+- **22:22-22:31-Pump-Session** (79-80 °C, L2/L3): = User-Modul-/TEE-Arbeit, KEINE
+  Runden-Daten. Abend-Residenz gesamt: cd_l2 1174 s, cd_l3 412 s, **cd_l4 = 0**
+  — die 87-°C-Klippe wurde nie erreicht. spike_drops=0 durchgehend.
+- **ctl-Zoo aufgeklärt**: 1.6.7-ctl starb 22:04 (AnTuTu-App-Killer), Neustarts
+  22:05:38 (Banner „1.6.6" = module.prop-Stale-Read während User-Modul-Churn —
+  ctl liest module.prop live via sed), 22:10:56 + 22:13:55 wieder 1.6.7. PID
+  5540 (seit 22:13:52) = 1.6.7 ✓, deployed Skript = alle 1.6.7-Features (9 Hits)
+  ✓, module.prop = 1.6.7 ✓. Daemon-Stop hielt durchgehend (dump nie TGAME-SS).
+  ctl überlebte den zweiten AnTuTu-Lauf diesmal.
+- **brene (BRENE-SUSFS v0.0.76) + tricky_store (TEESimulator-RS v6.0.1)** =
+  User-Integrity-Stack (22:13/22:16 installiert), keine k6a-Interferenz.
+- **k6a_thermal-Floor-Konfig**: en=1, T1/T2/T3 = 85/90/95 °C, hard=100 °C —
+  außerhalb Arbeitsbereich, nie wirksam.
+- **R2 (CoD-Runde)**: gefroren bis User ausgeruht (User-Müdigkeit; AnTuTu passiv
+  substituiert heute). **R3/462 vom User freigegeben, unabhängig von R2**: Test-
+  Infra-Build per frozen protocol (Goldens aus eingefrorener 461-Logik, S8a-d +
+  smooth-immer-Assertion + S9, S1-S7b bit-identisch, Version bleibt 1.7.6).
