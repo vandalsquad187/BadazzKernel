@@ -144,3 +144,8 @@ include/linux/*.orig
 fs/susfs/*.orig
 tools/k6a_gov_host_test/*.h.tmp
 tools/k6a_gov_host_test/extracted.h
+tools/k6a_gov_host_test/k6a_host_test
+
+# release/download artefacts (ferry copies, never tracked)
+/SHA256SUMS
+/Badazz-kernel-sweet-*.zip

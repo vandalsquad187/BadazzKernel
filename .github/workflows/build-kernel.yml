@@ -227,6 +227,10 @@ jobs:
               errors=$((errors+1))
             fi
           done
+          if grep -q '^CONFIG_FORTIFY_SOURCE=y' .config; then
+            echo "::error::CONFIG_FORTIFY_SOURCE=y is forbidden: 4.14 + GCC13.3 bootloops (build458a bisect)"
+            errors=$((errors+1))
+          fi
           if [ "$errors" -gt 0 ]; then
             echo "FAILED: $errors required config(s) missing"
             exit 1

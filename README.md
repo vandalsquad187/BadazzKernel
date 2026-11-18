@@ -161,6 +161,8 @@ exactly what makes this trap invisible.
 | `hysteresis` | RW | `fast normal` — dwell ms, `fast` 1..5000 (default 3000), `normal` 1..5000 (default 2000) |
 | `hist` | RO | Transition ring (16), `ms:temp:from>to` comma-separated, ms since insmod, oldest first — empty without transitions |
 | `cd_thresholds` | RW | `l2t l3t l4t rec` in **°C**, `l2g l3g l4g` in **kHz** (CPU-Gold-Caps) — Beispiel: `96 99 102 93 1708800 1209600 1094400` (GAMING) |
+| `cd_ladder` | RW | 0/1 (default 1) — fine-grained CD ladder: piecewise-linear Gold-cap interpolation `l2g→l3g→l4g` over the threshold temps; `0` = flat Build459 behavior (A/B without re-flash) |
+| `cd_silver_caps` | RW | `l2 l3 l4` — **Hz** — Silver (CPU-0) caps in the CD path, `0 0 0` = off (default) |
 | `gpu_caps` | RW | `l2 l3 l4` — **Hz** — Beispiel: `800000000 565000000 430000000` (GAMING) |
 | `bw_floors` | RW | `gpubw_l2 l3 l4 llcc_l2 l3 l4` — **raw DT-table votes** (gpubw/llcc devfreq tables, max ≈ 6881/7716), each ≤ 30000, 0 = no floor — Beispiel: `4000 3000 1500 0 4000 3000` (GAMING) |
 | `battery_guard` | RW | 0/1 — battery guard (trip point in `battery_guard_temp`) |
