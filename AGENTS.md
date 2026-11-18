@@ -2731,7 +2731,15 @@ wie er ist**, keine fürsche Kernel-Arbeit nötig. Konsequenzen/Items:
   **13 Level** (1 423 543 … 1 708 800 Hz), **326 Cap-Wechsel/1385 s = 14,12/min**
   (Leiter parkt nicht); spike_drops=0; Dump 9 Zeilen/0 TGAME (Vendor-Engine still);
   throttle_events +10 (Post) / +8 (Serie) vs +30 (460). State-Verteilung: cd_l2 315 s,
-  cd_l3 616 s, gaming 172 s. User-Feel-Runde folgt separat.
+  cd_l3 616 s, gaming 172 s.
+- **User-Feel (R2, subjektiv)**: „sehr gute Runde", nur im **hektischen Finale minimale
+  Stutters**. Bei langen Fahrten/Flügen und viel Feuer spürbar sinkende FPS — interpretiert
+  als die graduelle Cap-Rampe des Feinleiters (genau der beabsichtigte Trade-off: keine
+  194-s-L4-Bang-bang-Klippe mehr, dafür frühes sanftes Absenken). Geschätzter Durchschnitt
+  **5-10 FPS niedriger, aber stabiler über die Runde** (subjektive Schätzung, keine FPS-
+  Messung in dieser Runde — io_samp4 misst PSI/GPU/IO, nicht fps). Konsistent mit dem
+  r14-D1-Eindruck „super flüssig" und dem 460-Runden-Feedback
+  „minimale Ruckler zum Ende".
 - **Lektion**: data.txt ist Snapshot (35 Zeilen), KEINE Zeitreihe — als 2. Beobachter
   nur io_samp4-Serie + Kernel-Snapshot nutzen. Foreground-Sampler nie bei geschlossenem
   Termux einsetzen.
