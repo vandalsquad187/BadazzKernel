@@ -11,9 +11,10 @@ k6a-ctl: separater Repo-Stand mit eigenem `README.md` + `CHANGELOG.md`.
 - **Repo**: `vandalsquad187/BadazzKernel` `main` — Six-Point-Review Phasen 1–4 umgesetzt
   (Phase 1 `0fe3023b8` CI-Hygiene, Phase 3 Docs-Umbau `6c85d4506`, Build 463 = Phase 4
   Consensus-Gate, dieser Commit).
-- **Gerät**: **Build 461 = Gaming-Baseline** (Feinleiter `cd_ladder` default an; R2-CoD-Runde
-  PASS — L4 0 s vs. 460-Baseline 194,5 s). Build 460 = Spike-Filter/Silver-Caps/quiet-Telemetrie;
-  Build 462 = Test-Infra (Spike-Filter-Helper + S8/S9-Goldens, kein Verhalten, Flash nicht nötig).
+- **Gerät**: **Build 464 = Stand** (gov 1.7.7 Consensus-Gate, R2 ✅ PASS +5–10 fps
+  subj., Details devlog IX). Build 461 = vorherige Gaming-Baseline (R2 PASS, L4 0 s vs.
+  460-Baseline 194,5 s); 460 = Spike-Filter/Silver-Caps/quiet; 462 = Test-Infra (kein
+  Verhalten, nie geflasht).
 - **Build 463 committet (gov 1.7.7)**: Consensus-Gate — `temp_smooth` zieht **nur bei
   Konsens (alle lebenden Gold-Zonen steigen gemeinsam)** nach oben (schließt die +15-K-
   Bias-Grenze: ohne Konsens friert die Referenz, Klemme absorbiert dauerhaft), L4-Latenz
@@ -23,14 +24,17 @@ k6a-ctl: separater Repo-Stand mit eigenem `README.md` + `CHANGELOG.md`.
   **CI grün** (host-test 17, Lockdep 24, Build Kernel **Run 464** — der Phase-1-Push
   verbrauchte 463, Marker/Commits bleiben einheitlich „Build 463"; Flash-Quelle =
   Artefakte `Badazz-kernel-sweet-v4.14.369-build464aosp`/`…miui`).
-  **Offen: Flash durch User, R2-Feldrevalidierung.**
+  **Flash ✅ + R2-Feldrevalidierung 2026-11-19 ✅ PASS**: L4 0 s, ≥86 °C 0 Samples,
+  spike_drops 0, Backstop 0 Treffer, Exakt-Schwellwert-Eskalationen, subjektiv
+  **+5–10 fps** vs. 461 und flüssig bis zum Ende (Bericht: devlog
+  `build-scopes-and-rounds.md` IX).
 - **k6a-ctl**: **v1.6.8 / versionCode 178** committet (`81c0c66` pidof→/proc-Scan Tri-State,
   `65ff32a` Persistenz `cd_ladder`/`cd_silver_caps`), ZIP `k6a-ctl-v1.6.8.zip` gebaut
   (Gate OK) — **deployed 2026-11-19 nach User-OK**: Backup `/data/adb/k6a-ctl-bak-v167`,
   atomare `mv`-Ersetzung, settings.conf-Keys angehaengt, sauberer Controller-Restart
   (Banner 1.6.8 mit `cd_ladder=1 silver_caps=0 0 0` verifiziert, hb tick Reset, Tri-State-Verify live).
 - **Review-Reihenfolge**: Phase 1 ✅ → Phase 2 ✅ → Phase 3 ✅ → Check ✅ → Phase 4 ✅
-  (Build 463 committet; Flash + R2 ausstehend).
+  (Build 463/464 vollständig: CI ✅ → Flash ✅ → R2 ✅ PASS).
 - Rollendes Status-Log bis Build 457: [`docs/devlog/state-log-to-build457.md`](docs/devlog/state-log-to-build457.md).
 
 ## k6a-ctl (Magisk-Modul — integraler Bestandteil des Kernel-Pakets, User-OK 2026-10-29)

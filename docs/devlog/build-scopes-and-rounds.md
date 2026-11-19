@@ -849,3 +849,29 @@ GNU-Variable-Sized-Warning aus `cgroup-defs.h`.
 - **Lektion**: data.txt ist Snapshot (35 Zeilen), KEINE Zeitreihe — als 2. Beobachter
   nur io_samp4-Serie + Kernel-Snapshot nutzen. Foreground-Sampler nie bei geschlossenem
   Termux einsetzen.
+
+## 2026-11-19 IX — Build 464 (Consensus-Gate) R2-Validierung: PASS (+5-10 fps subj.)
+- **Setup**: Build 464 (gov 1.7.7, `ce7f8759`) geflasht; Verify: ko fresh 20:13,
+  vermagic `build464-aosp`, `/sys/module/k6a_gov/version=1.7.7`, status
+  `build_hash=ce7f8759`, `[SVC] k6a_gov 1.7.7 geladen` @20:14, Controller 1.6.8,
+  `hash_verified=1`. D1-Thresholds 72/80/87/66 (user), cd_ladder=1, silver_caps=0 0 0,
+  poll_adaptive=0. T0-Snapshot (`r2_before.txt`): gaming 2 723 673 ms, l2/l3/l4=0,
+  throttle_events=0, spike_drops=0, ticks=10677, Temp 42-45 C.
+- **Runde** ~21:13-21:36 (hist-Ring, 15 Transitions), Post (`r2_after.txt`):
+  throttle_events **+7** (nur L2/L3, direkte gaming->l3@80 = Design), residency
+  l2 +247 352 ms / l3 +702 364 ms / **l4 = 0**, spike_drops **0**,
+  **dmesg Build463/Backstop: 0 Treffer** (Roh-Peak nie >=87 ueber 8 Ticks), hb-Max
+  **81 C**, hist-Max 80, **>=86 C = 0 Samples**, Emissionen exakt an Schwellwerten
+  (73>=72, 80>=80), Mindest-Abstand 2,8 s > 2-s-Dwell, kein Crash/Respawn,
+  Boundary-Chatter um 72/80 in der Heissphase (11 Transitions/90 s) innerhalb der
+  Hysterese — kein Flip-Bug.
+- **Gate-Nachweis**: T lief bei echten Heizramps ungebremst durch (Transitions auf
+  exaktem Schwellwert = keine Konsens-Blockade/Unterlesung), L4 blieb bei max 81 C
+  bei 0 s — weder Unterreaktion noch Ueberreaktion; Klemmen kamen nie zur Anwendung
+  (spike_drops=0 wie in 461).
+- **User-Feel**: „eine bis zum Ende fluessige Runde, fps hoeher subjektiv 5-10 fps"
+  gegenueber 461 (dort: 5-10 fps niedriger, aber stabil) — **R2 damit PASS**,
+  subjektive Schaetzung, keine FPS-Messung (io_samp4 diesmal nicht eingesetzt;
+  badazz_iowatch-Beobachter-Methode bleibt fuer die naechste Runde).
+- **Vergleich 461-R2**: L4 0 s = 0 s; throttle +7 vs +10; State-Anteile l2 247/l3 702
+  vs 315/616 (1385-s-Fenster) — vergleichbare Heisslast, gleiche Null-L4-Bilanz.
