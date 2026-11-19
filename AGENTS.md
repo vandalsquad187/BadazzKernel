@@ -20,7 +20,10 @@ k6a-ctl: separater Repo-Stand mit eigenem `README.md` + `CHANGELOG.md`.
   via **Peak-Backstop** (Roh-Peak ≥ l4 über 8 Ticks → L4; Exit hält Roh-Peak-Margin,
   kein Flap); S8d-Golden gekippt „Bias eingefroren". Host-Tests **167/167**, DOC-DRIFT grün,
   Syntax-Check pristine-compared 0/0, R4 im selben Commit, `kver_ok()` deckt 1.7.7 ab.
-  **Offen: CI-Build, Flash durch User, R2-Feldrevalidierung.**
+  **CI grün** (host-test 17, Lockdep 24, Build Kernel **Run 464** — der Phase-1-Push
+  verbrauchte 463, Marker/Commits bleiben einheitlich „Build 463"; Flash-Quelle =
+  Artefakte `Badazz-kernel-sweet-v4.14.369-build464aosp`/`…miui`).
+  **Offen: Flash durch User, R2-Feldrevalidierung.**
 - **k6a-ctl**: **v1.6.8 / versionCode 178** committet (`81c0c66` pidof→/proc-Scan Tri-State,
   `65ff32a` Persistenz `cd_ladder`/`cd_silver_caps`), ZIP `k6a-ctl-v1.6.8.zip` gebaut
   (Gate OK) — **deployed 2026-11-19 nach User-OK**: Backup `/data/adb/k6a-ctl-bak-v167`,
@@ -58,7 +61,9 @@ k6a-ctl: separater Repo-Stand mit eigenem `README.md` + `CHANGELOG.md`.
 
 ## CI (`build-kernel.yml`) — Kurzfassung
 
-- Push `main` → Dual-Build (`aosp`+`miui`) + **ein** Release `v4.14.369-badazz-buildNNN`, 13–17 min;
+- Push `main` → Dual-Build (`aosp`+`miui`) + host-test + lockdep, **nur Artefakte**
+  (Flash-Quelle); **Release `v4.14.369-badazz-buildNNN` nur per `workflow_dispatch`**
+  (seit `f2b059635`, Build399-Lesson), 13–17 min;
   `miui/**` → nur Artefakte; **Pushes via GITHUB_TOKEN feuern kein CI**.
 - `.github`-Push-Sicherheit: der miui-Resync-Job muss `.github/` nach dem Merge auf Branch-Stand
   zurücksetzen (Token darf Workflows nicht pushen); `.gitignore` listet `.github` → `git add -f`.
@@ -76,7 +81,7 @@ k6a-ctl: separater Repo-Stand mit eigenem `README.md` + `CHANGELOG.md`.
 - **Commits**: title + evidence body, **no `Co-Authored-By`**. The Write tool is broken on this box
   (emits NULs) → always commit with a heredoc:
   `git commit -q -F - <<'EOF' … EOF`
-- **CI**: push to `main` → release `v4.14.369-badazz-buildNNN`, ~13–17 min. Poll with
+- **CI**: push to `main` → Dual-Build-Artefakte (~13–17 min); Release nur per `workflow_dispatch`. Poll with
   `gh run view <id> --repo vandalsquad187/BadazzKernel --json status,conclusion` in `sleep 55`
   loops, **timeout ≥ 1700000 ms**. Releases: `gh release list --repo vandalsquad187/BadazzKernel --limit 3`.
 - **Syntax-check before push** (see `docs/devlog/local-build-notes.md`), always pristine-compared.
