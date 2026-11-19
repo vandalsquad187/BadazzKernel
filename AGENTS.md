@@ -23,7 +23,9 @@ k6a-ctl: separater Repo-Stand mit eigenem `README.md` + `CHANGELOG.md`.
   in `drivers/thermal/k6a_gov/k6a_gov.c`.
 - **k6a-ctl**: **v1.6.8 / versionCode 178** committet (`81c0c66` pidof→/proc-Scan Tri-State,
   `65ff32a` Persistenz `cd_ladder`/`cd_silver_caps`), ZIP `k6a-ctl-v1.6.8.zip` gebaut
-  (Gate OK) — **Deploy erst nach User-OK** (auf dem Gerät läuft weiter 1.6.7).
+  (Gate OK) — **deployed 2026-11-19 nach User-OK**: Backup `/data/adb/k6a-ctl-bak-v167`,
+  atomare `mv`-Ersetzung, settings.conf-Keys angehaengt, sauberer Controller-Restart
+  (Banner 1.6.8 mit `cd_ladder=1 silver_caps=0 0 0` verifiziert, hb tick Reset, Tri-State-Verify live).
 - **Review-Reihenfolge**: Phase 1 ✅ → Phase 2 ✅ → Phase 3 ✅ (dieser Docs-Umbau) →
   **Check mit User** → Phase 4 (Build 463).
 - Rollendes Status-Log bis Build 457: [`docs/devlog/state-log-to-build457.md`](docs/devlog/state-log-to-build457.md).
