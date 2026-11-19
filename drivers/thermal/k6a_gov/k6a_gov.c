@@ -30,13 +30,14 @@ extern int kgsl_k6a_set_min_level_idx(unsigned int level);
 extern int k6a_devfreq_get_bw(const char *name, u32 *cur, u32 *min, u32 *max);
 extern int k6a_devfreq_set_bw(const char *name, u32 min, u32 max);
 
-#define K6A_GOV_VERSION       "1.7.6"
+#define K6A_GOV_VERSION       "1.7.7"
 #define K6A_GOV_KTHREAD_SLEEP_MS   250
 #define K6A_GOV_MAX_FREQS     32
 #define K6A_HIST_N            16
 #define K6A_RAMP_UP_TICKS     4   /* Ticks pro OPP-Schritt beim Loesen des Gold-Caps */
 #define K6A_L4_MARGIN     3   /* K unter cd_l4_temp, bevor L4 verlassen wird */
 #define K6A_SPIKE_K       15  /* Build460: max K/Tick (250 ms) Sprung, darueber = Spike (Realraempfe ~0.1-2 K/Tick) */
+#define K6A_L4_BACKSTOP_TICKS 8 /* Build463: Roh-Peak >= cd_l4_temp in 8 aufeinanderfolgenden Ticks (2 s) erzwingt L4 trotz Klemmen */
 
 enum k6a_state { K6A_OFF=0, K6A_GAMING=1, K6A_CD_L2=2, K6A_CD_L3=3, K6A_CD_L4=4 };
 enum k6a_tsrc { K6A_TSRC_NONE=0, K6A_TSRC_GOLD, K6A_TSRC_SILVER, K6A_TSRC_XO, K6A_TSRC_SOC, K6A_TSRC_ZONE0 };
@@ -61,6 +62,10 @@ struct k6a_gov {
     u32 invalid_ticks;     /* Build454: aufeinanderfolgende Ticks ohne Temp-Quelle */
     s32 temp_smooth;       /* Build460: gefilterte Referenz fuer den Spike-Filter, 0 = unset */
     u32 spike_drops;       /* Build460: geclampte Spike-Ticks (Telemetrie) */
+    s32 tz_prev[4];        /* Build463: Vortick-Werte der 4 Gold-Zonen (Konsens-Gate) */
+    s32 tsrc_prev;         /* Build463: Vortick-Wert der Fallback-Quelle (Konsens-Gate) */
+    u32 temp_peak_raw;     /* Build463: Peak vor dem Spike-Filter (L4-Peak-Backstop) */
+    u32 l4_back_cnt;       /* Build463: aufeinanderfolgende Roh-Peak-Ticks >= cd_l4_temp */
     bool cd_ladder;        /* Build461: Feinleiter (piecewise l2g->l3g->l4g), default an */
     u32 profile;
     bool thresholds_user;
@@ -545,17 +550,29 @@ static int read_cached_temp(struct thermal_zone_device **slot, const char *name)
 
 /* KB8: 2nd-highest of the 4 Gold zones (cpu-1-0..3-usr) for the state
  * decision, the peak stays in temp_peak and arms the L4 emergency only. */
-static int read_temp(int *src_out, bool *valid_out, int *peak_out) {
+static int read_temp(int *src_out, bool *valid_out, int *peak_out,
+                     bool *consensus_out) {
     int i, t, max_t = 0, second_t = 0;
+    int valid_n = 0, rising_n = 0;
 
     *valid_out = false;
     *src_out = K6A_TSRC_NONE;
     *peak_out = 0;
+    *consensus_out = false;
 
     for (i = 0; i < 4; i++) {
         char name[16];
         snprintf(name, sizeof(name), "cpu-1-%d-usr", i);
         t = read_cached_temp(&gov->tz_gold[i], name);
+        if (t > 0) {
+            valid_n++;
+            /* Build463: Konsens = jede lebende Zone steigt gegenueber dem
+             * Vortick (unset/0 zaehlt als steigend, tote Zone blockiert
+             * nicht; eine haengend-hohe Zone steht still und sperrt). */
+            if (gov->tz_prev[i] <= 0 || t > gov->tz_prev[i])
+                rising_n++;
+        }
+        gov->tz_prev[i] = t;
         if (t > max_t) {
             second_t = max_t;
             max_t = t;
@@ -568,6 +585,8 @@ static int read_temp(int *src_out, bool *valid_out, int *peak_out) {
         *valid_out = true;
         *src_out = K6A_TSRC_GOLD;
         *peak_out = max_t;
+        *consensus_out = (valid_n > 0 && rising_n == valid_n);
+        gov->tsrc_prev = 0;
         return second_t ? second_t : max_t;
     }
 
@@ -576,6 +595,8 @@ static int read_temp(int *src_out, bool *valid_out, int *peak_out) {
         *valid_out = true;
         *src_out = K6A_TSRC_SILVER;
         *peak_out = t;
+        *consensus_out = (gov->tsrc_prev <= 0 || t > gov->tsrc_prev);
+        gov->tsrc_prev = t;
         return t;
     }
     t = read_cached_temp(&gov->tz_xo, "xo-therm");
@@ -583,6 +604,8 @@ static int read_temp(int *src_out, bool *valid_out, int *peak_out) {
         *valid_out = true;
         *src_out = K6A_TSRC_XO;
         *peak_out = t;
+        *consensus_out = (gov->tsrc_prev <= 0 || t > gov->tsrc_prev);
+        gov->tsrc_prev = t;
         return t;
     }
     t = read_cached_temp(&gov->tz_soc, "soc-therm");
@@ -590,6 +613,8 @@ static int read_temp(int *src_out, bool *valid_out, int *peak_out) {
         *valid_out = true;
         *src_out = K6A_TSRC_SOC;
         *peak_out = t;
+        *consensus_out = (gov->tsrc_prev <= 0 || t > gov->tsrc_prev);
+        gov->tsrc_prev = t;
         return t;
     }
     t = read_cached_temp(&gov->tz_zone0, "thermal_zone0");
@@ -597,6 +622,8 @@ static int read_temp(int *src_out, bool *valid_out, int *peak_out) {
         *valid_out = true;
         *src_out = K6A_TSRC_ZONE0;
         *peak_out = t;
+        *consensus_out = (gov->tsrc_prev <= 0 || t > gov->tsrc_prev);
+        gov->tsrc_prev = t;
         return t;
     }
     return 0;
@@ -646,6 +673,7 @@ static void state_machine(void) {
         /* Profil "off": Governor inaktiv, egal was thresholds_user sagt */
         set_state_locked(K6A_OFF);
         gov->entry_since = 0;
+        gov->l4_back_cnt = 0;
         return;
     }
 
@@ -671,12 +699,35 @@ static void state_machine(void) {
         goto done;
     }
 
+    /* Build463: L4-Peak-Backstop — der gefilterte tp kann durch die
+     * Klemmen (und das eingefrorene smooth) unterhalb von cd_l4_temp
+     * kleben bleiben; ein Roh-Peak, der die L4-Schwelle in
+     * K6A_L4_BACKSTOP_TICKS aufeinanderfolgenden Ticks haelt, erzwingt
+     * L4 trotzdem (2 s Latenz, Ein-Tick-Ausreisser zaehlen nicht). */
+    if (gov->state < K6A_CD_L4 &&
+        gov->temp_peak_raw >= gov->cd_l4_temp) {
+        if (++gov->l4_back_cnt >= K6A_L4_BACKSTOP_TICKS) {
+            set_state_locked(K6A_CD_L4);
+            gov->throttle_events++;
+            gov->l4_back_cnt = 0;
+            pr_warn("Build463: L4 peak-backstop @%u (raw >= %u, %u ticks)\n",
+                    gov->temp_peak_raw, gov->cd_l4_temp,
+                    K6A_L4_BACKSTOP_TICKS);
+            goto done;
+        }
+    } else {
+        gov->l4_back_cnt = 0;
+    }
+
     switch (gov->state) {
     case K6A_CD_L4:
         /* Rueckstufung nur, wenn auch die Spitze klar unter der L4-Schwelle liegt,
-         * sonst eskaliert der naechste Tick sofort wieder */
+         * sonst eskaliert der naechste Tick sofort wieder. Build463: der Roh-Peak
+         * zaehlt mit — sonst flaegt die Backstop-Eskalation beim naechsten
+         * Exit sofort wieder hoch, solange die heiße Zone noch druebersteht. */
         if (t < gov->cd_l3_temp &&
             tp + K6A_L4_MARGIN < gov->cd_l4_temp &&
+            gov->temp_peak_raw + K6A_L4_MARGIN < gov->cd_l4_temp &&
             (now - gov->state_ts) >= dwell_out)
             set_state_locked(K6A_CD_L3);
         break;
@@ -1354,20 +1405,24 @@ static void read_one_node(const char *path, char *dst, size_t cap) {
  * den CD_L2-Zustand normal auf. Caller haelt gov->lock. */
 static void sensor_failsafe_tick(void) {
     gov->invalid_ticks++;
+    gov->l4_back_cnt = 0;   /* Build463: kein Zaehlerstand ueber einen Sensor-Ausfall */
     if (gov->invalid_ticks < 10 || gov->state != K6A_GAMING) return;
     pr_warn("Build454: sensor fail-safe after %u invalid ticks, forcing CD_L2\n",
             gov->invalid_ticks);
     set_state_locked(K6A_CD_L2);
 }
 
-/* Build462: Spike-Filter als Helper — bit-identischer Refactor des
- * Inline-Blocks aus gov_thread (Build460-Logik). Bias-Grenze
- * (dokumentiert in docs/k6a_gov_rules.md): ein anhaltend falsch-hoher
- * Wert wird bis +K6A_SPIKE_K absorbiert und danach mitgetrackt
- * (temp_smooth folgt dem Bias ab Tick 2) — Grenze, nicht Bug; L4 kann
- * auf dem biased t ausloesen. Liefert 1, wenn eine Klemme zuschlug,
+/* Build462: Spike-Filter als Helper — Refactor des Inline-Blocks aus
+ * gov_thread (Build460-Logik), Build463 mit Konsens-Gate. Zwei Klemmen
+ * (Tick-Rate gegen die gefilterte Referenz, Zonen-Spread gegen den
+ * 2nd-highest) plus die smooth-Aktualisierung: aufwaerts nur bei
+ * Konsens (alle lebenden Gold-Zonen steigen gemeinsam, aus read_temp()),
+ * abwaerts und beim Bootstrap (smooth==0) immer. Ohne Konsens friert
+ * die Referenz ein — die +15-K-Klemme absorbiert einen anhaltend
+ * falsch-hohen Wert dauerhaft (Bias eingefroren statt mitgetrackt,
+ * docs/k6a_gov_rules.md). Liefert 1, wenn eine Klemme zuschlug,
  * 0 bei unberuehrten realen Anstiegen. */
-static int k6a_spike_filter(int *t, int *t_peak, s32 *smooth)
+static int k6a_spike_filter(int *t, int *t_peak, s32 *smooth, bool consensus)
 {
     int spike = 0;
 
@@ -1378,7 +1433,7 @@ static int k6a_spike_filter(int *t, int *t_peak, s32 *smooth)
      * (a) Tick-Rate gegen die gefilterte Referenz,
      * (b) Zonen-Spread gegen den 2nd-highest (Ein-Ausreisser
      * unterm Max). Keine Latenz fuer reale Anstiege: alle
-     * Zonen steigen gemeinsam (< 15 K/Tick Spread). */
+     * Zonen steigen gemeinsam (< 15 K/Tick Spread) = Konsens. */
     if (*smooth > 0 &&
         *t > *smooth + K6A_SPIKE_K) {
         *t = *smooth + K6A_SPIKE_K;
@@ -1388,7 +1443,8 @@ static int k6a_spike_filter(int *t, int *t_peak, s32 *smooth)
         *t_peak = *t + K6A_SPIKE_K;
         spike = 1;
     }
-    *smooth = *t;
+    if (*smooth <= 0 || *t <= *smooth || consensus)
+        *smooth = *t;
     return spike;
 }
 
@@ -1400,6 +1456,7 @@ static int gov_thread(void *data) {
         int r_hash = 0;
         int t_src = K6A_TSRC_NONE;
         bool t_valid = false;
+        bool t_consensus = false;
         int t_peak = 0;
         int spike = 0;
         int bt = 0;
@@ -1422,7 +1479,7 @@ static int gov_thread(void *data) {
             read_one_node("/sys/class/thermal/thermal_message/cpu_limits",
                           vlbuf, sizeof(vlbuf));
         }
-        t = read_temp(&t_src, &t_valid, &t_peak);
+        t = read_temp(&t_src, &t_valid, &t_peak, &t_consensus);
         bt_ok = (read_bat_temp(&bt) == 0);
         mutex_lock(&gov->lock);
         if (gov->enabled) {
@@ -1443,11 +1500,13 @@ static int gov_thread(void *data) {
             }
             battery_guard_apply(bt_ok, bt);
             if (t_valid) {
-                /* Build462: Filter in k6a_spike_filter() (Build460-Logik,
-                 * bit-identisch). Bias-Grenze: anhaltend falsch-hoch wird
-                 * bis +15 K absorbiert und dann mitgetrackt — Grenze,
-                 * nicht Bug (docs/k6a_gov_rules.md). */
-                spike = k6a_spike_filter(&t, &t_peak, &gov->temp_smooth);
+                /* Build463: Filter mit Konsens-Gate — smooth zieht
+                 * aufwaerts nur bei Konsens der Gold-Zonen, Bias wird
+                 * eingefroren statt mitgetrackt; der Roh-Peak (vor dem
+                 * Filter) speist den L4-Peak-Backstop in state_machine(). */
+                gov->temp_peak_raw = t_peak;
+                spike = k6a_spike_filter(&t, &t_peak, &gov->temp_smooth,
+                                         t_consensus);
                 if (spike)
                     gov->spike_drops++;
                 gov->temp_celsius = t;

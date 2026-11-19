@@ -4,7 +4,7 @@
   <p>Gaming-optimized kernel for <b>SM7150 (sweet / sweet k6a)</b> — 4.14.369</p>
   <p>
     <img src="https://img.shields.io/badge/Kernel-4.14.369-blue?style=flat-square">
-    <img src="https://img.shields.io/badge/k6a__gov-1.7.6-orange?style=flat-square">
+    <img src="https://img.shields.io/badge/k6a__gov-1.7.7-orange?style=flat-square">
     <img src="https://img.shields.io/badge/KernelSU--Next-v3.3.0--311-green?style=flat-square">
     <img src="https://img.shields.io/badge/SUSFS-v2.3.0-success?style=flat-square">
     <img src="https://img.shields.io/badge/Android-13%20%E2%80%93%2016-lightgrey?style=flat-square">
@@ -15,7 +15,7 @@
 
 ## Overview
 
-BadazzKernel is a performance and gaming tuned kernel for **Redmi Note 12 Pro 4G (sweet / sweetin)**. Core is the in-kernel governor **k6a_gov v1.7.6** (loadable module, `CONFIG_K6A_GOV=m`, insmodded by k6a-ctl) — the perfect base for the companion module **[k6a-ctl](https://github.com/vandalsquad187/k6a-ctl)**. Both work hand-in-hand in delegated mode: kernel throttles, module controls.
+BadazzKernel is a performance and gaming tuned kernel for **Redmi Note 12 Pro 4G (sweet / sweetin)**. Core is the in-kernel governor **k6a_gov v1.7.7** (loadable module, `CONFIG_K6A_GOV=m`, insmodded by k6a-ctl) — the perfect base for the companion module **[k6a-ctl](https://github.com/vandalsquad187/k6a-ctl)**. Both work hand-in-hand in delegated mode: kernel throttles, module controls.
 
 🤌🏻 Join my Telegram channel: https://t.me/Badazz89
 
@@ -27,7 +27,7 @@ BadazzKernel is a performance and gaming tuned kernel for **Redmi Note 12 Pro 4G
 linux-4.14.369
 ├── KernelSU-Next v3.3.0-311 (UAPI 6, 4.14 direct-patch) + SUSFS v2.3.0  # Root + Hide (submodule 79003ef8)
 ├── fs/nomount — NoMount v22 (dev 8f05de7)      # VFS path redirection — zero-mount module injection (CONFIG_NOMOUNT=y)
-├── drivers/thermal/k6a_gov/k6a_gov.c v1.7.6     # In-kernel gaming governor (CONFIG_K6A_GOV=m)
+├── drivers/thermal/k6a_gov/k6a_gov.c v1.7.7     # In-kernel gaming governor (CONFIG_K6A_GOV=m)
 ├── drivers/gpu/msm/kgsl_pwrctrl.c               # GPU pwrlevel export (k6a_gov)
 ├── drivers/devfreq/devfreq.c                    # BW floors (gpubw / llcc), 0 = release floor
 ├── drivers/gpu/msm/ + drivers/thermal/          # Thermal + cooling floors
@@ -39,7 +39,7 @@ linux-4.14.369
 
 | Area | Feature | Details |
 |------|---------|---------|
-| **Governor** | **k6a_gov v1.7.6** | Loadable module (`CONFIG_K6A_GOV=m`, `k6a_gov.ko` shipped in the zip and loaded by k6a-ctl), state machine OFF→GAMING→CD_L2/L3/L4, hysteresis, **immediate escalation** L2→L3→L4, entry dwell on GAMING, L4 flap margin (`peak + 3 K < cd_l4_temp`), `profile=0` forces OFF immediately, throttle history (16), **residency accounting (`residency_ms`) + live `gold_cap_now` with GPU-cap ramping (tighten 1 OPP/tick, release 1 OPP/4 ticks, L4/entry-immediate), `stats_reset` node**, boot default **schedutil** |
+| **Governor** | **k6a_gov v1.7.7** | Loadable module (`CONFIG_K6A_GOV=m`, `k6a_gov.ko` shipped in the zip and loaded by k6a-ctl), state machine OFF→GAMING→CD_L2/L3/L4, hysteresis, **immediate escalation** L2→L3→L4, entry dwell on GAMING, L4 flap margin (`peak + 3 K < cd_l4_temp`), `profile=0` forces OFF immediately, throttle history (16), **residency accounting (`residency_ms`) + live `gold_cap_now` with GPU-cap ramping (tighten 1 OPP/tick, release 1 OPP/4 ticks, L4/entry-immediate), `stats_reset` node**, boot default **schedutil** |
 | **CPU** | Gold clamp | `find_gold_cpu()` + `clamp_freq`, `enforce_max_freq` + `cpufreq_update_policy` (kthread only), hardened notifier, **released again on recovery/disable** |
 | **Temp** | Multi-zone | Max over 4 Gold zones `cpu-1-0..3-usr`, fallback `cpu-0-0-usr` → `xo-therm` → `soc-therm` → `thermal_zone0`; `temp_src`/`temp_valid` in status, holds the last state if no zone answers |
 | **GPU** | Native enforcement | `kgsl_k6a_get_levels` / `kgsl_k6a_set_max_level_idx`, caps per CD state |
@@ -49,7 +49,7 @@ linux-4.14.369
 | **Thermal** | Cooling device | `k6a_gov` as `thermal_cooling_device`, `cool_cur` locked, `K6A_CD_L4` clamp |
 | **Root** | KSU-Next + SUSFS | v3.3.0-311 **UAPI 6**, 4.14 direct-patch mode (submodule `79003ef8`), SUSFS `v2.3.0` round 2 (sus_path/mount/kstat/map, **dup-safe adds + caps, KSU-domain passthrough — root sees the truth, `del_sus_path` cmd**), `tamper_syscall_table` |
 | **Injection** | NoMount v22 | Built-in VFS path-redirection subsystem (`CONFIG_NOMOUNT=y`, dev `8f05de7`), control channel `add_key("nomount")` — the **NoMount metamodule** (v2.2.0) injects installed KSU modules as VFS operations instead of mounts: **`/proc/mounts` stays clean**, fully transparent to apps, UID isolation for exclusions. Verified live in Build 441 |
-| **USB** | DWC3 / QUSB2 | SM6150 clocks (`GCC/DISPCC/CAMCC`), `WAIT_FOR_LPM` clear, `bus_aggr`/`GCTL` 50ms, `is_a_peripheral` fix — PC bootloop gone since v1.3.2. Full device-mode enumeration works since Build 336 (Faults 1/4 fixed) — see [USB status](#usb-status) |
+| **USB** | DWC3 / QUSB2 | SM6150 clocks (`GCC/DISPCC/CAMCC`), `WAIT_FOR_LPM` clear, `bus_aggr`/`GCTL` 50ms, `is_a_peripheral` fix — PC bootloop gone since v1.3.2. Full device-mode enumeration works since Build 336 (Faults 1/4 fixed) — see [`docs/devlog/readme-usb-fixedbugs.md`](docs/devlog/readme-usb-fixedbugs.md) |
 | **Scheduler** | UCLAMP, SCHED_CASS | Latency/efficiency tuning |
 | **Memory** | KSM, LRU_GEN, ZRAM lz4 | Gaming stability |
 | **Net** | BBR | Low latency |
@@ -58,72 +58,7 @@ linux-4.14.369
 | **NFC** | PN80T I2C driver | `CONFIG_NFC=n` intentional (NCI in userspace), `CONFIG_NFC_NQ_PN80T=y` provides `/dev/nq-nci` — fix via [Sweet2NfcFIX](https://github.com/vandalsquad187/Sweet2NfcFIX) module |
 | **MIUI** | HyperOS overlay | `sweet_miui.config` overlay (`ARCH_SM6150/GCC/CAMCC/DISPCC/PDC`) + `xiaomi/sweet` DTS, unified AnyKernel, CI matrix `aosp`/`miui` |
 
-### k6a_gov v1.6.0 hardening fixes (Builds 397/398, Oct 2026)
-
-Fixes 1–10, all in-tree: `build397` shipped 1–7 + unified `pr_fmt`, `build398` added 8–10.
-
-| # | Fix | Where |
-|---|-----|-------|
-| 1 | Gold clamp honours `user_policy.max` releases | `enforce_max_freq()` |
-| 2 | `enable=0` also resets the GPU floor | `enable_store()` |
-| 3 | GPU floor: captured user min restored, never re-capped | `gpu_floor_reset()`, `enforce_gpu_floor()` |
-| 4 | Battery guard: sane temperature on sensor error, decoupled from `temp_valid` | `read_bat_temp()`, `battery_guard_tick()` |
-| 5 | Init: `schedule_delayed_work` only after `kthread_run` (UAF fix) | `k6a_gov_init()` |
-| 6 | `game_pid`: strict `kstrtoint` + `PID_MAX_LIMIT` bound; now echoed in `status` | `game_pid_store()`, `status_show()` |
-| 7 | Governor struct `static`, module params 0644→0444, unified `pr_fmt` (`k6a_gov: ` prefix) | file-wide |
-| 8 | L4 down-step only when `peak + 3 K < cd_l4_temp` — kills the escalate/retreat flap loop | `K6A_L4_MARGIN` |
-| 9 | `profile=0/off` forces state OFF immediately (no more resurrection by `thresholds_user`) | `state_machine()`, `profile_store()` |
-| 10 | GPU cap: remembers the user `max_pwrlevel` (`gpu_cap_saved_max`) and restores it on release (was a hard idx 0) | `enforce_gpu_cap()`, `gpu_reset()` |
-
-### k6a_gov v1.7.0 + SUSFS round 1/2 (Builds 421–428, 2026-10-31)
-
-| # | Feature / Fix | Where |
-|---|-------|-------|
-| — | **Time-residency accounting**: `residency_ms=off,gaming,cd_l2..l4` in `status`, `stats_reset` node | `k6a_gov.c` |
-| — | **GPU-cap ramping** (thrash killer): tighten 1 OPP/tick, release 1 OPP/4 ticks (`K6A_RAMP_UP_TICKS=4`), L4/entry/table-miss immediate; `gold_cap_now` in `status`; notifier clamps to the *currently ramped* cap; `cap_now` reset at enable/profile/board-reset | `ramp_next_cap()` |
-| — | SUSFS round 1: UAF in `susfs_add_sus_kstat/add_sus_path_loop` (added-flag so the user-error path can no longer free published entries), `kern_path`/`path_put` out of RCU, string termination on all user-path fields + uname spoof, **cmdline overflow fix** (fake cmdline truncated to the real `saved_command_line` size) | `fs/susfs/*` |
-| — | SUSFS round 2: **KSU-domain passthrough** (sus_path/sus_mount/kstat-spoof see nothing hidden for `susfs_is_current_ksu_domain()` — root/ksud keep the truth, untrusted apps stay blind; **on-device proven**), `SUSFS_LOGI/LOGE` do-while(0), **dup-safe adds**: path-loop idempotent (cap 256, `-ENOSPC`), kstat 1024/`-EEXIST`, open-redirect 256; `update_sus_kstat` → `-ENOENT` on unknown inode; new `CMD_SUSFS_DEL_SUS_PATH` (0x55554) + `susfs_del_sus_path()` (fork wiring `79003ef8`) | `fs/susfs/*`, fork |
-| — | KSU fork hardening: atomic diag-bit ORs (`KSU_DIAG_SET`, 10 sites), `fd_idx < max_fds`, ratelimits/caps in supercall dispatch, 1/s throne gate, `linux/ratelimit.h` | fork |
-| — | CI: action refs pinned to commit SHAs + dependabot, host test (23 checks) in `tools/k6a_gov_host_test/` with `host-test.yml`, `out/` untracked (repo slimmer), `susfs*.v210` legacy removed | `.github/`, `tools/` |
-
-> Device note: The blackout of 2026-10-31 was diagnosed as a failed display-resume after the device was kept awake ~10 h by an open CODM lobby (kernel ran stable the whole night, L4 never engaged, `residency_ms` proved 9 h gaming state). Not a kernel regression; kill the game before sleeping.
-
-### k6a_gov v1.6.1 / v1.6.2 (Builds 402–404, Oct 2026)
-
-| # | Fix | Where |
-|---|-----|-------|
-| — | Adaptive polling: `poll_adaptive` (default on), slow-poll OFF/battery-cool, instant fast on +3 K trend | `gov_thread()` |
-| — | ftrace tracepoint `k6a_state` (`from`/`to`/`temp`) on every state transition | `trace.h`, `set_state_locked()` |
-| 11 | GPU cap/floor **read-back**: live `max_idx`/`min_idx` compared against the target every tick — if KGSL (`opp_notify`) loosened our limit, it is re-applied (ratelimited log); stricter external limits are never relaxed | `enforce_gpu_cap()`, `enforce_gpu_floor()` |
-| 12 | Race-free unload: sysfs + cooling device removed first, `enabled=false` under lock, thread sleep is `kthread_stop()`-wakeable (no poll_ms stall on rmmod), all limits released under lock afterwards | `k6a_gov_exit()`, `gov_thread()` |
-
-CPU side (Build 401): `cpu_cooling.c` thermal floor clamp + `k6a_thermal` sysfs (see below).
-
-### k6a_gov v1.7.4 — sensor fail-safe + release hardening (Build 454, Nov 2026)
-
-| # | Feature / Fix | Where |
-|---|-------|-------|
-| — | **Sensor fail-safe**: 10 consecutive ticks without any temp source while held in GAMING force CD_L2 (the escalation fail-open — a dead sensor previously meant "hold last state", i.e. unthrottled heating). Recovery is automatic once a source returns; a held CD_L2/L3/L4 is already conservative and is kept | `sensor_failsafe_tick()` |
-| — | `profile=0` releases the Gold CPU cap immediately (`cap_now=0`, `apply_policy()`) instead of ramping down 1 OPP/tick — matches what `enable=0` has done since Build 446. GPU cap releases via the next plan tick | `profile_store()` |
-| — | Hotplug: if the cached gold CPU is offline at readback time, `find_gold_cpu()` re-resolves fresh (previously `p==NULL` silently skipped the verification) | `enforce_max_freq()` |
-| — | One-time boot log of every temp source (`cpu-1-0..3-usr`, `cpu-0-0-usr`, `xo-therm`, `soc-therm`, `thermal_zone0`) with id + type — a firmware rename is visible in the first dmesg, not only as a symptom | `freq_init_worker()` |
-| — | `hist` moved to its own node (Build 450) and `hysteresis` defaults corrected in this README (`fast` 1..5000, default 3000 since Build 347) | docs |
-
-### k6a_gov v1.7.5 — spike filter + silver caps + quiet telemetry (Build 460, Nov 2026)
-
-| # | Feature / Fix | Where |
-|---|-------|-------|
-| — | **Spike filter before the state decision**: a single glitchy sensor read with a plausible positive value used to arm L4 immediately (`tp >= cd_l4_temp`). Two clamps — (a) tick-rate vs the filtered reference (> 15 K per 250 ms tick discarded, real ramps are ~0.1–2 K/tick), (b) zone-spread vs the 2nd-highest (an outlier more than 15 K above the vote is clamped). No latency for real ramps; counter `spike_drops` in `status` | `gov_thread()`, `K6A_SPIKE_K` |
-| — | **Silver caps in the CD path** (`cd_silver_caps` sysfs, `L2 L3 L4` Hz, `0 0 0` = off): symmetric to Gold — applied immediately (no ramp; the vendor also throttled cpu0 directly), notifier clamp on the CPU-0 policy, released on CD exit. Silver stays in stock/vendor regime while off | `get_cd_silver_max_freq()`, `enforce_max_freq()`, `cpufreq_notify()` |
-| — | **quiet_therm telemetry** (`temp_quiet=` in `status`): zone74 is the dominant input of the vendor TGAME ladder (39.0 onset / ~46.5 cliff) — live proximity monitoring, no control decision on it | `status_show()` |
-
-### k6a_gov v1.7.6 — fine-grained CD ladder (Build 461, Nov 2026)
-
-| # | Feature / Fix | Where |
-|---|-------|-------|
-| — | **Fine-grained CD ladder** (`cd_ladder` sysfs, default on): instead of 3 flat cap steps with dwell flip-flops at the boundaries, the Gold cap interpolates piecewise-linear through all three anchors — `l2g @ cd_l2_temp → l3g @ cd_l3_temp → l4g @ cd_l4_temp` (e.g. 1708800 → 1555200 → 1324800 over 72→80→87 °C). The existing threshold tuning stays meaningful; L4 stays immediate + backstop. `cd_ladder=0` restores the flat Build459 behavior (A/B without re-flash). Cap ramping (1 OPP/tick down, 1 OPP/4 ticks up) still smooths the curve | `get_cd_max_freq()`, `ladder_lerp()` |
-
-The full decision layering (who decides when: sensor acquisition → spike filter → state machine → ladder → ramp → notifier, incl. sensor-loss and filter-limit behavior) lives in [`docs/k6a_gov_rules.md`](docs/k6a_gov_rules.md).
+> Detailed k6a_gov version changelogs (v1.6.0 → v1.7.7): [`docs/devlog/gov-version-changelog.md`](docs/devlog/gov-version-changelog.md).
 
 ---
 
@@ -255,87 +190,7 @@ Healthy connect: `mtp,adb` with `f1/f2` endpoints and `dwc3_msm mtp,adb` bound.
 
 ---
 
-## USB status
-
-### Charger SNK-only tradeoff (Build 3xx, in-tree)
-
-The Type-C role switch fix toggles **EN_SNK_ONLY_BIT** (Type-C off, 50 ms, on — current/voltage limits untouched). Side effect by design: **the device can no longer supply power over USB — USB-OTG devices and reverse charging are disabled.**
-
-### Debug breadrumbs rallied (Build 332 heartbeat, cleanup 2026-10-31)
-
-The `b332_hb_fn` heartbeat was a permanent 500 ms non-deferrable timer with one log line per tick (~170k wakeups/day; dmesg buffer overwritten in ~2 h). Now **off by default** and deferrable; hot-path `dev_err/pr_info` breadcrumbs are `dev_dbg/pr_debug` (compiled out with `CONFIG_DYNAMIC_DEBUG` off). Opt-in back temporarily on the cmdline: **`dwc3.b332_hb_ms=500`**. Idle target after flash: well below a few hundred dmesg lines/hour (`dmesg | wc -l` over half an hour must not grow).
-
-## USB status
-
-The v1.3.2 PC-bootloop fix landed. Builds 307–336 then worked through a chain of deeper faults.
-**The blocker is closed — full enumeration now works.**
-
-| # | Issue | State |
-|---|-------|-------|
-| **Fault 1** | `SETEPCFG` ep0out timeout → `RESTART_USB_SESSION` → gadget torn down and restarted every ~2 s until unplug | **Storm stopped** — Build 320 adds quiescent-core recovery + a give-up counter, Build 331 holds the dwc3 core PM reference across a connection |
-| **Fault 2** | OTG host mode: `usb1-port1: Cannot enable. Maybe the USB cable is bad?` ×4 → `unable to enumerate` | **No longer reproduces** — retested on Build 336 with a USB stick: port enable, enumeration, `usb-storage`, SCSI and the vold mount all succeed |
-| **Fault 3** | Charger: `APSD=OCP` re-runs every 5 s | **No longer reproduces** — retested 2026-10-02 on Build 338 with a 500 s capture (`printk 8 4 1 7`, `cap334.sh`, 40 491 lines): 0× `APSD=OCP`, 0× `Oops`/`power cycle`, `smblib_rerun_apsd` = 5 = exactly one per plug event (no 5 s loop), `vbus_notifier` = 9 lines in 3 bursts of 3 and only on `APSD=FLOAT` connect (×2) + the matching detach (×1) — never for DCP/HVDCP2 |
-| **Fault 4** | **Instant whole-SoC reset the moment a USB-C cable is plugged in** (5 s of vibration, then reboot) | **Fixed in Build 336** — see below |
-
-### Fault 4 — instant reset on attach (fixed in Build 336)
-
-Plugging sweet into a Galaxy S21 reset the phone immediately: 5 s of vibration, then a reboot. For
-several builds the log was completely silent, which pointed the investigation at PMIC hardware and
-runtime suspend. Both were wrong.
-
-The real cause was one uninitialized local in `ffs_func_eps_enable()`:
-
-```c
-struct ffs_data *ffs;                 /* never assigned before use ... */
-ffs_log("enter: ...");                /* ... this reads ffs->ipc_log */
-```
-
-`ffs_log()` expands to `ipc_log_string(ffs->ipc_log, ...)` — a dereference of an uninitialized
-pointer. It runs on **every** `SET_CONFIGURATION`, i.e. on the first real setup packet of any
-enumeration, so the reset was host-independent; the S21 was simply the host that talked far enough
-to trigger it. The resulting oops kills the dwc3 bottom-half work item, `panic_on_oops` turns it
-into `panic=5` (the 5 s of vibration) and the PMIC performs a PS_HOLD power-cycle.
-
-Three compounding problems made it invisible:
-
-1. `panic_on_oops=1` + `panic=5` meant the oops never reached a durable log.
-2. The power-cycle is reported as a **`'cold' boot`**, which wipes the 4 MB ramoops region — so
-   `/sys/fs/pstore` and `/proc/last_kmsg` are always empty afterwards, even with
-   `CONFIG_PSTORE_RAM=y`.
-3. The capture script flushed too slowly, dropping everything written since its last sync.
-
-**Build 335** added breadcrumbs at every step of `ffs_func_set_alt()`; **Build 336** fixes the bug.
-Verified on device:
-
-```
-Build336: eps_enable ffs=ffffffde9e981800 ipc_log=ffffffdea3516200 ... count=2
-Build335: set_alt eps_enable ret=0
-Build335: set_alt done ok
-android_work: sent uevent USB_STATE=CONFIGURED
-```
-
-Zero oopses, `/sys/class/udc/a600000.dwc3/state` = `configured`, `usb/online=1`,
-`real_type=USB_PD`.
-
-Faults 1–3 detail and the full evidence tables live in `AGENTS.md`.
-
-**Fault 2 was retested on Build 336** with a USB stick on a USB-C OTG adapter and no longer
-reproduces: `xhci-hcd` registers both buses, `usb 1-1: New USB device found`, `usb-storage`
-creates `sdg`/`sdg1`, and vold mounts the volume. Zero `Cannot enable` / `power cycle` /
-`unable to enumerate`. One trap worth knowing: Termux bundles the libaums *userspace* mass-storage
-provider, and whenever it probes the stick it claims the interface and the disk disappears **without
-a single line in `dmesg`** — that is userspace, not a kernel fault.
-
-Empirical rule from all logs so far (Build 319):
-
-| `DSTS` condition | ep-cmd result |
-|---|---|
-| `COREIDLE=1`, `USBLNKST!=3` | 9/9 OK |
-| `COREIDLE=0` | 692/692 timeout |
-| `COREIDLE=1`, `USBLNKST=3` (U3/Suspend) | 1/1 timeout |
-
-Build 320 raised `CONFIG_LOG_BUF_SHIFT` 17 → 20 (128 KB → 1 MB), and the kernel boots with
-`log_buf_len=2M loglevel=6`.
+> USB fault history (Builds 300–336) and the fixed-bugs postmortem table: [`docs/devlog/readme-usb-fixedbugs.md`](docs/devlog/readme-usb-fixedbugs.md).
 
 ---
 
@@ -361,15 +216,6 @@ Full Changelog: `git log --oneline`
 
 ---
 
-## Fixed Bugs (v1.3.2)
-
-| Bug | Symptom | Root Cause | Fix |
-|-----|---------|------------|-----|
-| **USB PC Bootloop** | PC host → instant reboot/bootloop, 67W charger OK, `No data transfer` didn't help, `bq2597x` init cut at 0.73s, stock boot.img OK | DWC3 `WAIT_FOR_LPM` deadlock + EP0 `TRB timeout` (`bus_aggr`/`noc_aggr` clocks off, `GCTL RAMCLKSEL` on `rev 00000000` wrong, `is_a_peripheral=0`) → WDT bite | SM6150 clocks (`GCC/DISPCC/CAMCC/SCC`), `WAIT_FOR_LPM` clear on extcon, `bus_aggr` enable + IOMMU guard, `GCTL` 50ms delay, `is_a_peripheral` `pullup`/`vbus_connect` — verified S21 + PC `IRQ>0` `mtp,adb` |
-| **USB attach → whole-SoC reset** (Fault 4) | USB-C into a Galaxy S21 → 5 s vibration + reboot, log empty, `/sys/fs/pstore` empty every time | `ffs_func_eps_enable()` used the local `struct ffs_data *ffs` in an `ffs_log()` **before** `ffs = func->ffs;` → `ipc_log_string(ffs->ipc_log, …)` dereferences an uninitialised pointer (`+0x1a8`, x0=0) → oops kills `dwc_wq` → `panic=5` → PS_HOLD `'cold' boot` wipes ramoops | **Build 336**: assign `ffs` before the `ffs_log`; **Build 335** breadcrumbs proved it. Verified: `USB_STATE=CONFIGURED`, UDC `configured`, zero oops |
-| **Identical Release Names** | All GitHub Releases/ZIPs named identically (`v4.14.369`) | `build-kernel.yml` `name: "Badazz-kernel v${VERSION}"` + ZIP `v${VERSION}.zip` without `run_number` | CI now `name: "v${VERSION}-badazz-build${run_number}"` + ZIP `v${VERSION}-build${run_number}[ -miui].zip` + artifact `…-buildXX-variant` |
-| **KSU Manager "update required"** | Manager CI `34252913097` (`88feb68` `e801e16` version matching) on kernel `a5ff54c` → red banner | `e801e16` new UAPI + `bundled_lkm` check, old kernel UAPI mismatch; `88feb68` needs `KPROBES` + 5.x APIs (`syscall_fn_t`, `pgtable.h`, `lsm_hook`) not 4.14 compatible | Fork `dev` → `88feb68` for PC, hotfix `CONFIG_KPROBES=y` + `syscall_fn_t`/`pgtable`/`ksys_close` guards, then **revert** to the current line (`b100bd28`, UAPIv4) until a proper 4.14 port exists. **Resolved 2026-10-02**: manager + ksud `v3.4.0-19-g2b31f718` (CI `36750739326`, uapi 4) run against our kernel `GET_INFO version=38309 ≥ 34634` with no red banner — the old `34142634591` pin is obsolete |
-| **MIUI/HOS not booting** | Stock HyperOS `V14.0.1.0` `4.14.190-perf` needs `ARCH_SM6150/CAMCC/GCC/PDC` + `xiaomi/sweet` DTS (`GTX9896_K6`, `FPC1540`) | `sweet_defconfig` flattened to `atoll/sm6150`, `QUSB2` only | `sweet_miui.config` overlay (7 lines) + `xiaomi/sweet` DTS shim + CI matrix `aosp`/`miui` (`miui/test` artifacts, `main` release `…-miui.zip`) |
 
 ---
 
@@ -397,7 +243,8 @@ Full Changelog: `git log --oneline`
 | k6a-ctl (Companion) | [GitHub](https://github.com/vandalsquad187/k6a-ctl) |
 | Rebase Plan (PC) | `/sdcard/Download/badazzrebase.md` |
 
-**Repo docs**: `README.md` (public), `AGENTS.md` (dev/agent state + build & debug recipes),
+**Repo docs**: `README.md` (public), `AGENTS.md` (compact dev state, Fallen, Working Agreements),
+`docs/devlog/` (history: status logs, build scopes, rounds, USB, CODM),
 `CONTRIBUTING.md` (upstream kernel guide). `Documentation/` is the **stock Linux 4.14**
 kernel documentation (6090 files) — kernel-internal API docs, nothing project-specific.
 
