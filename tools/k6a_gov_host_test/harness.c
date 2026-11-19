@@ -72,10 +72,14 @@ static void setup(int profile) {
     G.state_ts = fake_ms;
 }
 /* ein Kthread-Tick (250 ms): Battery-Guard, dann State Machine, wie in gov_thread() */
-static void tick(u32 t_second, u32 t_peak) {
+static void tick_raw(u32 t_second, u32 t_peak, u32 raw) {
     fake_ms += 250; G.temp_celsius = t_second; G.temp_peak = t_peak;
+    G.temp_peak_raw = raw;
     G.invalid_ticks = 0;   /* Build454: wie gov_thread im t_valid-Zweig */
     battery_guard_tick(); state_machine();
+}
+static void tick(u32 t_second, u32 t_peak) {
+    tick_raw(t_second, t_peak, t_peak);
 }
 static int count_trans(unsigned a, unsigned b) { int n = 0; for (int i = 0; i < tr_n; i++) if (tr_log[i].from == a && tr_log[i].to == b) n++; return n; }
 static void dump(void) { for (int i = 0; i < tr_n; i++) printf("    %6.1fs %s->%s @%d\n", (tr_log[i].ms - 100000) / 1000.0, SN[tr_log[i].from], SN[tr_log[i].to], tr_log[i].temp); }
@@ -176,59 +180,74 @@ static void s7_sensor_loss(void) {
     CHECK(G.state == K6A_CD_L3, "CD_L3 wurde durch fail-safe veraendert (%s)", SN[G.state]);
 }
 
-/* Build462: S8 — Spike-Filter-Goldens aus der eingefrorenen 461-Logik
- * (Tick-fuer-Tick-Expected-Values, deterministische Integer-Arithmetik
- * = Paritaetsbeweis). Helper ist rein (kein gov-Zugriff), direkte Calls. */
+/* Build462: S8 — Spike-Filter-Goldens (deterministische Integer-
+ * Arithmetik = Paritaetsbeweis); Build463: Konsens-Param, S8d kippt
+ * zu „Bias eingefroren", S8e/S8f/Grenzen ergaenzen das Gate. */
 static void s8_spike_filter(void) {
     int t, tp, s, r;
 
-    printf("S8a Reale Rampen 2 K/Tick: keine Klemme, smooth folgt\n");
+    printf("S8a Reale Rampen 2 K/Tick mit Konsens: keine Klemme, smooth folgt\n");
     s = 0; t = 40; tp = 40;
     for (int i = 0; i < 30; i++) {
-        r = k6a_spike_filter(&t, &tp, &s);
+        r = k6a_spike_filter(&t, &tp, &s, 1);
         CHECK(r == 0, "Tick %d: Klemme bei realem Anstieg (t=%d)", i, t);
         CHECK(s == t, "Tick %d: smooth != t (%d/%d)", i, s, t);
         CHECK(tp == t, "Tick %d: tp veraendert (%d/%d)", i, tp, t);
         t += 2; tp += 2;
     }
 
-    printf("S8b Einzel-Sprung +40 K: t auf smooth+15, tp auf t+15\n");
-    s = 40; t = 40; tp = 40; (void)k6a_spike_filter(&t, &tp, &s);
+    printf("S8b Einzel-Sprung +40 K mit Konsens: t auf smooth+15, tp auf t+15\n");
+    s = 40; t = 40; tp = 40; (void)k6a_spike_filter(&t, &tp, &s, 1);
     t = 80; tp = 80;
-    r = k6a_spike_filter(&t, &tp, &s);
+    r = k6a_spike_filter(&t, &tp, &s, 1);
     CHECK(r == 1, "Sprung nicht als Spike erkannt (r=%d)", r);
     CHECK(t == 55 && tp == 70 && s == 55, "Klemmwerte falsch (t=%d tp=%d s=%d)", t, tp, s);
 
-    printf("S8c Spread-Glitch: tp=110, t real 62 -> tp auf t+15\n");
-    s = 60; t = 60; tp = 60; (void)k6a_spike_filter(&t, &tp, &s);
+    printf("S8c Spread-Glitch mit Konsens: tp=110, t real 62 -> tp auf t+15\n");
+    s = 60; t = 60; tp = 60; (void)k6a_spike_filter(&t, &tp, &s, 1);
     t = 62; tp = 110;
-    r = k6a_spike_filter(&t, &tp, &s);
+    r = k6a_spike_filter(&t, &tp, &s, 1);
     CHECK(r == 1 && t == 62 && tp == 77 && s == 62,
           "Spread-Klemme falsch (t=%d tp=%d s=%d r=%d)", t, tp, s, r);
 
-    printf("S8d Persistenter Bias +25 K: Tick1 +15 absorbiert, Tick2+ getrackt\n");
-    s = 40; t = 40; tp = 40; (void)k6a_spike_filter(&t, &tp, &s);
-    t = 65; tp = 65; r = k6a_spike_filter(&t, &tp, &s);
-    CHECK(r == 1 && s == 55, "Tick1: Bias nicht absorbiert (s=%d r=%d)", s, r);
-    t = 65; tp = 65; r = k6a_spike_filter(&t, &tp, &s);
-    CHECK(r == 0 && s == 65, "Tick2: Bias nicht getrackt (s=%d r=%d)", s, r);
-    t = 65; tp = 65; r = k6a_spike_filter(&t, &tp, &s);
-    CHECK(r == 0 && s == 65, "Tick3: smooth driftet (s=%d)", s);
+    printf("S8d Persistenter Bias +25 K ohne Konsens: eingefroren (Build463)\n");
+    s = 40; t = 40; tp = 40; (void)k6a_spike_filter(&t, &tp, &s, 1);
+    t = 65; tp = 65; r = k6a_spike_filter(&t, &tp, &s, 0);
+    CHECK(r == 1 && t == 55 && tp == 65 && s == 40,
+          "Tick1: Bias nicht absorbiert/frozen (t=%d tp=%d s=%d r=%d)", t, tp, s, r);
+    t = 65; tp = 65; r = k6a_spike_filter(&t, &tp, &s, 0);
+    CHECK(r == 1 && t == 55 && tp == 65 && s == 40,
+          "Tick2: Bias nicht eingefroren (t=%d tp=%d s=%d r=%d)", t, tp, s, r);
+    t = 65; tp = 65; r = k6a_spike_filter(&t, &tp, &s, 0);
+    CHECK(r == 1 && t == 55 && s == 40,
+          "Tick3: smooth driftet (t=%d s=%d)", t, s);
+
+    printf("S8e Konsens-Gate: Anstieg ohne Klemme durchlaufen, smooth gefroren, Konsens oeffnet, Abwaerts folgt\n");
+    s = 40; t = 44; tp = 44; r = k6a_spike_filter(&t, &tp, &s, 0);
+    CHECK(r == 0 && t == 44 && s == 40, "kleiner Anstieg ohne Klemme muss durchlaufen (t=%d s=%d)", t, s);
+    t = 46; tp = 46; r = k6a_spike_filter(&t, &tp, &s, 0);
+    CHECK(r == 0 && t == 46 && s == 40, "smooth trotz Anstieg gefroren (s=%d)", s);
+    t = 47; tp = 47; r = k6a_spike_filter(&t, &tp, &s, 1);
+    CHECK(r == 0 && s == 47, "Konsens oeffnet das Gate nicht (s=%d)", s);
+    t = 45; tp = 45; r = k6a_spike_filter(&t, &tp, &s, 0);
+    CHECK(r == 0 && s == 45, "Abwaerts auch ohne Konsens folgen (s=%d)", s);
 
     printf("S8-smooth: smooth-Update auch ohne Klemme (Refactor-Schutz)\n");
-    s = 0; t = 42; tp = 42; r = k6a_spike_filter(&t, &tp, &s);
+    s = 0; t = 42; tp = 42; r = k6a_spike_filter(&t, &tp, &s, 1);
     CHECK(r == 0 && s == 42, "erster Tick: smooth=%d r=%d", s, r);
-    t = 44; tp = 44; r = k6a_spike_filter(&t, &tp, &s);
+    t = 44; tp = 44; r = k6a_spike_filter(&t, &tp, &s, 1);
     CHECK(r == 0 && s == 44, "nur-on-clamp-Refactor erkannt (smooth=%d r=%d)", s, r);
+    s = 0; t = 42; tp = 42; r = k6a_spike_filter(&t, &tp, &s, 0);
+    CHECK(r == 0 && s == 42, "Bootstrap ohne Konsens: smooth=%d r=%d", s, r);
 
     printf("S8-Grenzen: smooth+15 / tp=t+15 exakt passiert, +1 darueber geklemmt\n");
-    s = 40; t = 55; tp = 55; r = k6a_spike_filter(&t, &tp, &s);
+    s = 40; t = 55; tp = 55; r = k6a_spike_filter(&t, &tp, &s, 1);
     CHECK(r == 0 && s == 55, "smooth+15 exakt geklemmt (t=%d r=%d)", t, r);
-    s = 40; t = 56; tp = 56; r = k6a_spike_filter(&t, &tp, &s);
+    s = 40; t = 56; tp = 56; r = k6a_spike_filter(&t, &tp, &s, 1);
     CHECK(r == 1 && t == 55, "smooth+16 nicht geklemmt (t=%d r=%d)", t, r);
-    s = 55; t = 60; tp = 75; r = k6a_spike_filter(&t, &tp, &s);
+    s = 55; t = 60; tp = 75; r = k6a_spike_filter(&t, &tp, &s, 1);
     CHECK(r == 0 && tp == 75, "tp=t+15 exakt geklemmt (tp=%d r=%d)", tp, r);
-    s = 55; t = 60; tp = 76; r = k6a_spike_filter(&t, &tp, &s);
+    s = 55; t = 60; tp = 76; r = k6a_spike_filter(&t, &tp, &s, 1);
     CHECK(r == 1 && tp == 75, "tp=t+16 nicht geklemmt (tp=%d r=%d)", tp, r);
 }
 
@@ -286,9 +305,53 @@ static void s9_store_validation(void) {
           "0 0 0 (aus) nicht akzeptiert (r=%zd)", r);
 }
 
+/* Build463: S10 — L4-Peak-Backstop gegen die Klemmen: der Roh-Peak
+ * erzwingt L4 nach K6A_L4_BACKSTOP_TICKS aufeinanderfolgenden Ticks,
+ * auch wenn das gefilterte tp unter cd_l4_temp kleben bleibt. */
+static void s10_l4_backstop(void) {
+    printf("S10 L4-Peak-Backstop: Roh-Peak >= 102 ueber 8 Ticks erzwingt L4 (geklemmtes tp=95)\n");
+    setup(K6A_PROFILE_GAMING);   /* GAMING: l2=96 l3=99 l4=102 */
+    for (int i = 0; i < 4; i++) tick(80, 80);
+    CHECK(G.state == K6A_GAMING, "Start nicht GAMING (%s)", SN[G.state]);
+    tick_raw(80, 95, 110);
+    CHECK(G.state == K6A_GAMING && G.l4_back_cnt == 1,
+          "Ein-Tick-Blitz zu frueh (state=%s cnt=%u)", SN[G.state], G.l4_back_cnt);
+    tick(80, 80);
+    CHECK(G.l4_back_cnt == 0, "Counter nach Roh-Tick-Abfall nicht reset (%u)", G.l4_back_cnt);
+    for (int i = 0; i < 7; i++) tick_raw(80, 95, 110);
+    CHECK(G.state == K6A_GAMING, "L4 schon nach 7 Ticks (%s)", SN[G.state]);
+    CHECK(G.l4_back_cnt == 7, "cnt=%u statt 7", G.l4_back_cnt);
+    tick_raw(80, 95, 110);
+    CHECK(G.state == K6A_CD_L4, "Backstop hat L4 nicht erzwungen (%s)", SN[G.state]);
+    CHECK(count_trans(K6A_GAMING, K6A_CD_L4) == 1, "Backstop-Transition fehlt");
+    tick_raw(80, 95, 110);
+    CHECK(G.l4_back_cnt == 0, "cnt laeuft in L4 weiter (%u)", G.l4_back_cnt);
+
+    printf("S10d: L4 haelt, solange der Roh-Peak ueber der Schwelle steht (kein Flap), Abkuehlen rueckstuft\n");
+    for (int i = 0; i < 8; i++) tick_raw(80, 95, 110);
+    CHECK(G.state == K6A_CD_L4, "L4 trotz warmem Roh-Peak verlassen (%s)", SN[G.state]);
+    for (int i = 0; i < 8; i++) tick(70, 70);
+    CHECK(G.state != K6A_CD_L4, "L4 bei Abkuehlen nicht verlassen (%s)", SN[G.state]);
+
+    printf("S10b: Sensor-Ausfall resettet den Backstop-Zaehler\n");
+    setup(K6A_PROFILE_GAMING);
+    for (int i = 0; i < 5; i++) tick_raw(80, 95, 110);
+    CHECK(G.l4_back_cnt == 5, "cnt=%u statt 5", G.l4_back_cnt);
+    sensor_failsafe_tick();
+    CHECK(G.l4_back_cnt == 0, "failsafe hat cnt nicht reset (%u)", G.l4_back_cnt);
+
+    printf("S10c: Profil off resettet den Zaehler\n");
+    setup(K6A_PROFILE_GAMING);
+    for (int i = 0; i < 5; i++) tick_raw(80, 95, 110);
+    G.profile = K6A_PROFILE_OFF;
+    state_machine();
+    CHECK(G.l4_back_cnt == 0 && G.state == K6A_OFF,
+          "off-Branch ohne Reset (cnt=%u state=%s)", G.l4_back_cnt, SN[G.state]);
+}
+
 int main(void) {
     s1_single_core_spike(); s2_heat_cool(); s3_profile_off(); s4_battery_latch(); s5_entry_dwell(); s6_ramp(); s7_sensor_loss();
-    s8_spike_filter(); s9_store_validation();
+    s8_spike_filter(); s9_store_validation(); s10_l4_backstop();
     printf("\n%d Pruefungen, %d fehlgeschlagen\n", checks, fails);
     return fails ? 1 : 0;
 }

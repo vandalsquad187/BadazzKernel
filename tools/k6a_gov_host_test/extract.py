@@ -22,7 +22,7 @@ def block(start_re, open_ch="{", close_ch="}", end_semicolon=False):
     raise SystemExit("unbalanciert: " + start_re)
 
 out = ["/* automatisch extrahiert aus k6a_gov.c, nicht von Hand aendern */"]
-for name in ("K6A_HIST_N", "K6A_RAMP_UP_TICKS", "K6A_L4_MARGIN", "K6A_SPIKE_K", "K6A_GOV_MAX_FREQS"):
+for name in ("K6A_HIST_N", "K6A_RAMP_UP_TICKS", "K6A_L4_MARGIN", "K6A_SPIKE_K", "K6A_L4_BACKSTOP_TICKS", "K6A_GOV_MAX_FREQS"):
     m = re.search(r"^#define\s+" + name + r"\b.*$", src, re.M)
     line = m.group(0)
     if name == "K6A_L4_MARGIN" and margin is not None:

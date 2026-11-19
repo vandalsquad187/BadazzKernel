@@ -68,5 +68,12 @@ CPU side (Build 401): `cpu_cooling.c` thermal floor clamp + `k6a_thermal` sysfs 
 |---|-------|-------|
 | — | **Fine-grained CD ladder** (`cd_ladder` sysfs, default on): instead of 3 flat cap steps with dwell flip-flops at the boundaries, the Gold cap interpolates piecewise-linear through all three anchors — `l2g @ cd_l2_temp → l3g @ cd_l3_temp → l4g @ cd_l4_temp` (e.g. 1708800 → 1555200 → 1324800 over 72→80→87 °C). The existing threshold tuning stays meaningful; L4 stays immediate + backstop. `cd_ladder=0` restores the flat Build459 behavior (A/B without re-flash). Cap ramping (1 OPP/tick down, 1 OPP/4 ticks up) still smooths the curve | `get_cd_max_freq()`, `ladder_lerp()` |
 
+### k6a_gov v1.7.7 — consensus gate + L4 peak backstop (Build 463, Nov 2026)
+
+| # | Feature / Fix | Where |
+|---|-------|-------|
+| — | **Consensus gate on `temp_smooth`**: the filtered reference now only moves **up** when every live gold zone rises against the previous tick (dead zones don't block, a stuck-high zone does; fallback sources use their own previous value). Downward and bootstrap (`smooth == 0`) always follow. Without consensus the reference freezes and the existing +15 K rate clamp absorbs a persistent bias **forever** — flipped golden S8d from „tracked from tick 2" to „Bias eingefroren"; real ramps (all zones rising together) keep zero latency | `read_temp()` (new `consensus` out-param, `tz_prev[]`/`tsrc_prev`), `k6a_spike_filter()` |
+| — | **L4 peak backstop**: a raw peak (pre-filter) held at/above `cd_l4_temp` for 8 consecutive ticks (2 s) forces L4 even when the clamped `tp` stays below the threshold because of the frozen reference — covers the gate's worst-case L4 latency; resets on tick drop, sensor loss and profile-off; the L4 exit additionally requires the raw peak to be below `cd_l4_temp - 3` so a backstop-entered L4 can't flap while the hot zone stays up (`l4_back_cnt`, `temp_peak_raw`) | `state_machine()`, `K6A_L4_BACKSTOP_TICKS` |
+
 The full decision layering (who decides when: sensor acquisition → spike filter → state machine → ladder → ramp → notifier, incl. sensor-loss and filter-limit behavior) lives in [`docs/k6a_gov_rules.md`](docs/k6a_gov_rules.md).
 

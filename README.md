@@ -4,7 +4,7 @@
   <p>Gaming-optimized kernel for <b>SM7150 (sweet / sweet k6a)</b> — 4.14.369</p>
   <p>
     <img src="https://img.shields.io/badge/Kernel-4.14.369-blue?style=flat-square">
-    <img src="https://img.shields.io/badge/k6a__gov-1.7.6-orange?style=flat-square">
+    <img src="https://img.shields.io/badge/k6a__gov-1.7.7-orange?style=flat-square">
     <img src="https://img.shields.io/badge/KernelSU--Next-v3.3.0--311-green?style=flat-square">
     <img src="https://img.shields.io/badge/SUSFS-v2.3.0-success?style=flat-square">
     <img src="https://img.shields.io/badge/Android-13%20%E2%80%93%2016-lightgrey?style=flat-square">
@@ -15,7 +15,7 @@
 
 ## Overview
 
-BadazzKernel is a performance and gaming tuned kernel for **Redmi Note 12 Pro 4G (sweet / sweetin)**. Core is the in-kernel governor **k6a_gov v1.7.6** (loadable module, `CONFIG_K6A_GOV=m`, insmodded by k6a-ctl) — the perfect base for the companion module **[k6a-ctl](https://github.com/vandalsquad187/k6a-ctl)**. Both work hand-in-hand in delegated mode: kernel throttles, module controls.
+BadazzKernel is a performance and gaming tuned kernel for **Redmi Note 12 Pro 4G (sweet / sweetin)**. Core is the in-kernel governor **k6a_gov v1.7.7** (loadable module, `CONFIG_K6A_GOV=m`, insmodded by k6a-ctl) — the perfect base for the companion module **[k6a-ctl](https://github.com/vandalsquad187/k6a-ctl)**. Both work hand-in-hand in delegated mode: kernel throttles, module controls.
 
 🤌🏻 Join my Telegram channel: https://t.me/Badazz89
 
@@ -27,7 +27,7 @@ BadazzKernel is a performance and gaming tuned kernel for **Redmi Note 12 Pro 4G
 linux-4.14.369
 ├── KernelSU-Next v3.3.0-311 (UAPI 6, 4.14 direct-patch) + SUSFS v2.3.0  # Root + Hide (submodule 79003ef8)
 ├── fs/nomount — NoMount v22 (dev 8f05de7)      # VFS path redirection — zero-mount module injection (CONFIG_NOMOUNT=y)
-├── drivers/thermal/k6a_gov/k6a_gov.c v1.7.6     # In-kernel gaming governor (CONFIG_K6A_GOV=m)
+├── drivers/thermal/k6a_gov/k6a_gov.c v1.7.7     # In-kernel gaming governor (CONFIG_K6A_GOV=m)
 ├── drivers/gpu/msm/kgsl_pwrctrl.c               # GPU pwrlevel export (k6a_gov)
 ├── drivers/devfreq/devfreq.c                    # BW floors (gpubw / llcc), 0 = release floor
 ├── drivers/gpu/msm/ + drivers/thermal/          # Thermal + cooling floors
@@ -39,7 +39,7 @@ linux-4.14.369
 
 | Area | Feature | Details |
 |------|---------|---------|
-| **Governor** | **k6a_gov v1.7.6** | Loadable module (`CONFIG_K6A_GOV=m`, `k6a_gov.ko` shipped in the zip and loaded by k6a-ctl), state machine OFF→GAMING→CD_L2/L3/L4, hysteresis, **immediate escalation** L2→L3→L4, entry dwell on GAMING, L4 flap margin (`peak + 3 K < cd_l4_temp`), `profile=0` forces OFF immediately, throttle history (16), **residency accounting (`residency_ms`) + live `gold_cap_now` with GPU-cap ramping (tighten 1 OPP/tick, release 1 OPP/4 ticks, L4/entry-immediate), `stats_reset` node**, boot default **schedutil** |
+| **Governor** | **k6a_gov v1.7.7** | Loadable module (`CONFIG_K6A_GOV=m`, `k6a_gov.ko` shipped in the zip and loaded by k6a-ctl), state machine OFF→GAMING→CD_L2/L3/L4, hysteresis, **immediate escalation** L2→L3→L4, entry dwell on GAMING, L4 flap margin (`peak + 3 K < cd_l4_temp`), `profile=0` forces OFF immediately, throttle history (16), **residency accounting (`residency_ms`) + live `gold_cap_now` with GPU-cap ramping (tighten 1 OPP/tick, release 1 OPP/4 ticks, L4/entry-immediate), `stats_reset` node**, boot default **schedutil** |
 | **CPU** | Gold clamp | `find_gold_cpu()` + `clamp_freq`, `enforce_max_freq` + `cpufreq_update_policy` (kthread only), hardened notifier, **released again on recovery/disable** |
 | **Temp** | Multi-zone | Max over 4 Gold zones `cpu-1-0..3-usr`, fallback `cpu-0-0-usr` → `xo-therm` → `soc-therm` → `thermal_zone0`; `temp_src`/`temp_valid` in status, holds the last state if no zone answers |
 | **GPU** | Native enforcement | `kgsl_k6a_get_levels` / `kgsl_k6a_set_max_level_idx`, caps per CD state |
@@ -58,7 +58,7 @@ linux-4.14.369
 | **NFC** | PN80T I2C driver | `CONFIG_NFC=n` intentional (NCI in userspace), `CONFIG_NFC_NQ_PN80T=y` provides `/dev/nq-nci` — fix via [Sweet2NfcFIX](https://github.com/vandalsquad187/Sweet2NfcFIX) module |
 | **MIUI** | HyperOS overlay | `sweet_miui.config` overlay (`ARCH_SM6150/GCC/CAMCC/DISPCC/PDC`) + `xiaomi/sweet` DTS, unified AnyKernel, CI matrix `aosp`/`miui` |
 
-> Detailed k6a_gov version changelogs (v1.6.0 → v1.7.6): [`docs/devlog/gov-version-changelog.md`](docs/devlog/gov-version-changelog.md).
+> Detailed k6a_gov version changelogs (v1.6.0 → v1.7.7): [`docs/devlog/gov-version-changelog.md`](docs/devlog/gov-version-changelog.md).
 
 ---
 

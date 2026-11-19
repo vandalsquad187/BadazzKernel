@@ -8,26 +8,26 @@ k6a-ctl: separater Repo-Stand mit eigenem `README.md` + `CHANGELOG.md`.
 
 ## Current State (Stand 2026-11-19)
 
-- **Repo**: `vandalsquad187/BadazzKernel` `main` @ **`0fe3023b8`** (Review-Phase 1:
-  FORTIFY-Negativ-Assert + INIT_STACK-Positiv-Assert in `build-kernel.yml`, run.sh
-  Doc-Drift-Guard Teil 2, README-Interface-Rows `cd_ladder`/`cd_silver_caps`, Repo-Hygiene;
-  CI host-test 149/149 grün, Build grün).
+- **Repo**: `vandalsquad187/BadazzKernel` `main` — Six-Point-Review Phasen 1–4 umgesetzt
+  (Phase 1 `0fe3023b8` CI-Hygiene, Phase 3 Docs-Umbau `6c85d4506`, Build 463 = Phase 4
+  Consensus-Gate, dieser Commit).
 - **Gerät**: **Build 461 = Gaming-Baseline** (Feinleiter `cd_ladder` default an; R2-CoD-Runde
   PASS — L4 0 s vs. 460-Baseline 194,5 s). Build 460 = Spike-Filter/Silver-Caps/quiet-Telemetrie;
   Build 462 = Test-Infra (Spike-Filter-Helper + S8/S9-Goldens, kein Verhalten, Flash nicht nötig).
-- **Nächster Kernel-Build = 463** (Phase 4, User abgenickt): Consensus-Gate — `temp_smooth`
-  zieht **nur bei Konsens (alle 4 Gold-Zonen steigen gemeinsam)** nach oben (schließt die
-  +15-K-Bias-Grenze), L4-Latenz via peak-Backstop/Failsafe; S8d-Golden kippt zu „Bias
-  eingefroren"; verhaltensändernd → eigener Build, **R2-Feldrevalidierung nötig**,
-  `docs/k6a_gov_rules.md` R4 im selben Commit. Basis: `read_temp()`/`k6a_spike_filter()`
-  in `drivers/thermal/k6a_gov/k6a_gov.c`.
+- **Build 463 committet (gov 1.7.7)**: Consensus-Gate — `temp_smooth` zieht **nur bei
+  Konsens (alle lebenden Gold-Zonen steigen gemeinsam)** nach oben (schließt die +15-K-
+  Bias-Grenze: ohne Konsens friert die Referenz, Klemme absorbiert dauerhaft), L4-Latenz
+  via **Peak-Backstop** (Roh-Peak ≥ l4 über 8 Ticks → L4; Exit hält Roh-Peak-Margin,
+  kein Flap); S8d-Golden gekippt „Bias eingefroren". Host-Tests **167/167**, DOC-DRIFT grün,
+  Syntax-Check pristine-compared 0/0, R4 im selben Commit, `kver_ok()` deckt 1.7.7 ab.
+  **Offen: CI-Build, Flash durch User, R2-Feldrevalidierung.**
 - **k6a-ctl**: **v1.6.8 / versionCode 178** committet (`81c0c66` pidof→/proc-Scan Tri-State,
   `65ff32a` Persistenz `cd_ladder`/`cd_silver_caps`), ZIP `k6a-ctl-v1.6.8.zip` gebaut
   (Gate OK) — **deployed 2026-11-19 nach User-OK**: Backup `/data/adb/k6a-ctl-bak-v167`,
   atomare `mv`-Ersetzung, settings.conf-Keys angehaengt, sauberer Controller-Restart
   (Banner 1.6.8 mit `cd_ladder=1 silver_caps=0 0 0` verifiziert, hb tick Reset, Tri-State-Verify live).
-- **Review-Reihenfolge**: Phase 1 ✅ → Phase 2 ✅ → Phase 3 ✅ (dieser Docs-Umbau) →
-  **Check mit User** → Phase 4 (Build 463).
+- **Review-Reihenfolge**: Phase 1 ✅ → Phase 2 ✅ → Phase 3 ✅ → Check ✅ → Phase 4 ✅
+  (Build 463 committet; Flash + R2 ausstehend).
 - Rollendes Status-Log bis Build 457: [`docs/devlog/state-log-to-build457.md`](docs/devlog/state-log-to-build457.md).
 
 ## k6a-ctl (Magisk-Modul — integraler Bestandteil des Kernel-Pakets, User-OK 2026-10-29)
