@@ -24,10 +24,11 @@ k6a-ctl: separater Repo-Stand mit eigenem `README.md` + `CHANGELOG.md`.
   **CI grün** (host-test 17, Lockdep 24, Build Kernel **Run 464** — der Phase-1-Push
   verbrauchte 463, Marker/Commits bleiben einheitlich „Build 463"; Flash-Quelle =
   Artefakte `Badazz-kernel-sweet-v4.14.369-build464aosp`/`…miui`).
-  **Flash ✅ + R2-Feldrevalidierung 2026-11-19 ✅ PASS**: L4 0 s, ≥86 °C 0 Samples,
-  spike_drops 0, Backstop 0 Treffer, Exakt-Schwellwert-Eskalationen, subjektiv
+  **Flash ✅ + R2-Feldrevalidierung 2026-11-19 ✅ PASS**: L4 0 s, ≥86 °C 1/1500
+  Samples (1-s-Exkursion, 0,07 %, unter L4-Schwelle 87; hb-Reihe 0), spike_drops 0,
+  Backstop 0 Treffer, Exakt-Schwellwert-Eskalationen, subjektiv
   **+5–10 fps** vs. 461 und flüssig bis zum Ende (Bericht: devlog
-  `build-scopes-and-rounds.md` IX).
+  `build-scopes-and-rounds.md` IX; 1-Hz-Serie `io_r60r_DONE_1795121151.log`).
 - **k6a-ctl**: **v1.6.8 / versionCode 178** committet (`81c0c66` pidof→/proc-Scan Tri-State,
   `65ff32a` Persistenz `cd_ladder`/`cd_silver_caps`), ZIP `k6a-ctl-v1.6.8.zip` gebaut
   (Gate OK) — **deployed 2026-11-19 nach User-OK**: Backup `/data/adb/k6a-ctl-bak-v167`,

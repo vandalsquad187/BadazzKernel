@@ -871,7 +871,13 @@ GNU-Variable-Sized-Warning aus `cgroup-defs.h`.
   (spike_drops=0 wie in 461).
 - **User-Feel**: „eine bis zum Ende fluessige Runde, fps hoeher subjektiv 5-10 fps"
   gegenueber 461 (dort: 5-10 fps niedriger, aber stabil) — **R2 damit PASS**,
-  subjektive Schaetzung, keine FPS-Messung (io_samp4 diesmal nicht eingesetzt;
-  badazz_iowatch-Beobachter-Methode bleibt fuer die naechste Runde).
+  subjektive Schaetzung, keine FPS-Messung (badazz_iowatch-Methode).
+- **1-Hz-Serie** (`io_r60r_DONE_1795121151.log`, 1500 Samples, t=3583..5485 =
+  1902 s, fertig 21:45 = Rundenende): Sampler lief waehrend der Runde mit
+  (Watchdog 1739 + io_samp4, game_pid-Trigger). **max ktemp/kpeak = 86 C**,
+  **>=86 C = 1/1500 Samples (0,07 %)** — eine 1-s-Exkursion, unter L4-Schwelle
+  87, keine Dauerlast; hb-15-s-Sampling sah 0 (Hb-Max 81). State-Anteile
+  **gaming 764 / cd_l2 194 / cd_l3 542 / cd_l4 0** — bestaetigt hist/l4=0 bei
+  4x hoeherer Aufloesung als die 15-s-hb-Reihe.
 - **Vergleich 461-R2**: L4 0 s = 0 s; throttle +7 vs +10; State-Anteile l2 247/l3 702
   vs 315/616 (1385-s-Fenster) — vergleichbare Heisslast, gleiche Null-L4-Bilanz.
