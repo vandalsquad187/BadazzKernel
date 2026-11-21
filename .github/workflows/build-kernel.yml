@@ -142,11 +142,14 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y \
             gcc-aarch64-linux-gnu \
-            gcc-arm-linux-gnueabihf \
+            gcc-arm-linux-gnueabihf- \
             ccache \
             clang \
+            lld \
             llvm
           aarch64-linux-gnu-gcc --version | head -1
+          clang --version | head -1
+          ld.lld --version | head -1
 
       # -------------------------------------------------------
       # Schritt 3: ccache-Cache wiederherstellen
@@ -199,9 +202,10 @@ jobs:
             make sweet_defconfig
           fi
           # Build-Nummer in Kernel-Version einbetten (Identifikation per uname/dmesg)
-          sed -E -i 's/^CONFIG_LOCALVERSION=.*/CONFIG_LOCALVERSION="-BadazzKernel-sweet-v1.3.2-build${{ github.run_number }}-${{ matrix.variant }}-clang"/' .config
+          # Suffix -cl (nicht -clang): UTS_RELEASE max 64 Zeichen
+          sed -E -i 's/^CONFIG_LOCALVERSION=.*/CONFIG_LOCALVERSION="-BadazzKernel-sweet-v1.3.2-build${{ github.run_number }}-${{ matrix.variant }}-cl"/' .config
           grep -E "^CONFIG_LOCALVERSION=" .config
-          grep -qF 'build${{ github.run_number }}-${{ matrix.variant }}-clang' .config || { echo "::error::LOCALVERSION patch failed"; exit 1; }
+          grep -qF 'build${{ github.run_number }}-${{ matrix.variant }}-cl' .config || { echo "::error::LOCALVERSION patch failed"; exit 1; }
           sed -i 's/CONFIG_LLVM_POLLY=y/# CONFIG_LLVM_POLLY is not set/' .config
           grep -q 'CONFIG_CC_STACKPROTECTOR_STRONG=y' .config || \
             echo 'CONFIG_CC_STACKPROTECTOR_STRONG=y' >> .config
