@@ -120,14 +120,14 @@ k6a-ctl: separater Repo-Stand mit eigenem `README.md` + `CHANGELOG.md`.
   `certs/verity.x509.pem`, nur von x86-cuttlefish referenziert (wird nicht
   gebaut); `sweet_defconfig` hat `SYSTEM_TRUSTED_KEYS=""`. Kein Secret.
 - **KernelSU-Next-Pin: manuell bumpen, nie auto-force** — Submodul @
-  `e7312bd2` auf Branch `dev-upstream-merge` (eigener Fork
+  `7abf1c77` auf Branch `dev-upstream-merge` (eigener Fork
   `vandalsquad187/KernelSU-Next`, URL in `.gitmodules`; Fork-Default `dev`
   liegt *hinter* dem Pin — kein Dependabot-`gitsubmodule`, das würde gegen
   `dev` „downgraden“). Wöchentlicher `ksu-pin-check.yml` vergleicht nur mit
   Upstream `KernelSU-Next/KernelSU-Next` `dev` und failt bei Behind
   (Notify, kein Push). Bump: FF, bei Divergenz Merge von `upstream/dev` in
   `dev-upstream-merge` (2026-11-21: 150 upstream-Commits, ours 127 ahead →
-  Merge `e7312bd2`); danach CI-Patch-Gate
+  Merge `e7312bd2` + 4.14-Fix `7abf1c77`); danach CI-Patch-Gate
   (`patches/ksu-prctl-gate.patch` dry-run + 3 Assertions). Ausdrücklich
   abgelehnt: tägliches `reset --hard` + `push --force` auf `main`.
 
