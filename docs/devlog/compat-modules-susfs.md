@@ -53,7 +53,7 @@ wie er ist**, keine fürsche Kernel-Arbeit nötig. Konsequenzen/Items:
 | **Hybrid Mount** | ✅ | Systemless Mount, kompatibel |
 | **k6a-ctl** | ✅ | Kernel-eigen, immer kompatibel |
 | **nfc_sweet2_fix** | ✅ | Kernel-Modul |
-| **FastCharging** | ✅ | Kernel-Modul |
+| **FastCharging** | ⏸️ | **Deaktiviert 2026-11-21** — No-Op auf sweet: kein service.sh, Ziel-Nodes (`/sys/kernel/fast_charge`, `allow_hvdcp3`, …) fehlen, thermald=Stock. Kernel macht FastCharge selbst (`BQ2597X_CHARGE_PUMP` + `QPNP_SMB5`, dmesg ICL 3 A / FCC 4,3 A). `disable`-Flag gesetzt; bei Bedarf per `rm …/disable` + Reboot reaktivieren, dann Ladeleistung gegen Kernel-Stock messen |
 | **padazz89** | ✅ | Kernel-Modul |
 | **tricky_store** | ✅ | Key Attestation |
 

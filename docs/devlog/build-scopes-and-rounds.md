@@ -881,3 +881,64 @@ GNU-Variable-Sized-Warning aus `cgroup-defs.h`.
   4x hoeherer Aufloesung als die 15-s-hb-Reihe.
 - **Vergleich 461-R2**: L4 0 s = 0 s; throttle +7 vs +10; State-Anteile l2 247/l3 702
   vs 315/616 (1385-s-Fenster) — vergleichbare Heisslast, gleiche Null-L4-Bilanz.
+
+## 2026-11-21 XI — Block D Boot-Test: build467 (clang+FORTIFY) = BOOTLOOP
+- **Flash**: `/data/local/tmp/build467-clang.zip` md5 `c02acaca445d014137a5d48bc570a73a`
+  via OrangeFox. **Bootloop** — Hypothese „Clang umgeht GCC13.3+4.14-FORTIFY-Loop"
+  **widerlegt** (mindestens auf diesem Tree/Config). CI war grün (Compile-Pass ≠ Boot-Pass).
+- **Recovery**: OrangeFox-Restore `boot-pre465.img` (war Stand **build464**, nicht 465 —
+  pre465-Backup wurde vor dem 465-Flash gezogen). Danach kurz Chaos: kein Recents-Swipe,
+  Lautstärke-Tasten tot, System träge/laggy — vermutlich Reste des unterbrochenen
+  467-Boots + ggf. meines unterbrochenen AK3-465-Reflash-Versuchs (`reflash465.log`
+  war bis „flash done" durch, Reboot-Tool-Call abgebrochen), NICHT ein Fund gegen 464/465.
+- **Final-Stand**: User hat **build464-aosp** frisch geflasht. Läuft sauber:
+  dmesg `build464-aosp`, boot_completed=1, k6a_gov 1.7.7 geladen
+  (`/sys/kernel/k6a_gov/status`), k6a-ctl **1.6.10** `mode=gaming`, 0 Oops/Panic,
+  SystemUI+Launcher aktiv. Observer io_samp4 neu gestartet (PID 5130).
+- **Ergebnis D**: `experiment/clang-fortify` = **nicht mergebar** im aktuellen Stand
+  (CI green, Boot fail). Offen: FORTIFY+GCC bleibt verboten; Clang+FORTIFY ebenfalls
+  Boot-fail → FORTIFY auf diesem 414-Tree mit beiden Toolchains nicht tragfähig.
+  Branch bleibt liegen als Referenz (Commits `3df0ae1be`+`490f20d95`).
+- **Backup-Lage**: `boot-465-good.img` (md5 `6d…`) = laufendes 465 von vor dem
+  Experiment — intakt für künftigen Restore; `build465.zip` md5 `64df9e8c…` vorhanden.
+
+## 2026-11-21 XII — Build 465 (Hardening) R2-Validierung: PASS (60+ fps subj.)
+- **Setup**: Nach Clang-467-Bootloop und kurzem 464-Zwischenstand Build **465-aosp**
+  (`35023093f`) erneut geflasht (AK3, boot-new md5 `6cd9f349…` = `boot-465-good.img`).
+  Verify: dmesg `build465-aosp`, `heap alloc:on`, `set_task_stack_end_magic`,
+  `wbt=75000`, `softlockup_panic=0`, k6a_gov 1.7.7 `build_hash=35023093`,
+  k6a-ctl 1.6.10 `mode=gaming`, Observer io_samp4 neu gestartet.
+  T0: `/data/local/tmp/r2_465_before.txt`.
+- **Runde** ~13:25–13:50 (Serie `io_r60r.log`, 1015 Samples t=515..1808 ≈ 21 min
+  aktive Phase). Post: `/data/local/tmp/r2_465_after.txt`.
+- **Gates (alle PASS)**:
+  - **L4-Residenz 0 ms** (T0 wie Post `cd_l4:0`; Round-Delta gaming +892 s,
+    cd_l2 +760 s, cd_l3 +0, cd_l4 +0)
+  - **spike_drops=0**
+  - **throttle_events +8** (1→9, nur L2-Transitions)
+  - **dmesg**: Build463/Backstop/spike **0 Treffer**, 0 Oops/Panic
+  - **Temp**: Serie max **79 C** (kpeak 80, 1 Sample ≥80), **≥86 C = 0**;
+    hist 16 Transitions, Max **76 C**, kein Eintrag nach cd_l3/l4
+  - Verlauf 53→68→79→62 C, thr-Counter 2→9 monoton
+- **Vergleich 464-R2**: L4 0=0; throttle +8 vs +7; Tempmax 79 vs 81; ≥86 0 vs 0–1;
+  spike 0=0 — keine Regression durch Härtung (INIT_ON_ALLOC/STACK_END/WBT).
+- **User-Feel**: „gute Runde, 60+ fps relativ stabil" — **R2 PASS**.
+- **Fazit Block C**: Härtung unter Gaming-Last unauffällig; 465 kann Dauerstand bleiben.
+  R2-Dateien: `r2_465_{before,after}.txt`, Serie `io_r60r.log`.
+
+## 2026-11-21 XIII — Cleanup: experiment-Branch gelöscht, Tag behalten
+- `experiment/clang-fortify` (CI grün, Boot fail) von origin + lokal gelöscht.
+  SHAs bleiben unter Tag **`d-clang-fortify-failed`** → `490f20d95`
+  (Findings in Block-D-Eintrag, Devlog XI).
+- Observer io_samp4 gestoppt; R2-Serie während Auswertung in Devlog XII
+  festgehalten (Live-Log danach vom Sampler geleert — Kennzahlen dort).
+- Stand Gerät: **build465-aosp** + Härtung, R2 PASS, k6a 1.7.7 / ctl 1.6.10.
+- R2-Serie archiviert: `/data/local/tmp/io_r60r_DONE_R2_465.log` (1396 Zeilen).
+
+## 2026-11-21 XIV — FastCharging-Modul deaktiviert (No-Op)
+- `/data/adb/modules/FastCharging/` (FastChargingRyujin v1.1) als **disable** markiert:
+  kein service.sh/Service-Hooks, system.prop leer, Scripts zielen auf Nodes die auf
+  sweet fehlen (`/sys/kernel/fast_charge` etc.), thermald-conf = Stock.
+  Kernel-eigenes FastCharge reicht: `BQ2597X_CHARGE_PUMP=y`, `QPNP_SMB5=y`,
+  Plug-Log ICL bis 3 A / FCC 4,3 A / bq2597x master+slave.
+- Reaktivierung nur zum A/B-Test: `rm …/disable` + Reboot, Ladeleistung messen.

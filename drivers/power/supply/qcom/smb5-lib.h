@@ -145,7 +145,7 @@ enum print_reason {
 #define PD_UNVERIFED_VOLTAGE		4400000
 #endif
 /* thermal micros */
-#define MAX_TEMP_LEVEL		25
+#define MAX_TEMP_LEVEL		27
 /* percent of ICL compared to base 5V for different PD voltage_min voltage */
 #define PD_6P5V_PERCENT		85
 #define PD_7P5V_PERCENT		75

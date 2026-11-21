@@ -99,7 +99,7 @@ enum hvdcp3_type {
 #define HVDCP3P5_IBAT_MINUS_DEV_VAL			300
 #define HVDCP3P5_IBAT_PLUS_DEV_VAL			200
 
-#define MAX_THERMAL_LEVEL			22
+#define MAX_THERMAL_LEVEL			26
 /* jeita related */
 #ifdef CONFIG_K6_CHARGE
 #define JEITA_WARM_THR			480
