@@ -167,6 +167,10 @@ conflicts; non-conflicting main changes flow in normally, merge commit is
 `[skip ci]` to avoid trigger cascades). Pushes to `miui/**` only produce artifacts
 (no release). Runtime ~13–17 min warm; `gh run list` / `gh run watch <id>`.
 
+> **Supported defconfig:** only **`sweet_defconfig`** (aosp + miui overlay) is built and
+> tested in CI. Legacy defconfigs in `arch/arm64/configs/` (`tucana`, `davinci`, `phoenix`,
+> `toco`, …) are **unmaintained** — no CI, no flash testing, no support.
+
 ---
 
 ## Status & Debug

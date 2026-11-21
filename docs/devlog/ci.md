@@ -5,7 +5,7 @@
 
 ## CI (`build-kernel.yml`)
 
-- Trigger: push to `main` (full dual-build + release) / push to `miui/**` (artifact only, no release) / `workflow_dispatch`.
+- Trigger: push to `main` (full dual-build, **nur Artefakte** — keine Releases mehr) / push to `miui/**` (artifact only) / `workflow_dispatch` (**einziges Release-Ereignis**).
   Erste Live-Erkenntnis (19.10.): **Pushes via GITHUB_TOKEN feuern kein CI** — deshalb
   gibt es vom Auto-Resync-Push des Runners nie eine Trigger-Kaskade (das `[skip ci]`
   im Merge-Message-Text ist nur eine zweite Versicherungsstufe).
@@ -34,7 +34,9 @@
   die *artifact-NAMES* müssen `${{ matrix.variant }}` enthalten, sonst haben beide
   Beine denselben Namen und `download-artifact@v4` lädt nur eins (Bug in build361,
   schief gefixt in build362).
-- **Release** (separater Job `needs: [build]`, nur auf `main`): der `release`-Job
+- **Release** (separater Job `needs: [build]`, **nur bei `workflow_dispatch`** —
+  seit `f2b059635`/Build399-Lesson erzeugen Pushes auf `main` bewusst keine
+  Releases mehr, Flash-Quelle sind die Run-Artefakte): der `release`-Job
   lädt $# alle artifacts nach `dist/` (`merge-multiple: true`) und erzeugt via
   softprops **EIN Release** `v${VERSION}-badazz-build${run_number}` mit **beiden zips**
   (`files: dist/Badazz-kernel-sweet-*.zip`). Die Release-Body-Datei wird im Job

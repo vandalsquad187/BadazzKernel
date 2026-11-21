@@ -11,23 +11,31 @@ k6a-ctl: separater Repo-Stand mit eigenem `README.md` + `CHANGELOG.md`.
 - **Repo**: `vandalsquad187/BadazzKernel` `main` — Six-Point-Review Phasen 1–4 umgesetzt
   (Phase 1 `0fe3023b8` CI-Hygiene, Phase 3 Docs-Umbau `6c85d4506`, Build 463 = Phase 4
   Consensus-Gate, dieser Commit).
-- **Gerät**: **Build 461 = Gaming-Baseline** (Feinleiter `cd_ladder` default an; R2-CoD-Runde
-  PASS — L4 0 s vs. 460-Baseline 194,5 s). Build 460 = Spike-Filter/Silver-Caps/quiet-Telemetrie;
-  Build 462 = Test-Infra (Spike-Filter-Helper + S8/S9-Goldens, kein Verhalten, Flash nicht nötig).
+- **Gerät**: **Build 464 = Stand** (gov 1.7.7 Consensus-Gate, R2 ✅ PASS +5–10 fps
+  subj., Details devlog IX). Build 461 = vorherige Gaming-Baseline (R2 PASS, L4 0 s vs.
+  460-Baseline 194,5 s); 460 = Spike-Filter/Silver-Caps/quiet; 462 = Test-Infra (kein
+  Verhalten, nie geflasht).
 - **Build 463 committet (gov 1.7.7)**: Consensus-Gate — `temp_smooth` zieht **nur bei
   Konsens (alle lebenden Gold-Zonen steigen gemeinsam)** nach oben (schließt die +15-K-
   Bias-Grenze: ohne Konsens friert die Referenz, Klemme absorbiert dauerhaft), L4-Latenz
   via **Peak-Backstop** (Roh-Peak ≥ l4 über 8 Ticks → L4; Exit hält Roh-Peak-Margin,
   kein Flap); S8d-Golden gekippt „Bias eingefroren". Host-Tests **167/167**, DOC-DRIFT grün,
   Syntax-Check pristine-compared 0/0, R4 im selben Commit, `kver_ok()` deckt 1.7.7 ab.
-  **Offen: CI-Build, Flash durch User, R2-Feldrevalidierung.**
+  **CI grün** (host-test 17, Lockdep 24, Build Kernel **Run 464** — der Phase-1-Push
+  verbrauchte 463, Marker/Commits bleiben einheitlich „Build 463"; Flash-Quelle =
+  Artefakte `Badazz-kernel-sweet-v4.14.369-build464aosp`/`…miui`).
+  **Flash ✅ + R2-Feldrevalidierung 2026-11-19 ✅ PASS**: L4 0 s, ≥86 °C 1/1500
+  Samples (1-s-Exkursion, 0,07 %, unter L4-Schwelle 87; hb-Reihe 0), spike_drops 0,
+  Backstop 0 Treffer, Exakt-Schwellwert-Eskalationen, subjektiv
+  **+5–10 fps** vs. 461 und flüssig bis zum Ende (Bericht: devlog
+  `build-scopes-and-rounds.md` IX; 1-Hz-Serie `io_r60r_DONE_1795121151.log`).
 - **k6a-ctl**: **v1.6.8 / versionCode 178** committet (`81c0c66` pidof→/proc-Scan Tri-State,
   `65ff32a` Persistenz `cd_ladder`/`cd_silver_caps`), ZIP `k6a-ctl-v1.6.8.zip` gebaut
   (Gate OK) — **deployed 2026-11-19 nach User-OK**: Backup `/data/adb/k6a-ctl-bak-v167`,
   atomare `mv`-Ersetzung, settings.conf-Keys angehaengt, sauberer Controller-Restart
   (Banner 1.6.8 mit `cd_ladder=1 silver_caps=0 0 0` verifiziert, hb tick Reset, Tri-State-Verify live).
 - **Review-Reihenfolge**: Phase 1 ✅ → Phase 2 ✅ → Phase 3 ✅ → Check ✅ → Phase 4 ✅
-  (Build 463 committet; Flash + R2 ausstehend).
+  (Build 463/464 vollständig: CI ✅ → Flash ✅ → R2 ✅ PASS).
 - Rollendes Status-Log bis Build 457: [`docs/devlog/state-log-to-build457.md`](docs/devlog/state-log-to-build457.md).
 
 ## k6a-ctl (Magisk-Modul — integraler Bestandteil des Kernel-Pakets, User-OK 2026-10-29)
@@ -58,7 +66,9 @@ k6a-ctl: separater Repo-Stand mit eigenem `README.md` + `CHANGELOG.md`.
 
 ## CI (`build-kernel.yml`) — Kurzfassung
 
-- Push `main` → Dual-Build (`aosp`+`miui`) + **ein** Release `v4.14.369-badazz-buildNNN`, 13–17 min;
+- Push `main` → Dual-Build (`aosp`+`miui`) + host-test + lockdep, **nur Artefakte**
+  (Flash-Quelle); **Release `v4.14.369-badazz-buildNNN` nur per `workflow_dispatch`**
+  (seit `f2b059635`, Build399-Lesson), 13–17 min;
   `miui/**` → nur Artefakte; **Pushes via GITHUB_TOKEN feuern kein CI**.
 - `.github`-Push-Sicherheit: der miui-Resync-Job muss `.github/` nach dem Merge auf Branch-Stand
   zurücksetzen (Token darf Workflows nicht pushen); `.gitignore` listet `.github` → `git add -f`.
@@ -76,7 +86,7 @@ k6a-ctl: separater Repo-Stand mit eigenem `README.md` + `CHANGELOG.md`.
 - **Commits**: title + evidence body, **no `Co-Authored-By`**. The Write tool is broken on this box
   (emits NULs) → always commit with a heredoc:
   `git commit -q -F - <<'EOF' … EOF`
-- **CI**: push to `main` → release `v4.14.369-badazz-buildNNN`, ~13–17 min. Poll with
+- **CI**: push to `main` → Dual-Build-Artefakte (~13–17 min); Release nur per `workflow_dispatch`. Poll with
   `gh run view <id> --repo vandalsquad187/BadazzKernel --json status,conclusion` in `sleep 55`
   loops, **timeout ≥ 1700000 ms**. Releases: `gh release list --repo vandalsquad187/BadazzKernel --limit 3`.
 - **Syntax-check before push** (see `docs/devlog/local-build-notes.md`), always pristine-compared.
@@ -122,6 +132,12 @@ k6a-ctl: separater Repo-Stand mit eigenem `README.md` + `CHANGELOG.md`.
 4. **Phantom-Killer**: Background/nohup-Worker sterben nach ~8,5 min (Android) — Dauertasks
    nur via `run/`-Files bzw. Foreground. Hängender Tool-Call = Orphan hält die Pipe →
    `$SU -c "sh $HOME/tmp/cap_scan.sh kill"`. Repo-Falle: `.gitignore` enthält `.github`.
+5. **`uname`/`/proc/version` sind gespoofed** (BRENE/SUSFS `SPOOF_UNAME`): Melden
+   `6.12.0-android16-6.12-perf-…` — **REAL ist 4.14.369-badazz**. `zcat /proc/config.gz`
+   zeigt ebenfalls den Spoof-Kontext und ist **kein** Beweis gegen `sweet_defconfig`
+   (u. a. FORTIFY-Y im IKCONFIG ≠ Repo-Default). Build-/Kernel-Beweis: dmesg-Banner,
+   `/sys/kernel/k6a_features/{git_hash,kernel_version}`, `git_hash` ↔ Commit.
+   Details: `docs/devlog/compat-modules-susfs.md`, `build-scopes-and-rounds.md`.
 
 ## Docs-Index ([`docs/devlog/`](docs/devlog/))
 
