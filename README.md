@@ -25,7 +25,7 @@ BadazzKernel is a performance and gaming tuned kernel for **Redmi Note 12 Pro 4G
 
 ```
 linux-4.14.369
-├── KernelSU-Next v3.3.0-311 (UAPI 6, 4.14 direct-patch) + SUSFS v2.3.0  # Root + Hide (submodule 79003ef8)
+├── KernelSU-Next v3.4.2-328 (UAPI 6, 4.14 direct-patch) + SUSFS v2.3.0  # Root + Hide (submodule e7312bd2)
 ├── fs/nomount — NoMount v22 (dev 8f05de7)      # VFS path redirection — zero-mount module injection (CONFIG_NOMOUNT=y)
 ├── drivers/thermal/k6a_gov/k6a_gov.c v1.7.7     # In-kernel gaming governor (CONFIG_K6A_GOV=m)
 ├── drivers/gpu/msm/kgsl_pwrctrl.c               # GPU pwrlevel export (k6a_gov)
@@ -47,7 +47,7 @@ linux-4.14.369
 | **Profiles** | 6 profiles | `off/gaming/battery/badazz/custom/badazz_safe` — temps, Gold/GPU/BW floors |
 | **Safety** | Battery guard + hash | `battery_guard` @`battery_guard_temp` (35..60 °C, default 45) → CD_L2, `poll_ms` 100..5000, `verify_build_hash` vs `k6a_features/git_hash` |
 | **Thermal** | Cooling device | `k6a_gov` as `thermal_cooling_device`, `cool_cur` locked, `K6A_CD_L4` clamp |
-| **Root** | KSU-Next + SUSFS | v3.3.0-311 **UAPI 6**, 4.14 direct-patch mode (submodule `79003ef8`), SUSFS `v2.3.0` round 2 (sus_path/mount/kstat/map, **dup-safe adds + caps, KSU-domain passthrough — root sees the truth, `del_sus_path` cmd**), `tamper_syscall_table` |
+| **Root** | KSU-Next + SUSFS | v3.4.2-328 **UAPI 6**, 4.14 direct-patch mode (submodule `e7312bd2`), SUSFS `v2.3.0` round 2 (sus_path/mount/kstat/map, **dup-safe adds + caps, KSU-domain passthrough — root sees the truth, `del_sus_path` cmd**), `tamper_syscall_table` |
 | **Injection** | NoMount v22 | Built-in VFS path-redirection subsystem (`CONFIG_NOMOUNT=y`, dev `8f05de7`), control channel `add_key("nomount")` — the **NoMount metamodule** (v2.2.0) injects installed KSU modules as VFS operations instead of mounts: **`/proc/mounts` stays clean**, fully transparent to apps, UID isolation for exclusions. Verified live in Build 441 |
 | **USB** | DWC3 / QUSB2 | SM6150 clocks (`GCC/DISPCC/CAMCC`), `WAIT_FOR_LPM` clear, `bus_aggr`/`GCTL` 50ms, `is_a_peripheral` fix — PC bootloop gone since v1.3.2. Full device-mode enumeration works since Build 336 (Faults 1/4 fixed) — see [`docs/devlog/readme-usb-fixedbugs.md`](docs/devlog/readme-usb-fixedbugs.md) |
 | **Scheduler** | UCLAMP, SCHED_CASS | Latency/efficiency tuning |
@@ -137,7 +137,7 @@ Own clamp layer in `cpu_cooling.c`: under thermal pressure the CPU max level is 
    `/data/adb/k6a_gov.ko` (`/` is dm-verity read-only, so the module cannot live in `/system`).
    Do **not** use `ksud module install` for upgrades — `su -c` here runs with `CapBnd=0` and it
    fails with `Permission denied`; unpack and `mv` the files in as root instead.
-3.    Install **KernelSU-Next Manager** APK — one working build: CI run [`36750739326`](https://github.com/KernelSU-Next/KernelSU-Next/actions/runs/36750739326) (`2b31f718` → `v3.4.0-19-g2b31f718-spoofed`), **uapi 4** (our current kernel line runs **UAPI 6**, 4.14 direct-patch, submodule `79003ef8`). The spoofed build ships a **randomised applicationId** (it has been `gojcms.hgelex.jabkht`), so `pm list packages | grep ksu` finds nothing — identify it by `versionName` instead. CI `34252913097` still needs the pending `88feb68` 4.14 port
+3.    Install **KernelSU-Next Manager** APK — one working build: CI run [`36750739326`](https://github.com/KernelSU-Next/KernelSU-Next/actions/runs/36750739326) (`2b31f718` → `v3.4.0-19-g2b31f718-spoofed`), **uapi 4** (our current kernel line runs **UAPI 6**, 4.14 direct-patch, submodule `e7312bd2`). The spoofed build ships a **randomised applicationId** (it has been `gojcms.hgelex.jabkht`), so `pm list packages | grep ksu` finds nothing — identify it by `versionName` instead. CI `34252913097` still needs the pending `88feb68` 4.14 port
 4. (Required for auto-load) Install **[k6a-ctl](https://github.com/vandalsquad187/k6a-ctl/releases)**
    — `delegated=1`. Current release **v1.3.1**; without it nothing insmods `k6a_gov.ko` and the
    kernel falls back to the built-in legacy cooldown (thermal protection still works, just no
@@ -258,7 +258,7 @@ kernel documentation (6090 files) — kernel-internal API docs, nothing project-
 
 - **BadazZ89** — Kernel, k6a_gov
 - **vandalsquad187** — Base, CI
-- **KernelSU-Next / SUSFS** — Root/Hide (submodule `79003ef8`, v3.3.0-311, UAPI 6, SUSFS `v2.3.0` round 2)
+- **KernelSU-Next / SUSFS** — Root/Hide (submodule `e7312bd2`, v3.4.2-328, UAPI 6, SUSFS `v2.3.0` round 2)
 - **AnyKernel3** — Flash template
 - **MiDoNaSR545** — Reference for MIUI/HOS (`sweet_k6a-r-oss`)
 
