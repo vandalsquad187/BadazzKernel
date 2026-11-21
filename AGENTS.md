@@ -11,10 +11,11 @@ k6a-ctl: separater Repo-Stand mit eigenem `README.md` + `CHANGELOG.md`.
 - **Repo**: `vandalsquad187/BadazzKernel` `main` — Six-Point-Review Phasen 1–4 umgesetzt
   (Phase 1 `0fe3023b8` CI-Hygiene, Phase 3 Docs-Umbau `6c85d4506`, Build 463 = Phase 4
   Consensus-Gate, dieser Commit).
-- **Gerät**: **Build 464 = Stand** (gov 1.7.7 Consensus-Gate, R2 ✅ PASS +5–10 fps
-  subj., Details devlog IX). Build 461 = vorherige Gaming-Baseline (R2 PASS, L4 0 s vs.
-  460-Baseline 194,5 s); 460 = Spike-Filter/Silver-Caps/quiet; 462 = Test-Infra (kein
-  Verhalten, nie geflasht).
+- **Gerät**: **Build 465 = Stand** (Härtung INIT_ON_ALLOC/STACK_END/WBT, R2 ✅ PASS
+  60+ fps, devlog XII). **Build 468** = Charge-Thermal A+B (`38aef538a`, CI Run
+  44915170922 grün, Artefakte build468aosp/miui) — flachere FCC-Tabellen (L23 3 A) +
+  `MAX_THERMAL_LEVEL` 26; Flash-Quelle `/data/local/tmp/build468.zip`, A/B Lademessung
+  ausstehend (devlog XV). FastCharging-Modul bleibt disable (No-Op, devlog XIV).
 - **Build 463 committet (gov 1.7.7)**: Consensus-Gate — `temp_smooth` zieht **nur bei
   Konsens (alle lebenden Gold-Zonen steigen gemeinsam)** nach oben (schließt die +15-K-
   Bias-Grenze: ohne Konsens friert die Referenz, Klemme absorbiert dauerhaft), L4-Latenz
