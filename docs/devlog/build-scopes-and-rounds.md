@@ -901,3 +901,27 @@ GNU-Variable-Sized-Warning aus `cgroup-defs.h`.
   Branch bleibt liegen als Referenz (Commits `3df0ae1be`+`490f20d95`).
 - **Backup-Lage**: `boot-465-good.img` (md5 `6d…`) = laufendes 465 von vor dem
   Experiment — intakt für künftigen Restore; `build465.zip` md5 `64df9e8c…` vorhanden.
+
+## 2026-11-21 XII — Build 465 (Hardening) R2-Validierung: PASS (60+ fps subj.)
+- **Setup**: Nach Clang-467-Bootloop und kurzem 464-Zwischenstand Build **465-aosp**
+  (`35023093f`) erneut geflasht (AK3, boot-new md5 `6cd9f349…` = `boot-465-good.img`).
+  Verify: dmesg `build465-aosp`, `heap alloc:on`, `set_task_stack_end_magic`,
+  `wbt=75000`, `softlockup_panic=0`, k6a_gov 1.7.7 `build_hash=35023093`,
+  k6a-ctl 1.6.10 `mode=gaming`, Observer io_samp4 neu gestartet.
+  T0: `/data/local/tmp/r2_465_before.txt`.
+- **Runde** ~13:25–13:50 (Serie `io_r60r.log`, 1015 Samples t=515..1808 ≈ 21 min
+  aktive Phase). Post: `/data/local/tmp/r2_465_after.txt`.
+- **Gates (alle PASS)**:
+  - **L4-Residenz 0 ms** (T0 wie Post `cd_l4:0`; Round-Delta gaming +892 s,
+    cd_l2 +760 s, cd_l3 +0, cd_l4 +0)
+  - **spike_drops=0**
+  - **throttle_events +8** (1→9, nur L2-Transitions)
+  - **dmesg**: Build463/Backstop/spike **0 Treffer**, 0 Oops/Panic
+  - **Temp**: Serie max **79 C** (kpeak 80, 1 Sample ≥80), **≥86 C = 0**;
+    hist 16 Transitions, Max **76 C**, kein Eintrag nach cd_l3/l4
+  - Verlauf 53→68→79→62 C, thr-Counter 2→9 monoton
+- **Vergleich 464-R2**: L4 0=0; throttle +8 vs +7; Tempmax 79 vs 81; ≥86 0 vs 0–1;
+  spike 0=0 — keine Regression durch Härtung (INIT_ON_ALLOC/STACK_END/WBT).
+- **User-Feel**: „gute Runde, 60+ fps relativ stabil" — **R2 PASS**.
+- **Fazit Block C**: Härtung unter Gaming-Last unauffällig; 465 kann Dauerstand bleiben.
+  R2-Dateien: `r2_465_{before,after}.txt`, Serie `io_r60r.log`.
