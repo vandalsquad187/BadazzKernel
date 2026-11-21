@@ -934,3 +934,11 @@ GNU-Variable-Sized-Warning aus `cgroup-defs.h`.
   festgehalten (Live-Log danach vom Sampler geleert — Kennzahlen dort).
 - Stand Gerät: **build465-aosp** + Härtung, R2 PASS, k6a 1.7.7 / ctl 1.6.10.
 - R2-Serie archiviert: `/data/local/tmp/io_r60r_DONE_R2_465.log` (1396 Zeilen).
+
+## 2026-11-21 XIV — FastCharging-Modul deaktiviert (No-Op)
+- `/data/adb/modules/FastCharging/` (FastChargingRyujin v1.1) als **disable** markiert:
+  kein service.sh/Service-Hooks, system.prop leer, Scripts zielen auf Nodes die auf
+  sweet fehlen (`/sys/kernel/fast_charge` etc.), thermald-conf = Stock.
+  Kernel-eigenes FastCharge reicht: `BQ2597X_CHARGE_PUMP=y`, `QPNP_SMB5=y`,
+  Plug-Log ICL bis 3 A / FCC 4,3 A / bq2597x master+slave.
+- Reaktivierung nur zum A/B-Test: `rm …/disable` + Reboot, Ladeleistung messen.
