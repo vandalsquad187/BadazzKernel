@@ -933,3 +933,4 @@ GNU-Variable-Sized-Warning aus `cgroup-defs.h`.
 - Observer io_samp4 gestoppt; R2-Serie während Auswertung in Devlog XII
   festgehalten (Live-Log danach vom Sampler geleert — Kennzahlen dort).
 - Stand Gerät: **build465-aosp** + Härtung, R2 PASS, k6a 1.7.7 / ctl 1.6.10.
+- R2-Serie archiviert: `/data/local/tmp/io_r60r_DONE_R2_465.log` (1396 Zeilen).
