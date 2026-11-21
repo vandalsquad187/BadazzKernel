@@ -119,6 +119,15 @@ k6a-ctl: separater Repo-Stand mit eigenem `README.md` + `CHANGELOG.md`.
 - **`verity_dev_keys.x509` aus Repo-Root entfernt** — byte-identisch mit
   `certs/verity.x509.pem`, nur von x86-cuttlefish referenziert (wird nicht
   gebaut); `sweet_defconfig` hat `SYSTEM_TRUSTED_KEYS=""`. Kein Secret.
+- **KernelSU-Next-Pin: manuell bumpen, nie auto-force** — Submodul @
+  `79003ef8` auf Branch `dev-upstream-merge` (eigener Fork
+  `vandalsquad187/KernelSU-Next`, URL in `.gitmodules`; Fork-Default `dev`
+  liegt *hinter* dem Pin — kein Dependabot-`gitsubmodule`, das würde gegen
+  `dev` „downgraden“). Wöchentlicher `ksu-pin-check.yml` vergleicht nur mit
+  Upstream `KernelSU-Next/KernelSU-Next` `dev` und failt bei Behind
+  (Notify, kein Push). Bump: manuelles FF + Commit; danach CI-Patch-Gate
+  (`patches/ksu-prctl-gate.patch` dry-run + 3 Assertions). Ausdrücklich
+  abgelehnt: tägliches `reset --hard` + `push --force` auf `main`.
 
 ## Common Issues
 1. **Fresh clone build fails**: need `CONFIG_KSU_SUSFS=y` + sub-options, submodule init

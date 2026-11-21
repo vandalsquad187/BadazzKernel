@@ -1,0 +1,68 @@
+# Weekly KernelSU-Next pin staleness check — notify only, never push.
+# Compares the pinned submodule SHA against upstream KernelSU-Next/KernelSU-Next
+# (default branch dev). Fails the run when behind so Actions shows a red signal.
+# No force-push, no auto-bump, no auto-merge (rejects the daily hard-reset pattern).
+name: KSU pin check
+
+on:
+  schedule:
+    - cron: '30 6 * * 1' # Mon 06:30 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  check-pin:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout (with submodules)
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          submodules: true
+          fetch-depth: 0
+
+      - name: Compare pin vs upstream dev
+        run: |
+          set -euo pipefail
+          PIN=$(git -C KernelSU-Next rev-parse HEAD)
+          PIN_SHORT=$(git -C KernelSU-Next rev-parse --short=9 HEAD)
+          echo "pin=$PIN" >> "$GITHUB_STEP_SUMMARY"
+
+          git -C KernelSU-Next remote remove upstream 2>/dev/null || true
+          git -C KernelSU-Next remote add upstream https://github.com/KernelSU-Next/KernelSU-Next.git
+          git -C KernelSU-Next fetch --quiet upstream dev
+          UP=$(git -C KernelSU-Next rev-parse FETCH_HEAD)
+          UP_SHORT=$(git -C KernelSU-Next rev-parse --short=9 FETCH_HEAD)
+
+          BEHIND=$(git -C KernelSU-Next rev-list --count "$PIN..$UP")
+          AHEAD=$(git -C KernelSU-Next rev-list --count "$UP..$PIN")
+
+          {
+            echo "### KernelSU-Next pin"
+            echo ""
+            echo "| | SHA |"
+            echo "|---|---|"
+            echo "| pin (submodule) | \`$PIN_SHORT\` |"
+            echo "| upstream/dev | \`$UP_SHORT\` |"
+            echo "| behind upstream | **$BEHIND** |"
+            echo "| ahead of upstream | $AHEAD |"
+            echo ""
+            echo "Bump (manual, never force):"
+            echo '```'
+            echo "cd KernelSU-Next && git fetch upstream && git merge --ff-only FETCH_HEAD"
+            echo "cd .. && git add KernelSU-Next"
+            echo "git commit -m 'chore: bump KernelSU-Next pin'"
+            echo '```'
+            echo "Gate after bump: CI \`Apply KSU hardening patch\` dry-run must pass."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          echo "pin=$PIN_SHORT upstream=$UP_SHORT behind=$BEHIND ahead=$AHEAD"
+
+          # AHEAD-only (local fork commits not yet upstream) is expected — not stale.
+          # Stale = upstream moved past the pin.
+          if [ "$BEHIND" -gt 0 ]; then
+            echo "::error::KernelSU-Next pin is $BEHIND commit(s) behind upstream/dev ($PIN_SHORT -> $UP_SHORT). Manual bump + patch dry-run required."
+            exit 1
+          fi
+          echo "::notice::KernelSU-Next pin is current with upstream/dev"
