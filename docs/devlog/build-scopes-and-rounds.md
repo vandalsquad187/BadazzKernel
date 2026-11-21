@@ -942,3 +942,54 @@ GNU-Variable-Sized-Warning aus `cgroup-defs.h`.
   Kernel-eigenes FastCharge reicht: `BQ2597X_CHARGE_PUMP=y`, `QPNP_SMB5=y`,
   Plug-Log ICL bis 3 A / FCC 4,3 A / bq2597x master+slave.
 - Reaktivierung nur zum A/B-Test: `rm …/disable` + Reboot, Ladeleistung messen.
+
+## 2026-11-21 XV — Charge-Thermal A+B (Build 468): flachere FCC-Tabellen + CP bis L25
+- **Auslöser**: User-Befund „mit FastCharging-Modul lädt es schneller" → Analyse:
+  Modul-Scripts laufen nie (kein service.sh); einziger Effekt = `thermald-devices.conf`
+  (`battery select_higher:1→0`). Live-Test: `system_temp_level=1` wird von mi_thermald
+  in ~3 s auf 23 zurückgesetzt; `restrict_cur` wirkungslos bei `restrict_chg=0`.
+  FC2 aus, weil `thermal_level 23 ≥ MAX_THERMAL_LEVEL 22`; FCC-Tabelle L23 = 1 A;
+  charger_temp 57–59 °C (echte Heat, Thermal hat Recht).
+- **A+B im Kernel** (Commit `38aef538a`, Run **44915170922** grün, Artefakte
+  `…-build468aosp` / `…-build468miui`):
+  - **A**: alle 8 DTS-Thermal-Tabellen in `sweet-sdmmagpie.dtsi` ab L14 flacher —
+    L22 1.5→3.5 A, L23 1.0→**3.0 A**, L25 0→2.0 A, L26 0→1.0 A, L27 bleibt 0;
+    L0–L13 unverändert; monoton nicht-steigend (28 Levels).
+  - **B**: `MAX_THERMAL_LEVEL` 22→**26** (`cp_qc30.h`, `pd_policy_manager.h`) —
+    Charge-Pump bleibt bis Level 25 aktiv; BYPASS enter/exit 20/22→24/26;
+    `MAX_TEMP_LEVEL` 25→**27** (`smb5-lib.h`) — FCC-Vote greift auch auf L25/26.
+- **Nicht geändert**: Thermal-Engine bleibt Autorität (mi_thermald schreibt weiter
+  system_temp_level); kein Clamp im Kernel (Option C bewusst verworfen).
+- Syntax-Check pristine-compared: cp_qc30/pdpm rc=0; smb5-lib 4 Pre-existing identisch.
+- Flash-Quelle: `/data/local/tmp/build468.zip` (aosp). A/B erst mit kaltem Gerät
+  (charger_temp < 45 °C), dann ibat/stl/FC2 gegen 465-Baseline.
+
+## 2026-11-21 XVI — A/B Lademessung Build 468: PASS (stl 23 → 3 A + FC2 aktiv)
+- **Flash ✅** (`/data/local/tmp/build468.zip`, aosp): dmesg `build468-aosp`,
+  `git_hash=38aef538`, fsck 465→468, `thermal_levels:28`, k6a_gov 1.7.7 /
+  k6a-controller + io-Observer live, cp_qc30_probe ok.
+- **Live-DT verifiziert** (`/sys/firmware/devicetree/…/qpnp-smb5/`):
+  `qcom,thermal-fcc-qc3-cp`, `thermal-mitigation`, `-dcp` jeweils **28** Einträge;
+  L14…L27 = 5500/5000/4800/4600/4400/4200/4000/3800/**3500/3000/2500/2000/1000/0** mA
+  (112 B, BE-u32). Damit greift A+B im laufenden Kernel.
+- **A/B gegen 465** (gleicher Tag, Kabel USB-PD/PPS, `/data/local/tmp/charge_ab_468_summary.txt`):
+
+  | Kennzahl | 465 (vorher) | 468 (nachher) |
+  |---|---|---|
+  | stl | 23 | 23 |
+  | `thermal_fcc_ua` | 1 000 000 (1 A) | **3 000 000 (3 A)** |
+  | ibat unter Last | ~1 A | **2.0–2.3 A** |
+  | FC2/CP | aus (`MAX 22`) | **an** (`charge_enabled:1`, L23 < 26) |
+  | `effective_fcc_val` | n/a (FC2 tot) | 1600–3000 (PD-Algorithmus) |
+  | charger_temp | 57–59 °C | 51–57 °C während FC2 |
+  | Exit | — | CV-Taper @ vbat≈4450 („taper charging done"), **nicht** thermisch |
+
+- SoC-Pfad 72 % → 89 % im Capture; batt 33–35 °C; PPS-Request ~9 V / ibus 1.0–1.4 A.
+- Baselines: `charge_t0_465.txt`, `charge_t0_468.txt`, Serie-Log im Summary-File.
+- **FastCharging-Modul**: `/data/adb/modules/FastCharging/` ist **nicht mehr vorhanden**
+  (nur noch disable → komplett entfernt). Kein Re-enable nötig; Kernel-BQ2597X bleibt
+  alleinige FastCharge-Quelle (devlog XIV/XV).
+- **Repo-Aufräumen**: lokaler NoMount-Stub `fs/nomount/Kconfig` (nur für altes
+  olddefconfig; CI klont via setup.sh den echten Baum) → `.gitignore`.
+- Offen (bewusst): Lade-Dauer-A/B 20→80 % erst bei entladenem Akku; Stress/R2 auf
+  468 noch offen.
