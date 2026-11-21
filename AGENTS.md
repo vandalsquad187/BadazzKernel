@@ -96,6 +96,30 @@ k6a-ctl: separater Repo-Stand mit eigenem `README.md` + `CHANGELOG.md`.
 - **Syntax-check before push** (see `docs/devlog/local-build-notes.md`), always pristine-compared.
 - User-facing reports are written in **German**.
 
+## Known Decisions (bewusst so, nicht „offener Befund“)
+
+- **`CONFIG_K6A_GOV=m`** (nicht `=y`) — seit Build 341 (`c42a67d07`) absichtlich:
+  Version-Lock via `kver_ok()`/insmod in k6a-ctl `service.sh`, `.ko` in der ZIP,
+  CI-Assert `CONFIG_K6A_GOV=m`. Kconfig-Help: „Build as module for version-lock“.
+  Details: `docs/devlog/k6a-gov-history.md` (Build-341-Abschnitt).
+  Umstellung auf `=y` würde die gesamte Gate-Maschinerie entsorgen — nur nach
+  expliziter Entscheidung, nicht „nebenbei“.
+- **WebUI-Token liegt im ausgelieferten `webroot/app.js`** (`const KTOKEN=…`, von
+  `service.sh` gesedet) — Known Decision, kein Umbau geplant. Scope: **Schutz vor
+  cross-user/cross-device, nicht vor on-device Apps** — jede App kann
+  `127.0.0.1:8767` erreichen und das ausgelieferte JS lesen. Bind nur
+  `127.0.0.1` (extern ausgeschlossen), Token-Gate (`k=`) auf state-changing
+  Routes, `config/webui.token` `chmod 600` + gitignored.
+- **`# CONFIG_FTRACE is not set`** gepinnt in `sweet_defconfig` — overridet
+  `default y if DEBUG_KERNEL` (`kernel/trace/Kconfig:170`); Events laufen über
+  `CONFIG_TRACING`/tracefs ohne Function-Tracer. Device-Beweis:
+  `/sys/kernel/tracing/events/k6a_gov/k6a_state` (id=1621). CI-Assert in
+  `build-kernel.yml` verhindert stillen Flip. KPROBES bleibt `=y`
+  (KernelSU-Next `depends on KPROBES`).
+- **`verity_dev_keys.x509` aus Repo-Root entfernt** — byte-identisch mit
+  `certs/verity.x509.pem`, nur von x86-cuttlefish referenziert (wird nicht
+  gebaut); `sweet_defconfig` hat `SYSTEM_TRUSTED_KEYS=""`. Kein Secret.
+
 ## Common Issues
 1. **Fresh clone build fails**: need `CONFIG_KSU_SUSFS=y` + sub-options, submodule init
 2. **SUSFS implicit declaration**: guard calls with `#ifdef CONFIG_KSU_SUSFS_*`
