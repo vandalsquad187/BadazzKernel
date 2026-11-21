@@ -132,6 +132,12 @@ k6a-ctl: separater Repo-Stand mit eigenem `README.md` + `CHANGELOG.md`.
 4. **Phantom-Killer**: Background/nohup-Worker sterben nach ~8,5 min (Android) — Dauertasks
    nur via `run/`-Files bzw. Foreground. Hängender Tool-Call = Orphan hält die Pipe →
    `$SU -c "sh $HOME/tmp/cap_scan.sh kill"`. Repo-Falle: `.gitignore` enthält `.github`.
+5. **`uname`/`/proc/version` sind gespoofed** (BRENE/SUSFS `SPOOF_UNAME`): Melden
+   `6.12.0-android16-6.12-perf-…` — **REAL ist 4.14.369-badazz**. `zcat /proc/config.gz`
+   zeigt ebenfalls den Spoof-Kontext und ist **kein** Beweis gegen `sweet_defconfig`
+   (u. a. FORTIFY-Y im IKCONFIG ≠ Repo-Default). Build-/Kernel-Beweis: dmesg-Banner,
+   `/sys/kernel/k6a_features/{git_hash,kernel_version}`, `git_hash` ↔ Commit.
+   Details: `docs/devlog/compat-modules-susfs.md`, `build-scopes-and-rounds.md`.
 
 ## Docs-Index ([`docs/devlog/`](docs/devlog/))
 
