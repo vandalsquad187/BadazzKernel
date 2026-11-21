@@ -881,3 +881,46 @@ GNU-Variable-Sized-Warning aus `cgroup-defs.h`.
   4x hoeherer Aufloesung als die 15-s-hb-Reihe.
 - **Vergleich 461-R2**: L4 0 s = 0 s; throttle +7 vs +10; State-Anteile l2 247/l3 702
   vs 315/616 (1385-s-Fenster) — vergleichbare Heisslast, gleiche Null-L4-Bilanz.
+
+## 2026-11-21 X — Zweites Review: Blocks A–D (A/B/C/C2 done, D CI green, R2 pending)
+- **Review-Verdict (2. extern)**: verity_dev_keys.x509 = false alarm; FORTIFY-Claim
+  „ihr baut mit Clang" = falsch (CI = gcc 13.3); Defconfig-Drift bestätigt;
+  KPROBES-Aus = gefährlich (SUSFS sus_map, bleibt=y); DMESG_RESTRICT schon y.
+  Freigabe Top-5 → Blöcke A–D.
+- **A — k6a-ctl v1.6.10** (Commit `9650066`, Tag `v1.6.10`): Deployed, Zip md5
+  `e98b44dc99cee1a8613260205cad1f0f`, settings.conf-Exception (`mode=gaming` erhalten).
+  Gates: /ping 200, noauth/badtok 403, badval 400, gov `hash_state=1`.
+- **B — sepolicy-Kurz-Experiment** (Commit `68c5c71`): selinuxfs-Oracle
+  `u:r:kernel:s0 → u:object_r:sysfs:s0` class file = 40012, dir = 10040012.
+  Review-P2 („Regel widerspricht Oracle") **widerlegt**, Regel bleibt.
+- **C — Kernel-Härtung** (Commit `35023093f`, Run 44877535652 grün):
+  `INIT_ON_ALLOC_DEFAULT_ON=y`, `DEBUG_KERNEL=y` + `SCHED_STACK_END_CHECK=y`
+  (DEBUG_PREEMPT/SCHED_DEBUG gepinnt), `BLK_WBT=y`,
+  `# CONFIG_BOOTPARAM_SOFTLOCKUP_PANIC is not set`.
+  **Geflasht als build465-aosp** (Zip md5 `64df9e8cda898bb4459f11a3a5b59da9`,
+  Boot-Partition md5 = `boot-new.img` ✓, dtbo erstes 270914 B ✓).
+  Live-Verifizierung: dmesg `mem auto-init: … heap alloc:on` (INIT_ON_ALLOC ✓),
+  `set_task_stack_end_magic` (SCHED_STACK_END_CHECK ✓), `wbt_lat_usec=75000` (BLK_WBT ✓),
+  `softlockup_panic=0`/`hung_task_panic=0` (Pinning ✓), FORTIFY real off
+  (`.config`-Gate; fortify_panic-Symbol unbedingt in `lib/string.c` kompiliert =
+  kein Beweis). Backup: `boot-pre465.img`/`dtbo-pre465.img`.
+- **C2 — Unmaintained-Markierung**: README-Hinweis: nur `sweet_defconfig` CI-gebaut;
+  tucana/davinci/phoenix/toco = kein CI, kein Flash-Test, kein Support.
+- **D — experiment/clang-fortify** (Branch `3df0ae1be`+`490f20d95`, Run 44891396380
+  **grün**): `CC=clang LLVM=1 LLVM_IAS=1`, Ubuntu clang 18.1.3 + `ld.lld`,
+  `CONFIG_FORTIFY_SOURCE=y` (Gate invertiert: required), LOCALVERSION-Suffix
+  `-cl` (UTS 64-Zeichen-Limit; `-clang` wäre 66). Artifact:
+  `Badazz-kernel-sweet-v4.14.369-build467-aosp-cl` (md5
+  `c02acaca445d014137a5d48bc570a73a`, staged as `/data/local/tmp/build467-clang.zip`).
+  Erster Versuch 44890948581 scheiterte: `ld.lld: not found` + UTS >64 — beide gefixt.
+  **Noch nicht geflasht** (Bootloop-Risiko wie bei GCC+458a).
+- **IKConfig-Falle**: `/proc/config.gz` ist ein Build-Fake — `kernel/Makefile` :122
+  bettet `arch/arm64/configs/stock_defconfig` (nicht `.config`) als `config_data.gz`
+  ein (dort FORTIFY=y, LOCALVERSION=-perf, Header 4.14.180). Config-Beweise nur über
+  dmesg-Banner, `git_hash`↔Commit, Runtime-Signale. AGENTS.md Punkt 5 präzisiert
+  (Commit `287e02023`, IKConfig-Teil nur auf experiment-Branch).
+- **R2 auf 465**: Observer `io_samp4.sh` läuft (hb in `io_r60r.log`), wartet auf
+  `game_pid`. T0-Snapshot: `/data/local/tmp/r2_465_before.txt`. Noch keine Runde.
+- **Lektion CI**: multiline `fromJSON(...)` in YAML `strategy.matrix` bricht PyYAML —
+  einzeilig/flow-style; `lld` muss explizit installiert werden (`clang`+`llvm` allein
+  reichen nicht für `LLVM=1`).
