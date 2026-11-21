@@ -133,11 +133,14 @@ k6a-ctl: separater Repo-Stand mit eigenem `README.md` + `CHANGELOG.md`.
    nur via `run/`-Files bzw. Foreground. Hängender Tool-Call = Orphan hält die Pipe →
    `$SU -c "sh $HOME/tmp/cap_scan.sh kill"`. Repo-Falle: `.gitignore` enthält `.github`.
 5. **`uname`/`/proc/version` sind gespoofed** (BRENE/SUSFS `SPOOF_UNAME`): Melden
-   `6.12.0-android16-6.12-perf-…` — **REAL ist 4.14.369-badazz**. `zcat /proc/config.gz`
-   zeigt ebenfalls den Spoof-Kontext und ist **kein** Beweis gegen `sweet_defconfig`
-   (u. a. FORTIFY-Y im IKCONFIG ≠ Repo-Default). Build-/Kernel-Beweis: dmesg-Banner,
-   `/sys/kernel/k6a_features/{git_hash,kernel_version}`, `git_hash` ↔ Commit.
-   Details: `docs/devlog/compat-modules-susfs.md`, `build-scopes-and-rounds.md`.
+   `6.12.0-android16-6.12-perf-…` — **REAL ist 4.14.369-badazz**. **`/proc/config.gz` ist
+   zusätzlich ein Build-Zeugnis- Fake**: `kernel/Makefile` erzeugt `config_data.gz` aus
+   **`arch/arm64/configs/stock_defconfig`**, nicht aus dem realen `.config` (dort u. a.
+   `FORTIFY_SOURCE=y`, `LOCALVERSION=-perf`, Header `4.14.180`). Nie als Config-Beweis
+   verwenden — Repo-Default = `sweet_defconfig` + CI-`.config`. Build-/Kernel-Beweis:
+   dmesg-Banner, `/sys/kernel/k6a_features/{git_hash,kernel_version}`, `git_hash` ↔ Commit,
+   Runtime-Signale (`mem auto-init: … heap alloc:on`, `set_task_stack_end_magic`,
+   `wbt_lat_usec`). Details: `docs/devlog/compat-modules-susfs.md`, `build-scopes-and-rounds.md`.
 
 ## Docs-Index ([`docs/devlog/`](docs/devlog/))
 
