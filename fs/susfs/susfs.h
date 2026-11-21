@@ -27,6 +27,7 @@
 
 extern bool susfs_is_current_ksu_domain(void);
 extern struct cred *ksu_cred;
+extern void setup_selinux(const char *domain, struct cred *cred);
 
 #ifdef CONFIG_KSU_SUSFS_ENABLE_LOG
 extern struct static_key_true susfs_is_log_enabled;

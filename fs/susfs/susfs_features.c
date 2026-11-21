@@ -56,6 +56,9 @@ void susfs_get_enabled_features(void __user **user_info) {
 #ifdef CONFIG_KSU_SUSFS_SUS_MAP
 	SUSFS_APPEND_FEATURE("CONFIG_KSU_SUSFS_SUS_MAP\n");
 #endif
+#ifdef CONFIG_KSU_SUSFS_PRIORITY_UID_FILTER
+	SUSFS_APPEND_FEATURE("CONFIG_KSU_SUSFS_PRIORITY_UID_FILTER\n");
+#endif
 #undef SUSFS_APPEND_FEATURE
 	info->err = 0;
 out:
