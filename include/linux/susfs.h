@@ -13,7 +13,7 @@ extern bool susfs_is_current_ksu_domain(void);
 #include <linux/statfs.h>
 #include <linux/seq_file.h>
 
-#define SUSFS_VERSION "v2.3.0"
+#define SUSFS_VERSION "v2.4.0"
 #if LINUX_VERSION_CODE < KERNEL_VERSION(5,0,0)
 #define SUSFS_VARIANT "NON-GKI"
 #else
@@ -23,8 +23,6 @@ extern bool susfs_is_current_ksu_domain(void);
 /*********/
 /* MACRO */
 /*********/
-#define getname_safe(name) (name == NULL ? ERR_PTR(-EINVAL) : getname(name))
-#define putname_safe(name) (IS_ERR(name) ? NULL : putname(name))
 
 /********/
 /* ENUM */
@@ -161,6 +159,14 @@ struct st_susfs_sus_map {
 };
 #endif
 
+/* getpriority uid filter */
+#ifdef CONFIG_KSU_SUSFS_PRIORITY_UID_FILTER
+struct st_susfs_priority_uid_filter {
+	char                                    app_strings[SUSFS_APP_STR_BUF_SIZE];
+	int                                     err;
+};
+#endif // #ifdef CONFIG_KSU_SUSFS_PRIORITY_UID_FILTER
+
 /* avc log spoofing */
 struct st_susfs_avc_log_spoofing {
 	bool                                    enabled;
@@ -235,6 +241,12 @@ void susfs_add_open_redirect(void __user **user_info);
 #ifdef CONFIG_KSU_SUSFS_SUS_MAP
 void susfs_add_sus_map(void __user **user_info);
 #endif
+
+/* getpriority uid filter */
+#ifdef CONFIG_KSU_SUSFS_PRIORITY_UID_FILTER
+void susfs_set_priority_uid_filter(void __user **user_info);
+void susfs_parse_priority_app_strings(void);
+#endif // #ifdef CONFIG_KSU_SUSFS_PRIORITY_UID_FILTER
 
 void susfs_set_avc_log_spoofing(void __user **user_info);
 
