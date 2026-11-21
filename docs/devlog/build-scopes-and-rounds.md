@@ -925,3 +925,11 @@ GNU-Variable-Sized-Warning aus `cgroup-defs.h`.
 - **User-Feel**: „gute Runde, 60+ fps relativ stabil" — **R2 PASS**.
 - **Fazit Block C**: Härtung unter Gaming-Last unauffällig; 465 kann Dauerstand bleiben.
   R2-Dateien: `r2_465_{before,after}.txt`, Serie `io_r60r.log`.
+
+## 2026-11-21 XIII — Cleanup: experiment-Branch gelöscht, Tag behalten
+- `experiment/clang-fortify` (CI grün, Boot fail) von origin + lokal gelöscht.
+  SHAs bleiben unter Tag **`d-clang-fortify-failed`** → `490f20d95`
+  (Findings in Block-D-Eintrag, Devlog XI).
+- Observer io_samp4 gestoppt; R2-Serie während Auswertung in Devlog XII
+  festgehalten (Live-Log danach vom Sampler geleert — Kennzahlen dort).
+- Stand Gerät: **build465-aosp** + Härtung, R2 PASS, k6a 1.7.7 / ctl 1.6.10.
