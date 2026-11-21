@@ -963,3 +963,33 @@ GNU-Variable-Sized-Warning aus `cgroup-defs.h`.
 - Syntax-Check pristine-compared: cp_qc30/pdpm rc=0; smb5-lib 4 Pre-existing identisch.
 - Flash-Quelle: `/data/local/tmp/build468.zip` (aosp). A/B erst mit kaltem Gerät
   (charger_temp < 45 °C), dann ibat/stl/FC2 gegen 465-Baseline.
+
+## 2026-11-21 XVI — A/B Lademessung Build 468: PASS (stl 23 → 3 A + FC2 aktiv)
+- **Flash ✅** (`/data/local/tmp/build468.zip`, aosp): dmesg `build468-aosp`,
+  `git_hash=38aef538`, fsck 465→468, `thermal_levels:28`, k6a_gov 1.7.7 /
+  k6a-controller + io-Observer live, cp_qc30_probe ok.
+- **Live-DT verifiziert** (`/sys/firmware/devicetree/…/qpnp-smb5/`):
+  `qcom,thermal-fcc-qc3-cp`, `thermal-mitigation`, `-dcp` jeweils **28** Einträge;
+  L14…L27 = 5500/5000/4800/4600/4400/4200/4000/3800/**3500/3000/2500/2000/1000/0** mA
+  (112 B, BE-u32). Damit greift A+B im laufenden Kernel.
+- **A/B gegen 465** (gleicher Tag, Kabel USB-PD/PPS, `/data/local/tmp/charge_ab_468_summary.txt`):
+
+  | Kennzahl | 465 (vorher) | 468 (nachher) |
+  |---|---|---|
+  | stl | 23 | 23 |
+  | `thermal_fcc_ua` | 1 000 000 (1 A) | **3 000 000 (3 A)** |
+  | ibat unter Last | ~1 A | **2.0–2.3 A** |
+  | FC2/CP | aus (`MAX 22`) | **an** (`charge_enabled:1`, L23 < 26) |
+  | `effective_fcc_val` | n/a (FC2 tot) | 1600–3000 (PD-Algorithmus) |
+  | charger_temp | 57–59 °C | 51–57 °C während FC2 |
+  | Exit | — | CV-Taper @ vbat≈4450 („taper charging done"), **nicht** thermisch |
+
+- SoC-Pfad 72 % → 89 % im Capture; batt 33–35 °C; PPS-Request ~9 V / ibus 1.0–1.4 A.
+- Baselines: `charge_t0_465.txt`, `charge_t0_468.txt`, Serie-Log im Summary-File.
+- **FastCharging-Modul**: `/data/adb/modules/FastCharging/` ist **nicht mehr vorhanden**
+  (nur noch disable → komplett entfernt). Kein Re-enable nötig; Kernel-BQ2597X bleibt
+  alleinige FastCharge-Quelle (devlog XIV/XV).
+- **Repo-Aufräumen**: lokaler NoMount-Stub `fs/nomount/Kconfig` (nur für altes
+  olddefconfig; CI klont via setup.sh den echten Baum) → `.gitignore`.
+- Offen (bewusst): Lade-Dauer-A/B 20→80 % erst bei entladenem Akku; Stress/R2 auf
+  468 noch offen.

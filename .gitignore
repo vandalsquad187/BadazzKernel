@@ -149,3 +149,6 @@ tools/k6a_gov_host_test/k6a_host_test
 # release/download artefacts (ferry copies, never tracked)
 /SHA256SUMS
 /Badazz-kernel-sweet-*.zip
+
+# local NoMount stub for olddefconfig — CI re-clones real tree via setup.sh
+/fs/nomount/
