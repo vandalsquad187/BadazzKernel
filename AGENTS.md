@@ -8,9 +8,17 @@ k6a-ctl: separater Repo-Stand mit eigenem `README.md` + `CHANGELOG.md`.
 
 ## Current State (Stand 2026-11-22)
 
-- **Gerät: Build 477 = Stand** (Reboot-Fix `7fc358f27`, CI Run 45049445376 grün,
+- **Gerät: Build 478 = Stand** (Audit-Race-Fix, Commit `8f6c4803f` = Patch
+  `f3fade9d3` aus dem Audit-Review + Kommentar-Streichen + Marker-Bump): susfs
+  `priority_uid_filter` Stale-Renew-Gate (strcmp vor Swap — upstream-erbter
+  Bug, `WildKernels …/fs/susfs.c:2103-2145` hat dasselbe Muster) + Flag-Lock
+  für `is_uid_filter_set_before` + SPDX-Header; Scope USER-only als Known
+  Decision; devlog `docs/devlog/susfs-priority-audit.md`. CI-Run/Flash-Belege
+  kommen als Docs-Nachtrag nach Live-Checks. Freeze-Welle #10–#12 weiterhin
+  offen (Beobachtung: Sniffer-×3 v7.1 als Alarm, Wakelock bewusst aus).
+- **Gerät (477er-Stand, historisch)**: Build 477 = Reboot-Fix `7fc358f27`, CI Run 45049445376 grün,
   AK3-Flash `~/tmp/flash477.sh` rc=0, live verifiziert `git_hash=7fc358f2` +
-  Banner `build477`, Boot-Backup `boot-build476.img`): susfs
+  Banner `build477`, Boot-Backup `boot-build476.img`: susfs
   `priority_uid_filter`-NULL-Guard (`kfree_rcu(NULL)` beim ersten SET panickte
   ≤476 — Ramoops-Trace `__call_rcu ← kfree_call_rcu ←
   susfs_set_priority_uid_filter ← ksu_handle_sys_reboot`, History-Beleg
@@ -141,6 +149,16 @@ k6a-ctl: separater Repo-Stand mit eigenem `README.md` + `CHANGELOG.md`.
   Merge `e7312bd2` + 4.14-Fix `7abf1c77`); danach CI-Patch-Gate
   (`patches/ksu-prctl-gate.patch` dry-run + 3 Assertions). Ausdrücklich
   abgelehnt: tägliches `reset --hard` + `push --force` auf `main`.
+- **Priority-UID-Filter: Scope USER-only** — Hooks nur in `PRIO_USER` /
+  `IOPRIO_WHO_USER` vor `find_user()` (`kernel/sys.c:244/316`,
+  `block/ioprio.c:140/241`), upstream-identisch (Upstream-Heimat
+  `WildKernels/GKI_KernelSU_SUSFS`, Patch `50_add_susfs_in_gki-…patch`,
+  Patch-Z. 2406-2439/9-45; `simonpunk/susfs4ksu` ist 404 — Quelle von
+  `97cbbaf`/`2557ea2` nicht mehr auflösbar). PROCESS/PGRP bewusst offen:
+  Ziel-PID-Kenntnis + proc-Sichtbarkeit sind separat abgedeckt; Abweichen
+  erzeugt bei jedem Upstream-Sync Merge-Reibung. Der `kfree_rcu`-NULL-Guard
+  (Build476) ist 4.14-spezifisch — Upstream zielt auf 6.18 GKI, wo
+  `kfree_rcu(NULL)` safe ist.
 
 ## Common Issues
 1. **Fresh clone build fails**: need `CONFIG_KSU_SUSFS=y` + sub-options, submodule init
@@ -214,3 +232,4 @@ k6a-ctl: separater Repo-Stand mit eigenem `README.md` + `CHANGELOG.md`.
 | `misc-backlog.md` | TODO-Tunings-Backlog + Device-Cherry-Picks |
 | `gov-version-changelog.md` | README-Archiv: k6a_gov-Versionstabellen v1.6.0 → v1.7.6 |
 | `readme-usb-fixedbugs.md` | README-Archiv: USB-Status (Faults 1–4) + Fixed-Bugs-Tabelle (v1.3.2) |
+| `susfs-priority-audit.md` | Audit `susfs_priority.c` (Build 478): Race-Fix, Flag-Lock, Scope-Doku, offene Secondary-User-A/B |

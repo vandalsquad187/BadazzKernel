@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-2.0
+
 #include "susfs.h"
 
 #ifdef CONFIG_KSU_SUSFS_PRIORITY_UID_FILTER
@@ -204,8 +206,10 @@ void susfs_set_priority_uid_filter(void __user **user_info) {
 		goto out_free_new_bitmap;
 	}
 
+	mutex_lock(&susfs_mutex_lock_priority_uid_filter);
 	if (is_uid_filter_set_before)
 		SUSFS_LOGI("renewing the priority uid filter\n");
+	mutex_unlock(&susfs_mutex_lock_priority_uid_filter);
 	err = susfs_parse_priority_app_names(info->app_strings, new_bitmap->bits, false);
 
 	susfs_restore_creds(orig_cred);
@@ -279,6 +283,11 @@ static int susfs_priority_app_strings_worker(void *data) {
 		goto out_restore_creds;
 
 	mutex_lock(&susfs_mutex_lock_priority_uid_filter);
+	if (!susfs_priority_app_strings ||
+	    strcmp(susfs_priority_app_strings, app_strings) != 0) {
+		mutex_unlock(&susfs_mutex_lock_priority_uid_filter);
+		goto out_restore_creds;
+	}
 	old_bitmap = rcu_dereference_protected(priority_uid_filter_bitmap, lockdep_is_held(&susfs_mutex_lock_priority_uid_filter));
 	rcu_assign_pointer(priority_uid_filter_bitmap, new_bitmap);
 	new_bitmap = NULL;
