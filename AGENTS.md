@@ -6,12 +6,23 @@ ausgelagert (Inhalte unverändert). Öffentliche Nutzer-Doku: [`README.md`](READ
 Governor-Regelwerk: [`docs/k6a_gov_rules.md`](docs/k6a_gov_rules.md);
 k6a-ctl: separater Repo-Stand mit eigenem `README.md` + `CHANGELOG.md`.
 
-## Current State (Stand 2026-11-21)
+## Current State (Stand 2026-11-22)
 
+- **Gerät: Build 477 = Stand** (Reboot-Fix `7fc358f27`, CI Run 45049445376 grün,
+  AK3-Flash `~/tmp/flash477.sh` rc=0, live verifiziert `git_hash=7fc358f2` +
+  Banner `build477`, Boot-Backup `boot-build476.img`): susfs
+  `priority_uid_filter`-NULL-Guard (`kfree_rcu(NULL)` beim ersten SET panickte
+  ≤476 — Ramoops-Trace `__call_rcu ← kfree_call_rcu ←
+  susfs_set_priority_uid_filter ← ksu_handle_sys_reboot`, History-Beleg
+  `kernel_panic,null,1795359972`); getpriority/setpriority-Funktionstest
+  **PASS** (PRIO_USER-Cross-Test ESRCH vs. Root-Bypass, Hook `kernel/sys.c:244/316`).
+  Reboot-Hunt Events #10–#13 + Freeze-Welle (offen, Beobachtung mit
+  `kwatch_nosuspend`-Wakelock + Sniffer-×3 v7.1): devlog
+  `compat-modules-susfs.md` 2026-11-22.
 - **Repo**: `vandalsquad187/BadazzKernel` `main` — Six-Point-Review Phasen 1–4 umgesetzt
   (Phase 1 `0fe3023b8` CI-Hygiene, Phase 3 Docs-Umbau `6c85d4506`, Build 463 = Phase 4
   Consensus-Gate, dieser Commit).
-- **Gerät**: **Build 468 = Stand** (Charge-Thermal A+B, `38aef538a`, CI Run 44915170922
+- **Gerät (468er-Stand, historisch)**: ~~Build 468~~ (Charge-Thermal A+B, `38aef538a`, CI Run 44915170922
   grün, Flash + **A/B Lademessung PASS** devlog XVI): bei stl=23 FCC-Vote
   **3 A** (vorher 1 A), FC2/CP aktiv bis Level 25 (`MAX_THERMAL_LEVEL 26`), ibat
   2.0–2.3 A, Live-DT 28 Levels mit L23=3000 mA. Flash-Quelle
@@ -149,6 +160,15 @@ k6a-ctl: separater Repo-Stand mit eigenem `README.md` + `CHANGELOG.md`.
     `UsbManager.openDevice()`, unbinding `usb-storage`. Restore with `usbfs/unbind` +
     `usb-storage/bind` — see *Fault 2* in *USB Debugging*. Do not chase it as a kernel bug; you
     will not find the holder in `/proc/*/fd` either, because root has `CapBnd=0` (no ptrace).
+11. **Reboot-Rätsel (≤476) — zwei Klassen + Lese-Fallen**: erstes
+    `susfs set_priority_uid_filter` pro Boot = `kfree_rcu(NULL)`-Panic (Guard seit
+    `7fc358f27`/Build477). pstore/ramoops nur bei **warmen** Resets (Class B
+    meist kalt → Gap unlesbar); History-Grund trennt: `kernel_panic,…` =
+    Panic-Reset, plain `reboot` = SW-Reset. kmsg-Timestamps = µs, frieren in
+    Suspend (awake-vs-Wall-Differenz = Suspend-Summe, keine Anomalie).
+    Schnell-Beweis-Quellen: `ramoops-boot-*` (strings -n 4), History via
+    `strings -a /data/property/persistent_properties`, Death-Archive
+    `kwatch-full-prev-*`/`deathsniff/`.
 
 ## Fallen (Pflichtkenntnisse)
 

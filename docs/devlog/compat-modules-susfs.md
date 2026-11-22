@@ -113,3 +113,64 @@ wie er ist**, keine fürsche Kernel-Arbeit nötig. Konsequenzen/Items:
   dmesg, k6a-ctl v1.5.4 Notbrems-Akku-Arm scharf); danach
   Issue #3 schließen.
 
+
+## 2026-11-22 — Reboot-Hunt Events #10–#13 → susfs-NULL-Guard (Build 477)
+
+**Ereignisse** (alle auf Akku, eingefrorene-/simultane Leser-Stopps ohne
+Kills): #10 14:26, #11 14:43, #12 15:12 = `reboot,<epoch>` plain,
+kalt (pstore leer, POFF SID0=PS_HOLD/„MSM Controlled Shutdown", PON
+„Hard Reset and 'cold' boot"); #13 16:05:28 = **`kernel_panic,null,
+1795359972`** und pstore ERHALTEN (`ramoops-boot-1122-160613`).
+Timelines: Reader-Stopp→uptime0 = 35–60 s (bark=11000/pet=9360,
+`qcom,wakeup-enable` in atoll.dtsi); #12 mit gehaltenem
+`kwatch_nosuspend`-Wakelock (Suspend-Paare 20→0) BEWEIST: Klasse-B
+auch im Wachzustand möglich. Klassen: Class A = Double-Comma
+`reboot,,…` (init-geordnet, 11:07-Ramoops mit `blk_cleanup_queue`
+WARN @ blk-core.c:725 in PID1 init + I2C-Sturm a84000/touch),
+Class B = Freeze-Welle ohne init-/powerctl-Prints.
+
+**Root Cause #13 (Ramoops-Trace, vollständig):**
+
+```
+Process susfs (pid 20828), CPU 3, Data abort WnR=1, ESR 86000005
+pc: __call_rcu+0x24/0x290 <- kfree_call_rcu+0x14/0x20
+    <- susfs_set_priority_uid_filter+0x2ec/0x410
+    <- ksu_handle_sys_reboot+0x604 <- hook_aarch64_reboot+0x28
+Kernel panic - not syncing: Fatal exception (panic_on_oops=1)
+```
+
+Erstes `CMD_SUSFS_SET_PRIORITY_UID_FILTER` seit Boot: `old_bitmap=NULL`,
+`kfree_rcu(NULL,rcu)` rechnet in 4.14 `&NULL->rcu` = Offset 0x10 →
+`call_rcu()` schreibt auf 0x10 → Translation-Fault → Panic.
+Zweite, identisch unguardte Stelle: `susfs_priority_app_strings_worker`.
+Events #10–#12 ohne SET-Fault passen zur Freeze-Vorläufe
+(Freeze → Resume nie → WDT-Bite → Bootloader, Reset klassifiziert als
+`reboot` statt `kernel_panic`).
+
+**Fix + Verifikation**: Commit `7fc358f27` (if (old_bitmap) an beiden
+Stellen, clang -fsyntax-only 0 Errors), CI Run 45049445376 = Run **477**
+grün, Flash via AK3 `~/tmp/flash477.sh` (rc=0 „flash done", Backup
+`boot-build476.img`/`dtbo-build476.img`), Reboot 18:39. Live-Beweis:
+`git_hash=7fc358f2`, Banner `build477`, danach
+`set_priority_uid_filter com.termux` → rc=0 + LOGI
+„the priority uid filter is set" statt Panic.
+
+**getpriority/setpriority-Funktionstest PASS**: Hook nur in
+`kernel/sys.c:244/316` (case PRIO_USER, `uid>=10000` +
+`susfs_is_priority_uid_filtered`, `goto out_unlock` = ESRCH);
+eigene-uid = uid_eq-Bypass, Root = uid<10000-Bypass. Paar
+root→10251 (gms) = -20 vs. termux→10251 = ESRCH(3) = Filter aktiv;
+Parse/Bit/LOGI (`uid '10251' is now added`) verifiziert. Bitmap wird
+nicht persistiert (kein Boot-Restore-SET → nächster Reboot = Neutral);
+CLI hat kein Clear-Cmd (nötig auch nicht). Bare `susfs` (rc=234) sendet
+KEIN SET — wem der 16:05er SET-Aufruf gehörte (KSU-App/ksud-Periodik)
+bleibt offen; dank Guard ist SET ab Build477 in jedem Fall unkritisch.
+
+**Offen/Follow-up**: Freeze-Welle #10–#12 (simultaner Reader-Stopp,
+#13: Freeze@16:04:05 → Reader erwachten nach Resume NICHT —
+Freezer-Leak-Verdacht, Ring-Silence + `AudioFlinger write blocked
+817ms`); Diagnose läuft mit neu gesetztem `kwatch_nosuspend`-Wakelock;
+Sniffer-×3 (v7.1 `service.sh`) + adb-Fänger laufen; Sniffer-Dump bei
+Freeze strukturell unmöglich (Ticks sterben mit dem System) — nur
+pre-freeze-Fenster fängbar. Beobachtung: 18:39→20:33 (6426 s
+Suspend-Anteil) ohne Event bei vorher 20–60-Minuten-Kadenz.
