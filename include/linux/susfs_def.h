@@ -18,6 +18,7 @@
 #define CMD_SUSFS_ADD_SUS_PATH_LOOP 0x55553
 #define CMD_SUSFS_SET_SUS_PATH_UID_FILTER 0x55554 /* Tausch mit DEL: Device-CLI sendet 0x55554 fuer den Filter */
 #define CMD_SUSFS_DEL_SUS_PATH 0x55555
+#define CMD_SUSFS_DEL_SUS_PATH_UID_FILTER 0x55556
 #define CMD_SUSFS_ADD_SUS_MOUNT 0x55560 /* deprecated */
 #define CMD_SUSFS_HIDE_SUS_MNTS_FOR_NON_SU_PROCS 0x55561
 #define CMD_SUSFS_UMOUNT_FOR_ZYGOTE_ISO_SERVICE 0x55562 /* deprecated */
@@ -38,6 +39,7 @@
 #define CMD_SUSFS_ENABLE_AVC_LOG_SPOOFING 0x60010
 #define CMD_SUSFS_ADD_SUS_MAP 0x60020
 #define CMD_SUSFS_SET_PRIORITY_UID_FILTER 0x60030
+#define CMD_SUSFS_DEL_PRIORITY_UID_FILTER 0x60031
 
 #define SUSFS_MAX_LEN_PATHNAME 256 // 256 should address many paths already unless you are doing some strange experimental stuff, then set your own desired length
 /* Obergrenzen je Liste/Hashtabelle (Eintraege kommen per sys_reboot, nur root): kein unbegrenztes Speicherwachstum */

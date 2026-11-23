@@ -377,6 +377,27 @@ out_copy_to_user:
 		kvfree(info);
 }
 
+void susfs_del_sus_path_uid_filter(void __user **user_info) {
+	struct susfs_sus_path_uid_filter_bitmap *old_bitmap = NULL;
+	int err = 0;
+
+	mutex_lock(&susfs_mutex_lock_sus_path_uid_filter);
+	old_bitmap = rcu_dereference_protected(sus_path_uid_filter_bitmap, lockdep_is_held(&susfs_mutex_lock_sus_path_uid_filter));
+	rcu_assign_pointer(sus_path_uid_filter_bitmap, NULL);
+	kvfree(susfs_sus_path_app_strings);
+	susfs_sus_path_app_strings = NULL;
+	mutex_unlock(&susfs_mutex_lock_sus_path_uid_filter);
+
+	if (old_bitmap)
+		kfree_rcu(old_bitmap, rcu);
+
+	SUSFS_LOGI("the sus path uid filter is deleted\n");
+
+	if (copy_to_user(&((struct st_susfs_uid_filter_del __user*)*user_info)->err, &err, sizeof(err)))
+		err = -EFAULT;
+	SUSFS_LOGI("CMD_SUSFS_DEL_SUS_PATH_UID_FILTER -> ret: %d\n", err);
+}
+
 static int susfs_sus_path_app_strings_worker(void *data) {
 	struct susfs_sus_path_uid_filter_bitmap *new_bitmap = NULL;
 	struct susfs_sus_path_uid_filter_bitmap *old_bitmap = NULL;
