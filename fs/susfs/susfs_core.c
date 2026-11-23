@@ -19,6 +19,14 @@ out:
 }
 
 void susfs_init(void) {
-	pr_info("Build478: susfs core v%s synced\n", SUSFS_VERSION);
+	pr_info("Build479: susfs core v%s synced\n", SUSFS_VERSION);
 	SUSFS_LOGI("SUSFS initialized\n");
 }
+
+static int __init susfs_init_late(void)
+{
+	susfs_init();
+	return 0;
+}
+
+late_initcall(susfs_init_late);
