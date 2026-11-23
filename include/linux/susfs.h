@@ -50,6 +50,11 @@ struct st_susfs_sus_path_list {
 	struct st_susfs_sus_path                info;
 	char                                    target_pathname[SUSFS_MAX_LEN_PATHNAME];
 };
+
+struct st_susfs_sus_path_uid_filter {
+	char                                    app_strings[SUSFS_APP_STR_BUF_SIZE];
+	int                                     err;
+};
 #endif
 
 /* sus_mount */
@@ -201,6 +206,9 @@ void susfs_add_sus_path_loop(void __user **user_info);
 void susfs_del_sus_path(void __user **user_info);
 void susfs_run_sus_path_loop(void);
 bool susfs_is_inode_sus_path(struct inode *inode);
+void susfs_set_sus_path_uid_filter(void __user **user_info);
+void susfs_parse_sus_path_app_strings(void);
+bool susfs_is_uid_allowed_for_sus_path(uid_t uid);
 #endif
 
 /* sus_mount */
