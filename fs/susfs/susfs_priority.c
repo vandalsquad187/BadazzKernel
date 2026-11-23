@@ -255,6 +255,7 @@ static int susfs_priority_app_strings_worker(void *data) {
 	struct susfs_priority_uid_filter_bitmap *old_bitmap = NULL;
 	struct cred *orig_cred = NULL;
 	char *app_strings = NULL;
+	char *parse_buf = NULL;
 	size_t app_str_len = 0;
 	int ret = 0;
 
@@ -278,7 +279,14 @@ static int susfs_priority_app_strings_worker(void *data) {
 	if (!new_bitmap)
 		goto out_restore_creds;
 
-	ret = susfs_parse_priority_app_names(app_strings, new_bitmap->bits, true);
+	parse_buf = kvmalloc(app_str_len + 1, GFP_KERNEL | __GFP_ZERO);
+	if (!parse_buf)
+		goto out_restore_creds;
+	memcpy(parse_buf, app_strings, app_str_len + 1);
+
+	ret = susfs_parse_priority_app_names(parse_buf, new_bitmap->bits, true);
+	kvfree(parse_buf);
+	parse_buf = NULL;
 	if (ret)
 		goto out_restore_creds;
 
