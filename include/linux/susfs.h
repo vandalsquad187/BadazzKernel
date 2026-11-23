@@ -172,6 +172,10 @@ struct st_susfs_priority_uid_filter {
 };
 #endif // #ifdef CONFIG_KSU_SUSFS_PRIORITY_UID_FILTER
 
+struct st_susfs_uid_filter_del {
+	int                                     err;
+};
+
 /* avc log spoofing */
 struct st_susfs_avc_log_spoofing {
 	bool                                    enabled;
@@ -207,6 +211,7 @@ void susfs_del_sus_path(void __user **user_info);
 void susfs_run_sus_path_loop(void);
 bool susfs_is_inode_sus_path(struct inode *inode);
 void susfs_set_sus_path_uid_filter(void __user **user_info);
+void susfs_del_sus_path_uid_filter(void __user **user_info);
 void susfs_parse_sus_path_app_strings(void);
 bool susfs_is_uid_allowed_for_sus_path(uid_t uid);
 #endif
@@ -253,6 +258,7 @@ void susfs_add_sus_map(void __user **user_info);
 /* getpriority uid filter */
 #ifdef CONFIG_KSU_SUSFS_PRIORITY_UID_FILTER
 void susfs_set_priority_uid_filter(void __user **user_info);
+void susfs_del_priority_uid_filter(void __user **user_info);
 void susfs_parse_priority_app_strings(void);
 #endif // #ifdef CONFIG_KSU_SUSFS_PRIORITY_UID_FILTER
 

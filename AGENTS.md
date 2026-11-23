@@ -8,29 +8,28 @@ k6a-ctl: separater Repo-Stand mit eigenem `README.md` + `CHANGELOG.md`.
 
 ## Current State (Stand 2026-11-23)
 
-- **Gerät: Build 481 = Stand** (Commit `7515f80bc`, CI Run #481 grün, `flash481.sh`
-  rc=0 „flash done", **AK3 ohne Auto-Reboot** — manueller Reboot nötig, Boot-Backup
-  `boot-build480.img`): **B6 Renew-Trigger geschlossen** — Observer via
-  `KSU_LSM_HOOK_INIT(inode_rename, "selinux_inode_rename")` gegen die aktive
-  `hook/lsm_hook.c`-Replace-Impl gekettet (v1 INSERT-Header tot-gebaut, v2
-  Replace scheiterte an fehlendem Data-Symbol) + **`CONFIG_KALLSYMS_ALL=y`**
-  (`security_hook_heads` ohne unauflösbar) + **B7 geschlossen**
-  (`late_initcall(susfs_init_late)`). **Evidence live481**: Banner `build481` +
-  `git_hash=7515f80b`, `Build481: susfs core …` @t=1.16 s,
-  `lsm_hook: patched inode_rename hook slot … from ffffff9e7a1fcdd0 to
-  ffffff9e7b02e1b0` + `renameat: observer chained to selinux_inode_rename
-  (orig ffffff9e7a1fcdd0)` @t=6.91 s, Events `renameat: packages.list.tmp ->
-  packages.list` (Boot-Scan t=51/60/104 s, ConkyDroid-Install t=2161 s,
-  Uninstall t=2224 s), Worker `susfs_parse_priority_app_names` parse-live nach
-  install UND uninstall (t=2161/2234) — Renew lief nie vor Build 481; SET rc=0
-  (`renewing`/`the priority uid filter is set`), **ESRCH-Paar 4/4 PASS**
-  (Root `0/-20/-20`, Cross 10339↔10251 `errno=3` symmetrisch, Nice revertiert).
-  Teststand: Filter aktiv für `com.google.android.gms`+`com.termux` (CLI hat
-  kein `del` → Backlog). Vorgänger479 (Marker-`late_initcall` live, B6-v1
-  `-22`) / 480 (B6-v2 `-ENOENT`): devlog `susfs-priority-audit.md`.
-  **Nächste Runde: Build 482 = `sus_path_uid_filter`-Port** (CMD 0x55554-Kollision
-  mit `del_sus_path`, Referenz-Patch JackA1ltman, plan freigegeben).
-  SUSFS-Log nach Boot runtime-disabled → `susfs enable_log 1` vor LOGI-Checks.
+- **Gerät: Build 483 = Stand** (Commit `bd8a80e4e`, CI Run #45253929619 grün,
+  `flash483.sh` rc=0 „flash done", **AK3 ohne Auto-Reboot** — manueller Reboot
+  nötig, Boot-Backup `boot-build482.img`): **Build482 = `sus_path_uid_filter`-Port**
+  (Commit `daf3ee056`, Allow-List, CMD-Tausch `0x55554`=SET/`0x55555`=DEL, Port aus
+  JackA1ltman `susfs_patch_to_4.14`, Stale-Gate + `kfree_rcu` wie priority,
+  Observer-Renew `susfs_parse_sus_path_app_strings` an beiden packages.list-Pfaden);
+  **Build483 = B8-Renew-Gate-Fix** (Worker-Snapshot wurde von `strsep` mutiert —
+  ab 2 Paketen `strcmp`-Gate immer fehl, Swap + `resolved again` entfielen, beide
+  Filter; Fix: Parse auf `parse_buf`-Copy, Gate gegen pristine). **Evidence live483**:
+  `Build483: susfs core …` @t=1.19 s + `git_hash=bd8a80e4`, B6-Kette auto
+  (`patched inode_rename` + `observer chained` @t=6.9 s), Multi-Set rc=0
+  (sus_path `gms+termux+ckd`, priority `gms+termux`), **Multi-Paket-Renew nach
+  ckd-Install → beide Worker `resolved again`**, Sichtbarkeits-A/B: ckd in Liste
+  `run-as` liest `susvis/f`, raus → `ENOENT`, Shell `u:r:su:s0`/uid0 versteckt
+  (Truth nur `u:r:ksu:s0` via `runcon`), `add_sus_path`-Flag lebt
+  (Parent `d?????????`, Lookup `-ENOENT` in `fs/namei.c`), CLI
+  `set_sus_path_uid_filter` → `0x55554` → `ret: 0` + LOGI. Vorgänger: 482/483
+  Details devlog `susfs-priority-audit.md` (B8), B6/B7 in 479–481 geschlossen.
+  Teststand: sus_path + priority Filter `com.google.android.gms`+`com.termux`,
+  `enable_log 1`, ConkyDroid deinstalliert (CLI hat kein `del` → Backlog
+  `del_priority_uid_filter`/`del_sus_path`). SUSFS-Log nach Boot
+  runtime-disabled → `susfs enable_log 1` vor LOGI-Checks.
   Freeze-Welle #10–#12 weiterhin offen (Sniffer-×3 v7.1 als Alarm, Wakelock bewusst aus).
 - **Gerät (478er-Stand, historisch)**: Build 478 = Audit-Race-Fix, Commit `b14b62525`
   Patch `f3fade9d3` aus dem Audit-Review, angewandt + Kommentare gestrichen +
@@ -224,7 +223,8 @@ k6a-ctl: separater Repo-Stand mit eigenem `README.md` + `CHANGELOG.md`.
     `pr_info("BuildNNN: susfs core …")` — war tot (B7), seit 479 via
     `late_initcall(susfs_init_late)` live; (c) „resolved again" — Renew-Trigger
     war tot (B6), seit **481** via `selinux_inode_rename`-Replace +
-    `CONFIG_KALLSYMS_ALL=y` live (Events `renameat:` + Worker-Parser sichtbar).
+    `CONFIG_KALLSYMS_ALL=y` live (Events `renameat:` + Worker-Parser sichtbar);
+    ab 2 Paketen zusätzlich B8-Gate-Fix (**483**: `strsep`-Mutation → Parse-Copy).
     Details: `docs/devlog/susfs-priority-audit.md`.
 
 ## Fallen (Pflichtkenntnisse)
