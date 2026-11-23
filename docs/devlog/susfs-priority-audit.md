@@ -171,3 +171,37 @@ susfs core vv2.4.0 synced` @t=1.207 s, Regression 480/481 identisch
 anbieten, wo der Aufrufer existiert (jetzt initcall); Build-Beweis zusätzlich
 Banner + `git_hash` (bewährt).
 
+
+### B8 — Renew-Gate `strcmp` scheitert ab 2 Paketen (MEDIUM, gefixt — Build 483)
+
+**Ursache (482-Verifikation entdeckt):** Der Worker-Snapshot `app_strings`
+wurde von `strsep()` im Parse **in-place mutiert** (Komma → `\0`). Das
+Stale-Gate `strcmp(stored, app_strings)` verglich danach den beschaedigten
+Buffer gegen den intakten Stored-String — ab ≥2 Paketen (Komma vorhanden)
+**immer ungleich** → `goto out_restore_creds` vor Swap: kein Bitmap-Update,
+kein `resolved again`-LOGI. Einzelpacket (ohne Komma) war unsichtbar
+betroffen. **Betrifft beide Worker** (`priority` seit Build478-Stale-Gate,
+`sus_path` mit dem Port in482). Ursprungsmuster upstream-erblich
+(WildKernels-Gate ohne Parse-Mutation dazwischen).
+
+**Fix (Build483, `bd8a80e4e`):** Parse auf separatem `parse_buf`-Copy,
+`kvfree` direkt danach; Gate gegen **pristine** Snapshot. SET-Pfad war
+nicht betroffen (stored-Copy vor Parse).
+
+**Live483-Evidence:**
+- Multi-Set rc=0 (`gms+termux+ckd` sus_path, `gms+termux` priority).
+- ckd-Install-Trigger → **beide** Worker: `the uids of the … uid filter
+  are resolved again` (priority pid+1, sus_path pid+2) — vorher nur bei
+  Einzelpaket.
+- Sichtbarkeits-A/B (Allow-List): ckd in Liste → `run-as` liest
+  `susvis/f` (`secret`); raus → `ENOENT`; Shell `u:r:su:s0`/uid0 →
+  versteckt (uid-Bypass greift erst ab `u:r:ksu:s0` — `runcon` dort
+  sieht `ls -la` vollstaendig); `add_sus_path`-Flag lebt (Parent-Listing
+  `d?????????` = Lookup-Intercept in `fs/namei.c` `-ENOENT`).
+- CMD-Tausch: CLI `set_sus_path_uid_filter` → `0x55554` → `ret: 0` +
+  LOGI; `DEL_SUS_PATH` liegt auf `0x55555` (Hand-Supercall, CLI hat kein
+  del — Backlog unveraendert).
+- Regression: B6-Kette + `Build483`-Marker + `git_hash=bd8a80e4` nach
+  Reboot; SET priority rc=0; Observer `renameat`-Events booten.
+- Teststand: Filter aktiv `com.google.android.gms`+`com.termux`
+  (sus_path + priority), `enable_log 1`, ConkyDroid deinstalliert.
