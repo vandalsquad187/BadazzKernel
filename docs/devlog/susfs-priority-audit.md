@@ -107,34 +107,67 @@ vgl. `k6a_gov.c`).
 
 ## Neue Befunde beim Live-Verify (nicht im Audit — eigene Baustellen)
 
-### B6 — Renew-Trigger tot auf dem Split-Build (MEDIUM, offen)
+### B6 — Renew-Trigger tot auf dem Split-Build (MEDIUM, geschlossen — Build 481)
 
-`ksu_rename_observer` (`pkg_observer.c:61`, static) hat **keinen Aufrufer**:
-`manager_observer.h` deklariert nur Stub-Init/Exit (`ksu_observer_init` gibt 0
-zurück), der `inode_rename`-LSM-Hook in `sus_path.c:1581` leitet nur an
-`SUS_LSM_PASS_ORIG` weiter, keine Weiterleitung. Folge: die beiden
-`susfs_parse_priority_app_strings()`-Call-Stellen (`pkg_observer.c:56/106`)
-werden nie erreicht → **der Renew-Worker läuft nie** (auch nie seit Build 470).
-Damit ist Audit-#1 (Stale-Race) auf unserem Build praktisch unerreichbar — der
-478-Gate bleibt korrekte Defensive (Upstream läuft über eigene Hook-Kette) —,
-und Paket-Änderungen aktualisieren den Filter nicht automatisch (nächster
-manuelle SET repariert). Live-Beweis: `install-existing`/`uninstall --user 0`/
-`force-stop`/`bg-dexopt-job` erzeugen **0** `renameat:`-Zeilen, 0 ×
-„resolved again" (Conditions im Code: uid-1000-rename von
-`packages.list.tmp → packages.list`).
+`ksu_rename_observer` (`pkg_observer.c:61`, static) hatte **keinen Aufrufer**:
+`ksu_observer_init` war Stub (`return 0`) → die `susfs_parse_priority_app_strings()`-
+Call-Stellen (`pkg_observer.c:56/106`) wurden nie erreicht → **der Renew-Worker
+lief nie (470–480)**. Live-Beweis478: `install-existing`/`uninstall`/
+`force-stop`/`bg-dexopt-job` = 0 `renameat:`-Zeilen.
 
-**Empfehlung (Backlog, nicht eilig)**: Observer an den `inode_rename`-Hook
-anbinden (Export aus pkg_observer.c + Insert in die KSU-Hook-Liste oder
-Forwarding in `sus_path_inode_rename` vor `PASS_ORIG`) — klein, aber eigener
-Build479-+Flash-Scope; Verifikation dann erst mit echtem App-Install.
+**Ursachenkette über drei Builds:**
 
-### B7 — `susfs_init()` nie aufgerufen → Marker `Build478:` nie sichtbar (LOW)
+- **Build 479 (v1, falscher Wire-Punkt)**: `KSU_LSM_HOOK_INSERT(inode_rename)`
+  aus `susfs/lsm_hook.h` → Laufzeit `-EINVAL` „target_name is required".
+  Ursache: Kbuild verlinkt **`hook/lsm_hook.o`** (Replace-Only-Impl, Header
+  ohne `insert`-Feld/INSERT-Makro); `kernel/susfs/*` (Insert-API, `sus_path.c`
+  etc.) sind **nicht eingebunden** (Kbuild kennt kein `susfs/`). Beleg dmesg479:
+  `lsm_hook: hook inode_rename: target_name is required` +
+  `observer inode_rename hook failed -22`.
+- **Build 480 (v2, Replace, aber Data-Symbol fehlt)**:
+  `KSU_LSM_HOOK_INIT(inode_rename, "selinux_inode_rename", …)` gegen die aktive
+  Impl + Pre-Resolve des Ziels (`find_kernel_symbol_exact` → `original` als
+  target-Hint, schließt das NULL-Fenster zwischen slot-patch und write-back),
+  `-EALREADY` des `init.c:206`/`boot_event.c:35`-Doppelaufrufs als OK gewertet →
+  schlug mit `-ENOENT` „failed to resolve security_hook_heads"
+  (`hook/lsm_hook.c:280`): **`CONFIG_KALLSYMS_ALL` nie gesetzt** (Kconfig-Default n,
+  sweet_defconfig hatte nur `KALLSYMS=y`) → kallsyms enthält nur Functions,
+  `security_hook_heads` (Data) ist unauflösbar. Beleg480: `git_hash b6971145`,
+  `/proc/kallsyms` zeigt `t selinux_inode_rename`, `security_hook_heads` fehlt
+  (nur 1 Data-Symbol `_etext`), Event-Test (python `setuid(1000)` +
+  rename `pkgs.test → packages.list` = exakter Trigger) = 0 Zeilen. Dieser
+  Resolver-Pfad wurde vorher von niemandem benutzt (einziger Käufer der API =
+  der Observer) — alle anderen `find_kernel_symbol_exact`-Ziele sind Functions.
+- **Build 481 (v3, geschlossen)**: `CONFIG_KALLSYMS_ALL=y` in
+  `arch/arm64/configs/sweet_defconfig` (GKI-konform; schließt zudem alle
+  künftigen Data-Symbol-Lookups frei; Kconfig-Roundtrip bestätigt `=y`).
+  **Live481-Evidence**:
+  - `lsm_hook: patched inode_rename hook slot … from ffffff9e7a1fcdd0 to
+    ffffff9e7b02e1b0` (t=6.91 s) + `renameat: observer chained to
+    selinux_inode_rename (orig ffffff9e7a1fcdd0)` — SELinux korrekt gekettet.
+  - Events: Boot-Package-Scan (t=51/60/104 s), ConkyDroid-Install (t=2161 s),
+    Uninstall (t=2224 s) → `renameat: packages.list.tmp -> packages.list …`
+    (Fast-Path inkl. `cached /data/system d_inode`).
+  - Worker: `susfs_parse_priority_app_names` parst den kompletten
+    packages.list-Stack nach **install UND uninstall** (t=2161/2234) —
+    Renew-Trigger läuft seit Build481, vorher nie.
+  - Regression: SET rc=0 + `renewing the priority uid filter` /
+    `the priority uid filter is set`; **ESRCH-Paar 4/4 PASS** (Root
+    `set=0 get=-20` für 10251+10339, Cross 10339↔10251 `set=-1 errno=3`
+    symmetrisch), Nice anschließend revertiert.
+  - Rest-Teststand: Filter aktiv für `com.google.android.gms`+`com.termux`
+    (CLI hat kein `del` → Backlog `del_priority_uid_filter`); ConkyDroid
+    deinstalliert, APK temporär entfernt.
 
-`fs/susfs/susfs_core.c:21` (`susfs_init` mit `pr_info("Build478: susfs core
-v%s synced")`) hat im gesamten Tree **keinen Aufrufer** (kein initcall, kein
-Caller) — die Zeile war auch in 476/477 nie im dmesg. `susfs=1` in
-`k6a_features` kommt von einem anderen Bootstrap-Pfad; die Funktion ist Dead
-Code. **Build-Beweis bleibt Banner + `git_hash`** (bewährt). Folge für
-Marker-Policy: `pr_info("BuildNNN: …")`-Marker nur anbieten, wo der Aufrufer
-auch existiert; Fix (ein `late_initcall`-Wire) als Backlog-Eintrag.
+### B7 — `susfs_init()` nie aufgerufen → Marker nie sichtbar (LOW, geschlossen — Build 479)
+
+`fs/susfs/susfs_core.c` hatte keinen Aufrufer für `susfs_init()` (kein
+initcall) — der `BuildNNN:`-Marker war nie im dmesg (auch in 476/477 nicht).
+Fix in Build 479: `late_initcall(susfs_init_late)` mit int-Wrapper
+(`initcall_t = int(void)`, `susfs_init` bleibt void — upstream-synced Header
+`include/linux/susfs.h`/`fs/susfs/susfs.h` unangetastet). **Live**: `Build479:
+susfs core vv2.4.0 synced` @t=1.207 s, Regression 480/481 identisch
+(`Build481: susfs core …` @t=1.161 s). Marker-Policy beibehalten: nur
+anbieten, wo der Aufrufer existiert (jetzt initcall); Build-Beweis zusätzlich
+Banner + `git_hash` (bewährt).
 

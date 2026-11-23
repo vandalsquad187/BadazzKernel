@@ -6,9 +6,33 @@ ausgelagert (Inhalte unverändert). Öffentliche Nutzer-Doku: [`README.md`](READ
 Governor-Regelwerk: [`docs/k6a_gov_rules.md`](docs/k6a_gov_rules.md);
 k6a-ctl: separater Repo-Stand mit eigenem `README.md` + `CHANGELOG.md`.
 
-## Current State (Stand 2026-11-22)
+## Current State (Stand 2026-11-23)
 
-- **Gerät: Build 478 = Stand** (Audit-Race-Fix, Commit `b14b62525` =
+- **Gerät: Build 481 = Stand** (Commit `7515f80bc`, CI Run #481 grün, `flash481.sh`
+  rc=0 „flash done", **AK3 ohne Auto-Reboot** — manueller Reboot nötig, Boot-Backup
+  `boot-build480.img`): **B6 Renew-Trigger geschlossen** — Observer via
+  `KSU_LSM_HOOK_INIT(inode_rename, "selinux_inode_rename")` gegen die aktive
+  `hook/lsm_hook.c`-Replace-Impl gekettet (v1 INSERT-Header tot-gebaut, v2
+  Replace scheiterte an fehlendem Data-Symbol) + **`CONFIG_KALLSYMS_ALL=y`**
+  (`security_hook_heads` ohne unauflösbar) + **B7 geschlossen**
+  (`late_initcall(susfs_init_late)`). **Evidence live481**: Banner `build481` +
+  `git_hash=7515f80b`, `Build481: susfs core …` @t=1.16 s,
+  `lsm_hook: patched inode_rename hook slot … from ffffff9e7a1fcdd0 to
+  ffffff9e7b02e1b0` + `renameat: observer chained to selinux_inode_rename
+  (orig ffffff9e7a1fcdd0)` @t=6.91 s, Events `renameat: packages.list.tmp ->
+  packages.list` (Boot-Scan t=51/60/104 s, ConkyDroid-Install t=2161 s,
+  Uninstall t=2224 s), Worker `susfs_parse_priority_app_names` parse-live nach
+  install UND uninstall (t=2161/2234) — Renew lief nie vor Build 481; SET rc=0
+  (`renewing`/`the priority uid filter is set`), **ESRCH-Paar 4/4 PASS**
+  (Root `0/-20/-20`, Cross 10339↔10251 `errno=3` symmetrisch, Nice revertiert).
+  Teststand: Filter aktiv für `com.google.android.gms`+`com.termux` (CLI hat
+  kein `del` → Backlog). Vorgänger479 (Marker-`late_initcall` live, B6-v1
+  `-22`) / 480 (B6-v2 `-ENOENT`): devlog `susfs-priority-audit.md`.
+  **Nächste Runde: Build 482 = `sus_path_uid_filter`-Port** (CMD 0x55554-Kollision
+  mit `del_sus_path`, Referenz-Patch JackA1ltman, plan freigegeben).
+  SUSFS-Log nach Boot runtime-disabled → `susfs enable_log 1` vor LOGI-Checks.
+  Freeze-Welle #10–#12 weiterhin offen (Sniffer-×3 v7.1 als Alarm, Wakelock bewusst aus).
+- **Gerät (478er-Stand, historisch)**: Build 478 = Audit-Race-Fix, Commit `b14b62525`
   Patch `f3fade9d3` aus dem Audit-Review, angewandt + Kommentare gestrichen +
   Marker-Bump + Current-State): susfs `priority_uid_filter` Stale-Renew-Gate
   (strcmp vor Swap — upstream-erbter Bug, `WildKernels …/fs/susfs.c:2103-2145`
@@ -194,12 +218,14 @@ k6a-ctl: separater Repo-Stand mit eigenem `README.md` + `CHANGELOG.md`.
     Schnell-Beweis-Quellen: `ramoops-boot-*` (strings -n 4), History via
     `strings -a /data/property/persistent_properties`, Death-Archive
     `kwatch-full-prev-*`/`deathsniff/`.
-12. **Susfs-„fehlende" Logs/Markers (Stand 478)**: (a) SUSFS-LOGI stumm, bis
-    `susfs enable_log 1` — Boot-Zustand runtime-disabled trotz
-    `DEFINE_STATIC_KEY_TRUE`; (b) `pr_info("BuildNNN: susfs core …")` nie
-    sichtbar — `susfs_init()` hat keinen Aufrufer (B7); (c) „resolved again"
-    nie sichtbar — Renew-Trigger `ksu_rename_observer` ohne Caller (B6),
-    Worker läuft nie. Details/Backlog: `docs/devlog/susfs-priority-audit.md`.
+12. **Susfs-„fehlende" Logs/Markers (historisch Stand 478, mittlerweile gefixt)**:
+    (a) SUSFS-LOGI stumm, bis `susfs enable_log 1` — Boot-Zustand
+    runtime-disabled trotz `DEFINE_STATIC_KEY_TRUE` (**bleibt**); (b)
+    `pr_info("BuildNNN: susfs core …")` — war tot (B7), seit 479 via
+    `late_initcall(susfs_init_late)` live; (c) „resolved again" — Renew-Trigger
+    war tot (B6), seit **481** via `selinux_inode_rename`-Replace +
+    `CONFIG_KALLSYMS_ALL=y` live (Events `renameat:` + Worker-Parser sichtbar).
+    Details: `docs/devlog/susfs-priority-audit.md`.
 
 ## Fallen (Pflichtkenntnisse)
 
