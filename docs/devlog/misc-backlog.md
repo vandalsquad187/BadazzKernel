@@ -16,13 +16,14 @@
   Build 479): `late_initcall(susfs_init_late)`-Wire; `Build481: susfs
   core …` @t=1.16 s.
 
-- [ ] **`del_priority_uid_filter` im Device-CLI fehlt**: `set_priority_uid_filter`
-  (Paketnamen-Arg) hat keinen Clear-Partner — leerer argv2 = rc=234; nach
-  Verify-Tests bleibt der Filter aktiv (Teststand: `com.google.android.gms` +
-  `com.termux`, Scope uid≥10000). Nachrüsten (CMD + CLI), bis dahin nur SET.
-  Gleiches `del_sus_path` für den neuen `sus_path_uid_filter` (Kernel-DEL liegt
-  seit482 auf `0x55555`, CLI kennt ihn nicht — Teststand-Filter ebenfalls nur
-  per SET steuerbar).
+- [x] **`del_priority_uid_filter` im Device-CLI fehlt** (Build484): Kernel-CMD
+  `CMD_SUSFS_DEL_PRIORITY_UID_FILTER 0x60031` + `CMD_SUSFS_DEL_SUS_PATH_UID_FILTER
+  0x55556` mit Clear-Handler (Bitmap NULL, app_strings kvfree); BRENE-CLI hat
+  weiterhin kein `del`-Verb — stattdessen helper `susfs_del` (freestanding
+  aarch64, Raw-Syscalls, Android-`__NR_reboot=142`) nach `/data/adb/ksu/bin/`:
+  `susfs_del priority|sus_path|path </path>`. Achtung: `0xFAFAFAFA` darf nicht
+  als C-Argument an register-asm-Variablen übergeben werden (-Os miscompiles
+  High-Half zu `0x0FAFAF` → SUSFS-Block matcht nicht); movz/movk inline.
 
 - [ ] **1. Sched+VM Tune** (`f5aaa8b` DarkKiller28): `init.qcom.post_boot.sh` — `sched_down/upmigrate 45/65 + 65/85`, BORE `sched_boost/latency 6ms/min 1ms/wakeup 0.5ms/migration 0.25ms/nr_migrate 64/burst_*`, VM `watermark_scale 35/dirty_ratio 30/expire 1500/writeback 150/extra_free 131072/min_free 32768` — *Meinung: `65/85` + `watermark/dirty` sinnvoll, `swappiness 160` + `extra_free 131k` akku-kritisch, selektiv testen (HZ1000+KSM bleiben)*
 - [ ] **2. Reflex Governor** (`80a346a`): `schedutil 500/20000 → reflex` — braucht `CONFIG_CPU_FREQ_GOV_REFLEX` Port (~500 LOC), schedutil bleibt via `k6a-ctl` + `JUMP_LABEL` (Meinung: erst bei Reflex-Port, nicht jetzt)
