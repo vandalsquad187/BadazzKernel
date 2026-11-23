@@ -84,10 +84,57 @@ vgl. `k6a_gov.c`).
   Index ∈ [0,9999] — kein Overflow.
 - Cleanup-Pfade vollständig, kein Leak.
 
-## Verify (478)
+## Verify (478) — abgeschlossen 2026-11-22/23
 
-- `clang -fsyntax-only` pristine-compared (Rezept
-  `local-build-notes.md`), Include-Set um SUSFS-Pfade ergänzt.
-- Live-Checks nach Flash: Banner/`git_hash`, SET rc=0 + LOGI,
-  ESRCH-Paar (gefilterte App), Renew-Smoke (SET + pkg-Event →
-  „resolved again“ + kein Stale-Overwrite).
+- `clang -fsyntax-only` pristine-compared (Rezept `local-build-notes.md`):
+  `susfs_priority.c` + `susfs_core.c` **rc=0 / 0 Errors** (nur bekannte
+  prä-existente GNU-extension-Warnung cgroup-defs.h:434, identisch beide Läufe).
+- CI **Run #478 success** (`45077297214`, HEAD `b14b62525`), Artefakt
+  `Badazz-kernel-sweet-v4.14.369-build478-aosp.zip` (md5 `5c8cd162…`).
+- Flash `~/tmp/flash478.sh` (abgeleitet mit `s/477/478/` + `s/build476/build477/`
+  für die Backup-Namen): update-binary **rc=0 „flash done"**, Backups
+  `boot-build477.img`/`dtbo-build477.img` (md5 + sdcard).
+- Live (Boot 23:35, History `reboot,shell,1795386994`): Banner **`build478`**,
+  `git_hash=b14b6252` ✓, Sniffer×3 + Follower respawn 23:36:38 ✓.
+- **SET** `com.termux,com.google.android.gms` → rc=0, LOGI
+  „the priority uid filter is set" + „CMD_… ret: 0" + „renewing" (neuer
+  Flag-Lock-Zweig) + „is now added … 10339" ✓ — Achtung: SUSFS-Log war
+  zur Bootzeit runtime-disabled; `susfs enable_log 1` vorher nötig
+  (Boot-Zustand: Default `static_key TRUE`, aber KSU/ksud setzt 0 — wie 476/477).
+- **ESRCH-Paar 4/4 PASS**: Root→10251 = `-20` (uid<10000-Bypass),
+  Root→10339 = `-20`, Caller 10339→Ziel 10251 = **ESRCH(3)**,
+  Caller 10251→Ziel 10339 = **ESRCH(3)** (symmetrisch, cross-uid only).
+
+## Neue Befunde beim Live-Verify (nicht im Audit — eigene Baustellen)
+
+### B6 — Renew-Trigger tot auf dem Split-Build (MEDIUM, offen)
+
+`ksu_rename_observer` (`pkg_observer.c:61`, static) hat **keinen Aufrufer**:
+`manager_observer.h` deklariert nur Stub-Init/Exit (`ksu_observer_init` gibt 0
+zurück), der `inode_rename`-LSM-Hook in `sus_path.c:1581` leitet nur an
+`SUS_LSM_PASS_ORIG` weiter, keine Weiterleitung. Folge: die beiden
+`susfs_parse_priority_app_strings()`-Call-Stellen (`pkg_observer.c:56/106`)
+werden nie erreicht → **der Renew-Worker läuft nie** (auch nie seit Build 470).
+Damit ist Audit-#1 (Stale-Race) auf unserem Build praktisch unerreichbar — der
+478-Gate bleibt korrekte Defensive (Upstream läuft über eigene Hook-Kette) —,
+und Paket-Änderungen aktualisieren den Filter nicht automatisch (nächster
+manuelle SET repariert). Live-Beweis: `install-existing`/`uninstall --user 0`/
+`force-stop`/`bg-dexopt-job` erzeugen **0** `renameat:`-Zeilen, 0 ×
+„resolved again" (Conditions im Code: uid-1000-rename von
+`packages.list.tmp → packages.list`).
+
+**Empfehlung (Backlog, nicht eilig)**: Observer an den `inode_rename`-Hook
+anbinden (Export aus pkg_observer.c + Insert in die KSU-Hook-Liste oder
+Forwarding in `sus_path_inode_rename` vor `PASS_ORIG`) — klein, aber eigener
+Build479-+Flash-Scope; Verifikation dann erst mit echtem App-Install.
+
+### B7 — `susfs_init()` nie aufgerufen → Marker `Build478:` nie sichtbar (LOW)
+
+`fs/susfs/susfs_core.c:21` (`susfs_init` mit `pr_info("Build478: susfs core
+v%s synced")`) hat im gesamten Tree **keinen Aufrufer** (kein initcall, kein
+Caller) — die Zeile war auch in 476/477 nie im dmesg. `susfs=1` in
+`k6a_features` kommt von einem anderen Bootstrap-Pfad; die Funktion ist Dead
+Code. **Build-Beweis bleibt Banner + `git_hash`** (bewährt). Folge für
+Marker-Policy: `pr_info("BuildNNN: …")`-Marker nur anbieten, wo der Aufrufer
+auch existiert; Fix (ein `late_initcall`-Wire) als Backlog-Eintrag.
+

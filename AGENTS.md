@@ -8,14 +8,21 @@ k6a-ctl: separater Repo-Stand mit eigenem `README.md` + `CHANGELOG.md`.
 
 ## Current State (Stand 2026-11-22)
 
-- **Gerät: Build 478 = Stand** (Audit-Race-Fix, Commit `8f6c4803f` = Patch
-  `f3fade9d3` aus dem Audit-Review + Kommentar-Streichen + Marker-Bump): susfs
-  `priority_uid_filter` Stale-Renew-Gate (strcmp vor Swap — upstream-erbter
-  Bug, `WildKernels …/fs/susfs.c:2103-2145` hat dasselbe Muster) + Flag-Lock
-  für `is_uid_filter_set_before` + SPDX-Header; Scope USER-only als Known
-  Decision; devlog `docs/devlog/susfs-priority-audit.md`. CI-Run/Flash-Belege
-  kommen als Docs-Nachtrag nach Live-Checks. Freeze-Welle #10–#12 weiterhin
-  offen (Beobachtung: Sniffer-×3 v7.1 als Alarm, Wakelock bewusst aus).
+- **Gerät: Build 478 = Stand** (Audit-Race-Fix, Commit `b14b62525` =
+  Patch `f3fade9d3` aus dem Audit-Review, angewandt + Kommentare gestrichen +
+  Marker-Bump + Current-State): susfs `priority_uid_filter` Stale-Renew-Gate
+  (strcmp vor Swap — upstream-erbter Bug, `WildKernels …/fs/susfs.c:2103-2145`
+  hat dasselbe Muster) + Flag-Lock für `is_uid_filter_set_before` + SPDX-Header;
+  Scope USER-only als Known Decision. **Evidence**: Syntax-Check rc=0/0 Errors,
+  CI **Run #478 success** (`45077297214`), Flash `flash478.sh` rc=0 „flash done"
+  (Backups `boot-build477.img`), live Banner `build478` + `git_hash=b14b6252`,
+  SET rc=0 + LOGI, **ESRCH-Paar 4/4 PASS** (Root-Bypass `-20` ↔ Cross `ESRCH(3)`
+  symmetrisch). Details + neue Befunde **B6 (Renew-Trigger tot —
+  `ksu_rename_observer` ohne Caller, Worker läuft nie)** /
+  **B7 (`susfs_init` tot — Marker `Build478:` nie sichtbar)**: devlog
+  `susfs-priority-audit.md`; Backlog: `misc-backlog.md`. SUSFS-Log nach Boot
+  runtime-disabled → `susfs enable_log 1` vor LOGI-Checks. Freeze-Welle #10–#12
+  weiterhin offen (Sniffer-×3 v7.1 als Alarm, Wakelock bewusst aus).
 - **Gerät (477er-Stand, historisch)**: Build 477 = Reboot-Fix `7fc358f27`, CI Run 45049445376 grün,
   AK3-Flash `~/tmp/flash477.sh` rc=0, live verifiziert `git_hash=7fc358f2` +
   Banner `build477`, Boot-Backup `boot-build476.img`: susfs
@@ -187,6 +194,12 @@ k6a-ctl: separater Repo-Stand mit eigenem `README.md` + `CHANGELOG.md`.
     Schnell-Beweis-Quellen: `ramoops-boot-*` (strings -n 4), History via
     `strings -a /data/property/persistent_properties`, Death-Archive
     `kwatch-full-prev-*`/`deathsniff/`.
+12. **Susfs-„fehlende" Logs/Markers (Stand 478)**: (a) SUSFS-LOGI stumm, bis
+    `susfs enable_log 1` — Boot-Zustand runtime-disabled trotz
+    `DEFINE_STATIC_KEY_TRUE`; (b) `pr_info("BuildNNN: susfs core …")` nie
+    sichtbar — `susfs_init()` hat keinen Aufrufer (B7); (c) „resolved again"
+    nie sichtbar — Renew-Trigger `ksu_rename_observer` ohne Caller (B6),
+    Worker läuft nie. Details/Backlog: `docs/devlog/susfs-priority-audit.md`.
 
 ## Fallen (Pflichtkenntnisse)
 
