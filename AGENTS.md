@@ -6,10 +6,28 @@ ausgelagert (Inhalte unverändert). Öffentliche Nutzer-Doku: [`README.md`](READ
 Governor-Regelwerk: [`docs/k6a_gov_rules.md`](docs/k6a_gov_rules.md);
 k6a-ctl: separater Repo-Stand mit eigenem `README.md` + `CHANGELOG.md`.
 
-## Current State (Stand 2026-11-23)
+## Current State (Stand 2026-11-24)
 
-- **Gerät: Build 483 = Stand, 484 in CI** (484 = `5b5953cea`, del-CMDs;
-  CI Run `45274579695`): **Build482 = `sus_path_uid_filter`-Port**
+- **Gerät: Build 485 = Stand** (485 = `5e03e93bd`, `CONFIG_SCHED_DEBUG=y`;
+  CI Run `45332213550` grün, Flash rc=0, Backups `boot-build484.img`):
+  Fair-Sched-Sysctls freilegen — `sched_latency_ns/min_granularity_ns/
+  wakeup_granularity_ns/migration_cost_ns/nr_migrate` lagen unter
+  `#ifdef CONFIG_SCHED_DEBUG`, das seit Hardening `35023093f` in
+  sweet_defconfig aus war; `sched_proc_update_handler` (normalized_*
+  + `sched_nr_latency`) ebenfalls. **Evidence live485**:
+  `Build485: susfs core …` @t=1.18 s + `git_hash=5e03e93b`, alle 8
+  Sysctls vorhanden, post_boot-Werte sticken (6ms/1ms/0.5ms/0.25ms/64),
+  `/proc/sched_debug` da, sched 65/85 + watermark 35 + dirty_ratio 30
+  + min_free 32768 live. VM-Nachzüge dirty_expire 1500/writeback 150
+  sticken **nicht** ( resettet durch Android-services; swappiness 10 +
+  extra_free 30375 aktiv = akku-kritische Teile laut Backlog bewusst
+  draußen). Vorgänger: **Build484 = del-CMDs** (`5b5953cea`, CI
+  `45274579695`, Helper `susfs_del`, Live-Verify Del rc=0 + LOGI);
+  482/483 Details devlog `susfs-priority-audit.md`.
+  Teststand: sus_path + priority Filter `com.google.android.gms`+
+  `com.termux`, `enable_log 1`, ConkyDroid deinstalliert (del-CMDs ab
+  484 via `susfs_del`, BRENE-CLI selbst hat kein `del`).
+- **Gerät (484er-Stand, historisch)**: **Build482 = `sus_path_uid_filter`-Port**
   (Commit `daf3ee056`, Allow-List, CMD-Tausch `0x55554`=SET/`0x55555`=DEL, Port aus
   JackA1ltman `susfs_patch_to_4.14`, Stale-Gate + `kfree_rcu` wie priority,
   Observer-Renew `susfs_parse_sus_path_app_strings` an beiden packages.list-Pfaden);

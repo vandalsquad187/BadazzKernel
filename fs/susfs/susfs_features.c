@@ -23,6 +23,7 @@ void susfs_get_enabled_features(void __user **user_info) {
 		info->err = -EFAULT;
 		goto out;
 	}
+	info->enabled_features[0] = '\0';
 #define SUSFS_APPEND_FEATURE(s) \
 	do { \
 		if (SUSFS_ENABLED_FEATURES_SIZE - strlen(info->enabled_features) - 1 > 0) \
