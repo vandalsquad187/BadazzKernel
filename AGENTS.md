@@ -8,15 +8,18 @@ k6a-ctl: separater Repo-Stand mit eigenem `README.md` + `CHANGELOG.md`.
 
 ## Current State (Stand 2026-11-23)
 
-- **Gerät: Build 483 = Stand** (Commit `bd8a80e4e`, CI Run #45253929619 grün,
-  `flash483.sh` rc=0 „flash done", **AK3 ohne Auto-Reboot** — manueller Reboot
-  nötig, Boot-Backup `boot-build482.img`): **Build482 = `sus_path_uid_filter`-Port**
+- **Gerät: Build 483 = Stand, 484 in CI** (484 = `5b5953cea`, del-CMDs;
+  CI Run `45274579695`): **Build482 = `sus_path_uid_filter`-Port**
   (Commit `daf3ee056`, Allow-List, CMD-Tausch `0x55554`=SET/`0x55555`=DEL, Port aus
   JackA1ltman `susfs_patch_to_4.14`, Stale-Gate + `kfree_rcu` wie priority,
   Observer-Renew `susfs_parse_sus_path_app_strings` an beiden packages.list-Pfaden);
   **Build483 = B8-Renew-Gate-Fix** (Worker-Snapshot wurde von `strsep` mutiert —
   ab 2 Paketen `strcmp`-Gate immer fehl, Swap + `resolved again` entfielen, beide
-  Filter; Fix: Parse auf `parse_buf`-Copy, Gate gegen pristine). **Evidence live483**:
+  Filter; Fix: Parse auf `parse_buf`-Copy, Gate gegen pristine);
+  **Build484 = del-CMDs** (`0x60031` priority + `0x55556` sus_path, Clear =
+  Bitmap NULL + kvfree; Helper `susfs_del` unter `/data/adb/ksu/bin/`, Android
+  `__NR_reboot=142`, Magics nur als movz/movk inline — C-Arg an register-asm
+  miscompilt `0xFAFAFAFA` zu `0x0FAFAF`). **Evidence live483**:
   `Build483: susfs core …` @t=1.19 s + `git_hash=bd8a80e4`, B6-Kette auto
   (`patched inode_rename` + `observer chained` @t=6.9 s), Multi-Set rc=0
   (sus_path `gms+termux+ckd`, priority `gms+termux`), **Multi-Paket-Renew nach
@@ -27,8 +30,8 @@ k6a-ctl: separater Repo-Stand mit eigenem `README.md` + `CHANGELOG.md`.
   `set_sus_path_uid_filter` → `0x55554` → `ret: 0` + LOGI. Vorgänger: 482/483
   Details devlog `susfs-priority-audit.md` (B8), B6/B7 in 479–481 geschlossen.
   Teststand: sus_path + priority Filter `com.google.android.gms`+`com.termux`,
-  `enable_log 1`, ConkyDroid deinstalliert (CLI hat kein `del` → Backlog
-  `del_priority_uid_filter`/`del_sus_path`). SUSFS-Log nach Boot
+  `enable_log 1`, ConkyDroid deinstalliert (del-CMDs ab 484 via `susfs_del`,
+  BRENE-CLI selbst hat kein `del`). SUSFS-Log nach Boot
   runtime-disabled → `susfs enable_log 1` vor LOGI-Checks.
   Freeze-Welle #10–#12 weiterhin offen (Sniffer-×3 v7.1 als Alarm, Wakelock bewusst aus).
 - **Gerät (478er-Stand, historisch)**: Build 478 = Audit-Race-Fix, Commit `b14b62525`
