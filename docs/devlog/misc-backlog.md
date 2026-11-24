@@ -38,7 +38,10 @@
   aktiv, nicht 160/131072). BORE `sched_burst_*` + `sched_*_boosted` bleiben
   Kernel-fremd (kein BORE/WALT-Boost im 4.14-Port) — post_boot-Echos laufen
   ins Leere, unkritisch. Reflex-Governor (Punkt 2) separat.
-- [ ] **2. Reflex Governor** (`80a346a`): `schedutil 500/20000 → reflex` — braucht `CONFIG_CPU_FREQ_GOV_REFLEX` Port (~500 LOC), schedutil bleibt via `k6a-ctl` + `JUMP_LABEL` (Meinung: erst bei Reflex-Port, nicht jetzt)
+- [x] **2. Reflex Governor** (`80a346a`) — **gestrichen 2026-11-24** (User-Entscheidung):
+  kein unabhängiges Benchmark, Gaming-Tuning deckt PELT-Lücke schon ab
+  (schedutil 500µs/50 hispeed aggressiv genug), k6a-ctl-Redesign > Gain;
+  Anekdoten teils negativ für Gaming. Port (~500 LOC) nicht gelohnt.
 - [x] **3. Audio BT v7** (`182eb86`): `audio_policy_configuration.xml` −15 BT A2DP + `sm6150.mk` +1 `bluetooth_audio_policy_configuration_7.0.xml` — *Device, Low-Risk, geplant als 4-Step Cherry-Pick (21 Zeilen)*
 
 ## Device Cherry-Pick
