@@ -237,6 +237,26 @@ k6a-ctl: separater Repo-Stand mit eigenem `README.md` + `CHANGELOG.md`.
   erzeugt bei jedem Upstream-Sync Merge-Reibung. Der `kfree_rcu`-NULL-Guard
   (Build476) ist 4.14-spezifisch — Upstream zielt auf 6.18 GKI, wo
   `kfree_rcu(NULL)` safe ist.
+- **`CONFIG_KALLSYMS_ALL=y`** — bewusst an (seit Build 481, B6-Renew-Trigger):
+  `resolved again` muss das Data-Symbol `security_hook_heads` aus
+  `/proc/kallsyms` auflösen; ohne `KALLSYMS_ALL` sind Data-Symbole unsichtbar
+  und der Observer-Parser tot. **Live-Lesefalle**: `kptr_restrict=2` → Adressen
+  auch für root im adb-shell-Kontext null (`0000000000000000 D
+  security_hook_heads`) — kein Bug, kein Beweis gegen die Config; `.config`
+  = `CONFIG_KALLSYMS_ALL=y`. Details: Common Issues 12(c),
+  `docs/devlog/susfs-priority-audit.md`.
+- **SUSFS-CMD-Tausch: UAPI-Divergenz gegenüber Upstream** — finale Tabelle
+  (`include/linux/susfs_def.h:19–21,41–42`, Dispatch
+  `KernelSU-Next/kernel/supercall/supercall.c:553–561`):
+  `SET_SUS_PATH_UID_FILTER=0x55554`, `DEL_SUS_PATH=0x55555`,
+  `DEL_SUS_PATH_UID_FILTER=0x55556`, `SET_PRIORITY_UID_FILTER=0x60030`,
+  `DEL_PRIORITY_UID_FILTER=0x60031`. Grund: Device-CLI sendet `0x55554`
+  für den Filter — Kernel und CLI aus einer Hand; Upstream hatte
+  `DEL_SUS_PATH=0x55554` (Build 482 bewusst getauscht). Bekannte
+  Message-Schwäche: 482-Commit-Message („DEL = 0x55555" im uid-filter-
+  Kontext irreführend), 484 korrekt (`0x55556`); Code final korrekt.
+  **Sync-Warnung**: nächster SUSFS-Port → CMD-Nummern gegen Upstream
+  prüfen (Merge-Reibung wie beim Priority-Scope).
 
 ## Common Issues
 1. **Fresh clone build fails**: need `CONFIG_KSU_SUSFS=y` + sub-options, submodule init

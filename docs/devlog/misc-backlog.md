@@ -58,6 +58,18 @@
   Anekdoten teils negativ für Gaming. Port (~500 LOC) nicht gelohnt.
 - [x] **3. Audio BT v7** (`182eb86`): `audio_policy_configuration.xml` −15 BT A2DP + `sm6150.mk` +1 `bluetooth_audio_policy_configuration_7.0.xml` — *Device, Low-Risk, geplant als 4-Step Cherry-Pick (21 Zeilen)*
 
+- [ ] **Shared-Helper-Refactor SUSFS (optional, nach Upstream-Stillstand)**:
+  `susfs_switch_to_ksu_domain` / `susfs_restore_creds` / strsep-Parser je
+  6× in `fs/susfs/susfs_path.c` + `fs/susfs/susfs_priority.c` (~150 LOC
+  Duplikation). Erst machen, wenn kein SUSFS-Port mehr ansteht — Refactor
+  erzeugt bei jedem Upstream-Sync Merge-Reibung.
+
+- [ ] **Nit `is_uid_filter_set_before` bei DEL nicht zurückgesetzt**
+  (`fs/susfs/susfs_path.c:290/337/355/356`,
+  `fs/susfs/susfs_priority.c:163/210/228/229`): nächster SET loggt
+  „renewing" statt „set" — rein kosmetisch, nächsten susfs-Commit
+  mitpflegen (Bitmap-DEL selbst ist korrekt).
+
 ## Device Cherry-Pick
 - **Quelle**: `DarkKiller28/android_device_xiaomi_sm6150-common@182eb86`
 - **Ziel**: `device/xiaomi/sm6150-common` — `configs/audio/audio_policy_configuration.xml` (remove 3× `BT A2DP` ports + 3× `route`) + `sm6150.mk` (`PRODUCT_COPY_FILES` `bluetooth_audio_policy_configuration.xml → /vendor/etc/bluetooth_audio_policy_configuration_7.0.xml`) + `xi:include` nach `r_submix`
