@@ -8,8 +8,39 @@ k6a-ctl: separater Repo-Stand mit eigenem `README.md` + `CHANGELOG.md`.
 
 ## Current State (Stand 2026-11-24)
 
-- **Gerät: Build 485 = Stand** (485 = `5e03e93bd`, `CONFIG_SCHED_DEBUG=y`;
-  CI Run `45332213550` grün, Flash rc=0, Backups `boot-build484.img`):
+- **Gerät: Build 486 = Stand** (486 = `96b6b840e`, Submodul `507203ee` auf
+  `dev-upstream-merge`; CI Run `45446364994` grün, Flash `flash486.sh` rc=0
+  „flash done", Backups `boot-build485.img`/`dtbo-build485.img`):
+  **Doppel-Dispatch-Fix** — `hook_aarch64_reboot`/`hook_armeabi_reboot`
+  riefen `ksu_handle_sys_reboot()` und danach Original-`sys_reboot()`;
+  `kernel/reboot.c` rief den Handler im Originalpfad ein **zweites** Mal →
+  jeder Supercall lief doppelt (Root-Cause aller SUSFS-Symptome ab 485:
+  Feature-Liste 20 statt 10, open_redirect -EEXIST, sus_path -ENOENT →
+  Shell-Break). Fix: alle 4 Hooks short-circuiten auf
+  `magic1 == KSU_INSTALL_MAGIC1`; Defense-in-Depth
+  `enabled_features[0]='\0'` nach `copy_from_user`. **Evidence live486**:
+  `Build486: susfs core …` @t=1.18 s + `git_hash=96b6b840`,
+  `enabled_features` = **10 Zeilen**, `CMD_SUSFS_*` je **1×** LOGI
+  (keine Duplikate), priority SET/DEL rc=0 + LOGI, **Cross A/B ESRCH(3)
+  symmetrisch** (10339↔10251), Root-Bypass OK, open_redirect add `err=0` /
+  dup `err=-17` (Korrekt — Eintrag lebt, CLI hat kein del),
+  `add_sus_path_loop`+`susfs_del path` rc=0, Shell stabil. TRY_UMOUNT
+  bewusst nicht in der Liste (toter Config). **Crash-Note**: `add_sus_path
+  /data` im Test löste Soft-Hang aus (`zygote_secondary exited 4×`, kein
+  Panic in ramoops) — Flag trifft uid≥10000-umounted; danach manueller
+  Reboot, Flag weg, alles stabil. **Nicht** mit `/data` als sus_path
+  testen. BRENE-Repo `rrr333nnn333/BRENE` nur Userspace-CLI (kein
+  Kernel-Code). Vorgänger: **Build485 = SCHED_DEBUG** (`5e03e93bd`, CI
+  `45332213550`); **484 = del-CMDs** (`5b5953cea`, Helper `susfs_del`);
+  482/483 Details devlog `susfs-priority-audit.md`.
+  Teststand: priority Filter `com.google.android.gms`+`com.termux`
+  (nach Test DEL gesetzt), `enable_log 1`, ConkyDroid deinstalliert;
+  BRENE `config_paths_hiding__data_local_tmp=1` versteckt neue Einträge
+  unter `/data/local/tmp` (Pfad-Tests unter `/data/adb/`).
+  Freeze-Welle #10–#12 weiterhin offen (Sniffer-×3 v7.1 als Alarm).
+- **Gerät (485er-Stand, historisch)**: Build 485 = `5e03e93bd`,
+  `CONFIG_SCHED_DEBUG=y`; CI Run `45332213550` grün, Flash rc=0,
+  Backups `boot-build484.img`:
   Fair-Sched-Sysctls freilegen — `sched_latency_ns/min_granularity_ns/
   wakeup_granularity_ns/migration_cost_ns/nr_migrate` lagen unter
   `#ifdef CONFIG_SCHED_DEBUG`, das seit Hardening `35023093f` in
@@ -21,12 +52,8 @@ k6a-ctl: separater Repo-Stand mit eigenem `README.md` + `CHANGELOG.md`.
   + min_free 32768 live. VM-Nachzüge dirty_expire 1500/writeback 150
   sticken **nicht** ( resettet durch Android-services; swappiness 10 +
   extra_free 30375 aktiv = akku-kritische Teile laut Backlog bewusst
-  draußen). Vorgänger: **Build484 = del-CMDs** (`5b5953cea`, CI
-  `45274579695`, Helper `susfs_del`, Live-Verify Del rc=0 + LOGI);
-  482/483 Details devlog `susfs-priority-audit.md`.
-  Teststand: sus_path + priority Filter `com.google.android.gms`+
-  `com.termux`, `enable_log 1`, ConkyDroid deinstalliert (del-CMDs ab
-  484 via `susfs_del`, BRENE-CLI selbst hat kein `del`).
+  draußen). SUSFS-Symptome (doppelte Liste etc.) wurden erst in 486
+  als Doppel-Dispatch überführt.
 - **Gerät (484er-Stand, historisch)**: **Build482 = `sus_path_uid_filter`-Port**
   (Commit `daf3ee056`, Allow-List, CMD-Tausch `0x55554`=SET/`0x55555`=DEL, Port aus
   JackA1ltman `susfs_patch_to_4.14`, Stale-Gate + `kfree_rcu` wie priority,

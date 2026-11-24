@@ -25,6 +25,20 @@
   als C-Argument an register-asm-Variablen übergeben werden (-Os miscompiles
   High-Half zu `0x0FAFAF` → SUSFS-Block matcht nicht); movz/movk inline.
 
+- [x] **Doppel-Dispatch Supercall** (Root-Cause SUSFS-Symptome 485) —
+  **Build486 abgeschlossen** (`96b6b840e`, Submodul `507203ee`):
+  `hook_aarch64_reboot`/`hook_armeabi_reboot` riefen `ksu_handle_sys_reboot()`
+  und danach Original-`sys_reboot()`; `kernel/reboot.c` rief den Handler im
+  Originalpfad ein zweites Mal → jeder Supercall doppelt (Feature-Liste 20
+  statt 10, open_redirect -EEXIST, sus_path -ENOENT → Shell-Break via
+  `add_sus_path /data`). Fix: alle 4 Hooks short-circuiten auf
+  `magic1 == KSU_INSTALL_MAGIC1` + `enabled_features[0]='\0'` nach
+  `copy_from_user`. Live486: 10 Features, CMD je 1× LOGI, priority Cross
+  A/B ESRCH(3), open_redirect add/dup korrekt. **Achtung**: `add_sus_path
+  /data` im Test löste Soft-Hang aus (zygote-Loop, kein Panic) — nicht
+  wiederholen; BRENE auto-hidet `/data/local/tmp` (Pfad-Tests unter
+  `/data/adb/`). TRY_UMOUNT: toter Config, nicht in Feature-Liste.
+
 - [x] **1. Sched+VM Tune** (`f5aaa8b` DarkKiller28) — **Build485 abgeschlossen**:
   Device-`post_boot.sh` hatte die Werte bereits (Commit steckte im Vendor-Image);
   Kernel-Seitig fehlten die Sysctls (`#ifdef CONFIG_SCHED_DEBUG`, gepinnt aus in
