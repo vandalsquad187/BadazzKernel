@@ -55,13 +55,22 @@ sind bewusst offen — Ziel-PID-Kenntnis setzt proc-Sichtbarkeit voraus, die
 SUSFS separat versteckt; Abweichen würde bei jedem Upstream-Sync
 Merge-Reibung erzeugen.
 
-### #4 — Secondary-User-Normalisierung (INFO, Testfall offen)
+### #4 — Secondary-User-Normalisierung (INFO, **A/B PASS 2026-11-24**)
 
 `uid % 100000` (Z. 317) mappt Work-Profil-/Secondary-User-UIDs (1010000+)
 auf den App-ID-Bereich — gewollt (Commit 82837be27: „Sekundaer-User").
 Korrekt für alle realen Android-UID-Räume; statische Prüfung OK.
-**Offen:** A/B-Test auf dem Gerät (App im Work-Profil → ESRCH-Paar)
-fehlt im Testprotokoll — nachzuholen.
+
+**Live-A/B (Build485, Testuser 11 + `prio_ab2/prio_ab3`, 5/5 konsistent
+nach Renew-Settle `sleep 1`):**
+- Cross (uid 10339) → Primary gefiltert (10251 gms): **ESRCH 5/5** ✓
+- Cross → Secondary gefiltert (1110251 = 11·100000+10251): **ESRCH 5/5** ✓
+  — `% 100000`-Mapping greift, Bitmap-Match auf App-ID korrekt.
+- Cross → Self (10339→10339): OK (by Design — `uid_eq`-Guard vor Filter).
+- Root-Bypass (0→10251): OK 5/5 ✓; `setpriority` symmetrisch zu `getpriority`.
+- Nicht-gefilterte Secondary (1110314): kein ESRCH-von-Filter.
+- Flake-Hinweis: Tests <1 s nach `set_priority_uid_filter` liefen teils
+  durch (Renew-Worker mid-swap) — mit `sleep 1` stabil.
 
 ### #5 — Fehlender SPDX-Header (INFO, gefixt in 478)
 
